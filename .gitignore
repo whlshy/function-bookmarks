@@ -1,0 +1,8 @@
+node_modules/
+dist/
+out/
+.vscode-test/
+*.vsix
+.vscode/function-bookmarks.json
+test/fixtures/workspace/.vscode/
+test/fixtures/workspace/**/tmp_*

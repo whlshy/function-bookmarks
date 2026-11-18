@@ -1,0 +1,82 @@
+import * as assert from 'assert';
+import {
+  emptyStore,
+  favorites,
+  findMark,
+  MarkKey,
+  parseStore,
+  renamePath,
+  serializeStore,
+  setAlias,
+  setFavorite,
+  updateLine,
+} from '../../src/storage/marks';
+
+const key: MarkKey = { file: 'app/views.py', path: 'ArticleView.get', kind: 'method' };
+const now = new Date('2026-11-19T00:00:00Z');
+
+describe('收藏與自訂名稱資料', () => {
+  it('加入、取消收藏；取消後沒有其他標記就移除', () => {
+    let d = setFavorite(emptyStore(), key, true, 11, now);
+    assert.deepStrictEqual(findMark(d, key), { ...key, favorite: true, addedAt: now.toISOString(), line: 11 });
+    d = setFavorite(d, key, false);
+    assert.strictEqual(d.symbols.length, 0);
+  });
+
+  it('自訂名稱：空白或與原名相同視為清除', () => {
+    let d = setAlias(emptyStore(), key, '  文章頁 GET ', 'get');
+    assert.strictEqual(findMark(d, key)?.alias, '文章頁 GET');
+    d = setAlias(d, key, 'get', 'get');
+    assert.strictEqual(findMark(d, key), undefined);
+    d = setAlias(setAlias(d, key, 'x', 'get'), key, '', 'get');
+    assert.strictEqual(findMark(d, key), undefined);
+  });
+
+  it('收藏與自訂名稱可同時存在，取消其中一個不影響另一個', () => {
+    let d = setAlias(setFavorite(emptyStore(), key, true, 1, now), key, '文章', 'get');
+    d = setFavorite(d, key, false);
+    assert.deepStrictEqual(findMark(d, key), { ...key, alias: '文章', line: 1 });
+  });
+
+  it('同名但種類不同視為不同項目', () => {
+    const d = setFavorite(setFavorite(emptyStore(), key, true), { ...key, kind: 'function' }, true);
+    assert.strictEqual(favorites(d).length, 2);
+  });
+
+  it('updateLine：沒有變化時回傳同一個物件', () => {
+    const d = setFavorite(emptyStore(), key, true, 5);
+    assert.strictEqual(updateLine(d, key, 5), d);
+    assert.strictEqual(findMark(updateLine(d, key, 9), key)?.line, 9);
+    assert.strictEqual(updateLine(d, { ...key, path: 'nope' }, 1), d);
+  });
+
+  it('檔案與資料夾改名', () => {
+    let d = setFavorite(emptyStore(), key, true);
+    d = setFavorite(d, { file: 'app/templates/a.html', path: 'content', kind: 'block' }, true);
+    d = setFavorite(d, { file: 'application/x.py', path: 'f', kind: 'function' }, true);
+    const r = renamePath(d, 'app', 'core');
+    assert.deepStrictEqual(r.symbols.map((m) => m.file).sort(), ['application/x.py', 'core/templates/a.html', 'core/views.py']);
+    assert.strictEqual(renamePath(d, 'nope', 'x'), d);
+  });
+
+  it('序列化後排序穩定，可再解析回來', () => {
+    let d = setFavorite(emptyStore(), { file: 'b.py', path: 'z', kind: 'function' }, true, 1, now);
+    d = setFavorite(d, { file: 'a.py', path: 'y', kind: 'function' }, true, 2, now);
+    const text = serializeStore(d);
+    assert.ok(text.indexOf('a.py') < text.indexOf('b.py'));
+    assert.deepStrictEqual(parseStore(text)?.symbols.length, 2);
+    assert.strictEqual(serializeStore(parseStore(text)!), text);
+  });
+
+  it('解析時略過格式錯誤的項目；JSON 壞掉回傳 undefined', () => {
+    const d = parseStore(
+      JSON.stringify({
+        version: 1,
+        symbols: [{ file: 'a.py', path: 'f', kind: 'function', favorite: true }, { file: 1 }, { file: 'a.py', path: 'g', kind: 'weird', favorite: true }, null],
+      }),
+    );
+    assert.strictEqual(d?.symbols.length, 1);
+    assert.strictEqual(parseStore('{oops'), undefined);
+    assert.deepStrictEqual(parseStore('{}'), emptyStore());
+  });
+});

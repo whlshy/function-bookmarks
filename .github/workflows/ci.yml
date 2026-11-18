@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        vscode: ['1.90.0', 'stable']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: 型別檢查與單元測試
+        run: npm test
+      - name: 整合測試（Linux）
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:integration
+        env:
+          VSCODE_VERSION: ${{ matrix.vscode }}
+      - name: 整合測試（Windows）
+        if: runner.os == 'Windows'
+        run: npm run test:integration
+        env:
+          VSCODE_VERSION: ${{ matrix.vscode }}
+      - name: 打包 .vsix
+        if: matrix.os == 'ubuntu-latest' && matrix.vscode == 'stable'
+        run: npx vsce package --no-dependencies --allow-missing-repository
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest' && matrix.vscode == 'stable'
+        with:
+          name: vsix
+          path: '*.vsix'

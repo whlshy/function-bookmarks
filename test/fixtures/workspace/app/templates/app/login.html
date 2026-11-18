@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+  {% include "partials/nav.html" %}
+  {% block form %}
+    <form id="login-form" method="post">{% csrf_token %}</form>
+  {% endblock form %}
+{% endblock content %}
+
+{% block scripts %}
+<script>
+  const submit = () => {
+    document.getElementById("login-form").submit();
+  };
+</script>
+{% endblock %}

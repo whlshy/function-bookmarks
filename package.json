@@ -1,0 +1,487 @@
+{
+  "name": "function-bookmarks",
+  "displayName": "%displayName%",
+  "description": "%description%",
+  "version": "0.0.2",
+  "publisher": "function-bookmarks",
+  "license": "MIT",
+  "preview": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/whlshy/function-bookmarks.git"
+  },
+  "bugs": {
+    "url": "https://github.com/whlshy/function-bookmarks/issues"
+  },
+  "homepage": "https://github.com/whlshy/function-bookmarks#readme",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "bookmarks",
+    "functions",
+    "symbols",
+    "outline",
+    "django"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./dist/extension.js",
+  "l10n": "./l10n",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "functionBookmarks",
+          "title": "%container.title%",
+          "icon": "media/activity-bar.svg"
+        }
+      ]
+    },
+    "views": {
+      "functionBookmarks": [
+        {
+          "id": "functionBookmarks.tree",
+          "name": "%view.tree.name%"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "functionBookmarks.refresh",
+        "title": "%command.refresh%",
+        "category": "Function Bookmarks",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "functionBookmarks.revealSymbol",
+        "title": "%command.revealSymbol%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.openFavorite",
+        "title": "%command.revealSymbol%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.openTemplate",
+        "title": "%command.openTemplate%",
+        "category": "Function Bookmarks",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "functionBookmarks.addFavorite",
+        "title": "%command.addFavorite%",
+        "category": "Function Bookmarks",
+        "icon": "$(star-empty)"
+      },
+      {
+        "command": "functionBookmarks.removeFavorite",
+        "title": "%command.removeFavorite%",
+        "category": "Function Bookmarks",
+        "icon": "$(star-full)"
+      },
+      {
+        "command": "functionBookmarks.toggleFavorite",
+        "title": "%command.toggleFavorite%",
+        "category": "Function Bookmarks",
+        "icon": "$(star)"
+      },
+      {
+        "command": "functionBookmarks.renameDisplayName",
+        "title": "%command.renameDisplayName%",
+        "category": "Function Bookmarks",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "functionBookmarks.goToReferenceLine",
+        "title": "%command.goToReferenceLine%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.goToParentBlock",
+        "title": "%command.goToParentBlock%",
+        "category": "Function Bookmarks",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "functionBookmarks.showFavoritesOnly",
+        "title": "%command.showFavoritesOnly%",
+        "category": "Function Bookmarks",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "functionBookmarks.showAll",
+        "title": "%command.showAll%",
+        "category": "Function Bookmarks",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "functionBookmarks.groupByFile",
+        "title": "%command.groupByFile%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.ungroup",
+        "title": "%command.ungroup%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.searchFunctions",
+        "title": "%command.searchFunctions%",
+        "category": "Function Bookmarks",
+        "icon": "$(search)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "functionBookmarks.searchFunctions",
+          "when": "view == functionBookmarks.tree",
+          "group": "navigation@1"
+        },
+        {
+          "command": "functionBookmarks.showFavoritesOnly",
+          "when": "view == functionBookmarks.tree && functionBookmarks.filterMode != favorites",
+          "group": "navigation@2"
+        },
+        {
+          "command": "functionBookmarks.showAll",
+          "when": "view == functionBookmarks.tree && functionBookmarks.filterMode == favorites",
+          "group": "navigation@2"
+        },
+        {
+          "command": "functionBookmarks.refresh",
+          "when": "view == functionBookmarks.tree",
+          "group": "navigation@9"
+        },
+        {
+          "command": "functionBookmarks.groupByFile",
+          "when": "view == functionBookmarks.tree && !functionBookmarks.groupByFile",
+          "group": "1_view@1"
+        },
+        {
+          "command": "functionBookmarks.ungroup",
+          "when": "view == functionBookmarks.tree && functionBookmarks.groupByFile",
+          "group": "1_view@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "functionBookmarks.addFavorite",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbSymbol:nofav(?!.*:ref)/",
+          "group": "inline@1"
+        },
+        {
+          "command": "functionBookmarks.removeFavorite",
+          "when": "view == functionBookmarks.tree && (viewItem =~ /^fbSymbol:fav/ || viewItem =~ /^fbFavorite/)",
+          "group": "inline@1"
+        },
+        {
+          "command": "functionBookmarks.goToParentBlock",
+          "when": "view == functionBookmarks.tree && viewItem =~ /:override/",
+          "group": "inline@2"
+        },
+        {
+          "command": "functionBookmarks.openTemplate",
+          "when": "view == functionBookmarks.tree && viewItem =~ /:ref/",
+          "group": "inline@2"
+        },
+        {
+          "command": "functionBookmarks.addFavorite",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbSymbol:nofav(?!.*:ref)/",
+          "group": "1_favorite@1"
+        },
+        {
+          "command": "functionBookmarks.removeFavorite",
+          "when": "view == functionBookmarks.tree && (viewItem =~ /^fbSymbol:fav/ || viewItem =~ /^fbFavorite/)",
+          "group": "1_favorite@1"
+        },
+        {
+          "command": "functionBookmarks.renameDisplayName",
+          "when": "view == functionBookmarks.tree && (viewItem =~ /^fbSymbol(?!.*:ref)/ || viewItem =~ /^fbFavorite/)",
+          "group": "1_favorite@2"
+        },
+        {
+          "command": "functionBookmarks.goToParentBlock",
+          "when": "view == functionBookmarks.tree && viewItem =~ /:override/",
+          "group": "2_navigate@1"
+        },
+        {
+          "command": "functionBookmarks.openTemplate",
+          "when": "view == functionBookmarks.tree && viewItem =~ /:ref/",
+          "group": "2_navigate@1"
+        },
+        {
+          "command": "functionBookmarks.goToReferenceLine",
+          "when": "view == functionBookmarks.tree && viewItem =~ /:ref/",
+          "group": "2_navigate@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "functionBookmarks.toggleFavorite",
+          "when": "editorTextFocus",
+          "group": "functionBookmarks@1"
+        },
+        {
+          "command": "functionBookmarks.renameDisplayName",
+          "when": "editorTextFocus",
+          "group": "functionBookmarks@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "functionBookmarks.revealSymbol",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.openFavorite",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.openTemplate",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.addFavorite",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.removeFavorite",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.goToReferenceLine",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.goToParentBlock",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Function Bookmarks",
+      "properties": {
+        "functionBookmarks.detection.source": {
+          "type": "string",
+          "enum": [
+            "rules",
+            "languageServer",
+            "both"
+          ],
+          "enumDescriptions": [
+            "%config.detection.source.rules%",
+            "%config.detection.source.languageServer%",
+            "%config.detection.source.both%"
+          ],
+          "default": "rules",
+          "markdownDescription": "%config.detection.source%"
+        },
+        "functionBookmarks.detection.rules": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "%config.detection.rules%",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "languages",
+              "pattern",
+              "kind",
+              "body"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "%config.rule.id%"
+              },
+              "label": {
+                "type": "string",
+                "description": "%config.rule.label%"
+              },
+              "languages": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "%config.rule.languages%"
+              },
+              "pattern": {
+                "type": "string",
+                "description": "%config.rule.pattern%"
+              },
+              "flags": {
+                "type": "string",
+                "description": "%config.rule.flags%"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "function",
+                  "method",
+                  "class",
+                  "block",
+                  "partial",
+                  "macro",
+                  "reference"
+                ],
+                "description": "%config.rule.kind%"
+              },
+              "body": {
+                "type": "string",
+                "enum": [
+                  "brace",
+                  "indent",
+                  "pair",
+                  "line",
+                  "embedded"
+                ],
+                "description": "%config.rule.body%"
+              },
+              "end": {
+                "type": "string",
+                "description": "%config.rule.end%"
+              },
+              "embeddedLanguage": {
+                "type": "string",
+                "description": "%config.rule.embeddedLanguage%"
+              },
+              "within": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "%config.rule.within%"
+              },
+              "include": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "%config.rule.include%"
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": true,
+                "description": "%config.rule.enabled%"
+              }
+            }
+          }
+        },
+        "functionBookmarks.detection.disabledRules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "html-id"
+          ],
+          "markdownDescription": "%config.detection.disabledRules%"
+        },
+        "functionBookmarks.detection.templateFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/templates/**"
+          ],
+          "markdownDescription": "%config.detection.templateFiles%"
+        },
+        "functionBookmarks.django.templateDirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "%config.django.templateDirs%"
+        },
+        "functionBookmarks.followCursor": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.followCursor%"
+        },
+        "functionBookmarks.storage": {
+          "type": "string",
+          "enum": [
+            "file",
+            "workspaceState"
+          ],
+          "enumDescriptions": [
+            "%config.storage.file%",
+            "%config.storage.workspaceState%"
+          ],
+          "default": "file",
+          "markdownDescription": "%config.storage%"
+        },
+        "functionBookmarks.project.include": {
+          "type": "string",
+          "default": "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,html,htm}",
+          "markdownDescription": "%config.project.include%"
+        },
+        "functionBookmarks.project.exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/node_modules/**",
+            "**/.git/**",
+            "**/.venv/**",
+            "**/venv/**",
+            "**/env/**",
+            "**/__pycache__/**",
+            "**/site-packages/**",
+            "**/dist/**",
+            "**/build/**",
+            "**/out/**",
+            "**/staticfiles/**",
+            "**/.next/**",
+            "**/coverage/**",
+            "**/*.min.js"
+          ],
+          "markdownDescription": "%config.project.exclude%"
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "functionBookmarks.renameDisplayName",
+        "key": "f2",
+        "when": "focusedView == functionBookmarks.tree"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "package:prod": "node esbuild.mjs --production",
+    "typecheck": "tsc -p . --noEmit",
+    "compile-tests": "tsc -p tsconfig.test.json",
+    "test:unit": "npm run compile-tests && mocha \"out/test/unit/**/*.test.js\"",
+    "test:integration": "npm run compile && npm run compile-tests && node out/test/integration/runTests.js",
+    "test": "npm run typecheck && npm run test:unit",
+    "vscode:prepublish": "npm run package:prod",
+    "vsix": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.17.0",
+    "@types/picomatch": "^3.0.2",
+    "@types/vscode": "1.90.0",
+    "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.24.0",
+    "mocha": "^10.8.2",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "picomatch": "^4.0.7"
+  }
+}
