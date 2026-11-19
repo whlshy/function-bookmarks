@@ -2,7 +2,7 @@
   "name": "function-bookmarks",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.0.2",
+  "version": "0.2.2",
   "publisher": "function-bookmarks",
   "license": "MIT",
   "preview": true,
@@ -25,10 +25,17 @@
     "functions",
     "symbols",
     "outline",
-    "django"
+    "django",
+    "markdown",
+    "jquery",
+    "ajax",
+    "mermaid"
   ],
   "extensionKind": [
     "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "l10n": "./l10n",
@@ -98,6 +105,18 @@
         "icon": "$(edit)"
       },
       {
+        "command": "functionBookmarks.editNote",
+        "title": "%command.editNote%",
+        "category": "Function Bookmarks",
+        "icon": "$(note)"
+      },
+      {
+        "command": "functionBookmarks.previewNote",
+        "title": "%command.previewNote%",
+        "category": "Function Bookmarks",
+        "icon": "$(open-preview)"
+      },
+      {
         "command": "functionBookmarks.goToReferenceLine",
         "title": "%command.goToReferenceLine%",
         "category": "Function Bookmarks"
@@ -109,32 +128,101 @@
         "icon": "$(arrow-up)"
       },
       {
-        "command": "functionBookmarks.showFavoritesOnly",
-        "title": "%command.showFavoritesOnly%",
-        "category": "Function Bookmarks",
-        "icon": "$(filter)"
-      },
-      {
         "command": "functionBookmarks.showAll",
         "title": "%command.showAll%",
         "category": "Function Bookmarks",
         "icon": "$(filter-filled)"
       },
       {
-        "command": "functionBookmarks.groupByFile",
-        "title": "%command.groupByFile%",
-        "category": "Function Bookmarks"
-      },
-      {
-        "command": "functionBookmarks.ungroup",
-        "title": "%command.ungroup%",
-        "category": "Function Bookmarks"
-      },
-      {
         "command": "functionBookmarks.searchFunctions",
         "title": "%command.searchFunctions%",
         "category": "Function Bookmarks",
         "icon": "$(search)"
+      },
+      {
+        "command": "functionBookmarks.revealLine",
+        "title": "%command.revealSymbol%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.toggleBookmark",
+        "title": "%command.toggleBookmark%",
+        "category": "Function Bookmarks",
+        "icon": "$(bookmark)"
+      },
+      {
+        "command": "functionBookmarks.addLabeledBookmark",
+        "title": "%command.addLabeledBookmark%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.renameBookmark",
+        "title": "%command.renameBookmark%",
+        "category": "Function Bookmarks",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "functionBookmarks.editBookmarkTags",
+        "title": "%command.editBookmarkTags%",
+        "category": "Function Bookmarks",
+        "icon": "$(tag)"
+      },
+      {
+        "command": "functionBookmarks.removeBookmark",
+        "title": "%command.removeBookmark%",
+        "category": "Function Bookmarks",
+        "icon": "$(close)"
+      },
+      {
+        "command": "functionBookmarks.clearBookmarksInFile",
+        "title": "%command.clearBookmarksInFile%",
+        "category": "Function Bookmarks",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "functionBookmarks.clearAllBookmarks",
+        "title": "%command.clearAllBookmarks%",
+        "category": "Function Bookmarks",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "functionBookmarks.nextBookmark",
+        "title": "%command.nextBookmark%",
+        "category": "Function Bookmarks",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "functionBookmarks.previousBookmark",
+        "title": "%command.previousBookmark%",
+        "category": "Function Bookmarks",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "functionBookmarks.searchBookmarks",
+        "title": "%command.searchBookmarks%",
+        "category": "Function Bookmarks",
+        "icon": "$(list-filter)"
+      },
+      {
+        "command": "functionBookmarks.showBookmarksOnly",
+        "title": "%command.showBookmarksOnly%",
+        "category": "Function Bookmarks",
+        "icon": "$(bookmark)"
+      },
+      {
+        "command": "functionBookmarks.groupBookmarksByTag",
+        "title": "%command.groupBookmarksByTag%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.groupBookmarksByFile",
+        "title": "%command.groupBookmarksByFile%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.hoverAction",
+        "title": "%command.addFavorite%",
+        "category": "Function Bookmarks"
       }
     ],
     "menus": {
@@ -145,13 +233,13 @@
           "group": "navigation@1"
         },
         {
-          "command": "functionBookmarks.showFavoritesOnly",
-          "when": "view == functionBookmarks.tree && functionBookmarks.filterMode != favorites",
-          "group": "navigation@2"
+          "command": "functionBookmarks.showBookmarksOnly",
+          "when": "view == functionBookmarks.tree && functionBookmarks.filterMode == all",
+          "group": "navigation@3"
         },
         {
           "command": "functionBookmarks.showAll",
-          "when": "view == functionBookmarks.tree && functionBookmarks.filterMode == favorites",
+          "when": "view == functionBookmarks.tree && functionBookmarks.filterMode != all",
           "group": "navigation@2"
         },
         {
@@ -160,14 +248,24 @@
           "group": "navigation@9"
         },
         {
-          "command": "functionBookmarks.groupByFile",
-          "when": "view == functionBookmarks.tree && !functionBookmarks.groupByFile",
-          "group": "1_view@1"
+          "command": "functionBookmarks.searchBookmarks",
+          "when": "view == functionBookmarks.tree",
+          "group": "2_bookmarks@1"
         },
         {
-          "command": "functionBookmarks.ungroup",
-          "when": "view == functionBookmarks.tree && functionBookmarks.groupByFile",
-          "group": "1_view@1"
+          "command": "functionBookmarks.groupBookmarksByTag",
+          "when": "view == functionBookmarks.tree && functionBookmarks.bookmarkGrouping != tag",
+          "group": "2_bookmarks@2"
+        },
+        {
+          "command": "functionBookmarks.groupBookmarksByFile",
+          "when": "view == functionBookmarks.tree && functionBookmarks.bookmarkGrouping == tag",
+          "group": "2_bookmarks@2"
+        },
+        {
+          "command": "functionBookmarks.clearAllBookmarks",
+          "when": "view == functionBookmarks.tree",
+          "group": "3_clear@1"
         }
       ],
       "view/item/context": [
@@ -207,6 +305,16 @@
           "group": "1_favorite@2"
         },
         {
+          "command": "functionBookmarks.editNote",
+          "when": "view == functionBookmarks.tree && (viewItem =~ /^fbSymbol(?!.*:ref)/ || viewItem =~ /^fbFavorite/)",
+          "group": "1_favorite@3"
+        },
+        {
+          "command": "functionBookmarks.previewNote",
+          "when": "view == functionBookmarks.tree && viewItem =~ /:note/",
+          "group": "1_favorite@4"
+        },
+        {
           "command": "functionBookmarks.goToParentBlock",
           "when": "view == functionBookmarks.tree && viewItem =~ /:override/",
           "group": "2_navigate@1"
@@ -220,9 +328,54 @@
           "command": "functionBookmarks.goToReferenceLine",
           "when": "view == functionBookmarks.tree && viewItem =~ /:ref/",
           "group": "2_navigate@2"
+        },
+        {
+          "command": "functionBookmarks.removeBookmark",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/",
+          "group": "inline@1"
+        },
+        {
+          "command": "functionBookmarks.renameBookmark",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/",
+          "group": "1_bookmark@1"
+        },
+        {
+          "command": "functionBookmarks.editBookmarkTags",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/",
+          "group": "1_bookmark@2"
+        },
+        {
+          "command": "functionBookmarks.editNote",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/",
+          "group": "1_bookmark@3"
+        },
+        {
+          "command": "functionBookmarks.previewNote",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/ && viewItem =~ /:note/",
+          "group": "1_bookmark@4"
+        },
+        {
+          "command": "functionBookmarks.removeBookmark",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/",
+          "group": "2_remove@1"
+        },
+        {
+          "command": "functionBookmarks.clearBookmarksInFile",
+          "when": "view == functionBookmarks.tree && viewItem == fbBmFile",
+          "group": "2_remove@1"
         }
       ],
       "editor/context": [
+        {
+          "command": "functionBookmarks.toggleBookmark",
+          "when": "editorTextFocus",
+          "group": "functionBookmarks@0"
+        },
+        {
+          "command": "functionBookmarks.addLabeledBookmark",
+          "when": "editorTextFocus",
+          "group": "functionBookmarks@0"
+        },
         {
           "command": "functionBookmarks.toggleFavorite",
           "when": "editorTextFocus",
@@ -232,6 +385,16 @@
           "command": "functionBookmarks.renameDisplayName",
           "when": "editorTextFocus",
           "group": "functionBookmarks@2"
+        },
+        {
+          "command": "functionBookmarks.editNote",
+          "when": "editorTextFocus",
+          "group": "functionBookmarks@3"
+        },
+        {
+          "command": "functionBookmarks.previewNote",
+          "when": "editorTextFocus",
+          "group": "functionBookmarks@4"
         }
       ],
       "commandPalette": [
@@ -262,6 +425,36 @@
         {
           "command": "functionBookmarks.goToParentBlock",
           "when": "false"
+        },
+        {
+          "command": "functionBookmarks.revealLine",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.renameBookmark",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.editBookmarkTags",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.removeBookmark",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.hoverAction",
+          "when": "false"
+        }
+      ],
+      "editor/lineNumber/context": [
+        {
+          "command": "functionBookmarks.toggleBookmark",
+          "group": "functionBookmarks@1"
+        },
+        {
+          "command": "functionBookmarks.addLabeledBookmark",
+          "group": "functionBookmarks@2"
         }
       ]
     },
@@ -329,6 +522,9 @@
                   "block",
                   "partial",
                   "macro",
+                  "event",
+                  "request",
+                  "heading",
                   "reference"
                 ],
                 "description": "%config.rule.kind%"
@@ -340,6 +536,8 @@
                   "indent",
                   "pair",
                   "line",
+                  "call",
+                  "heading",
                   "embedded"
                 ],
                 "description": "%config.rule.body%"
@@ -370,6 +568,21 @@
                 "type": "boolean",
                 "default": true,
                 "description": "%config.rule.enabled%"
+              },
+              "nameTemplate": {
+                "type": "string",
+                "description": "%config.rule.nameTemplate%"
+              },
+              "matchRaw": {
+                "type": "boolean",
+                "description": "%config.rule.matchRaw%"
+              },
+              "hideChildren": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "%config.rule.hideChildren%"
               }
             }
           }
@@ -422,7 +635,7 @@
         },
         "functionBookmarks.project.include": {
           "type": "string",
-          "default": "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,html,htm}",
+          "default": "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,html,htm,md,markdown}",
           "markdownDescription": "%config.project.include%"
         },
         "functionBookmarks.project.exclude": {
@@ -447,6 +660,26 @@
             "**/*.min.js"
           ],
           "markdownDescription": "%config.project.exclude%"
+        },
+        "functionBookmarks.bookmarks.onLineDelete": {
+          "type": "string",
+          "enum": [
+            "moveToNext",
+            "markLost",
+            "remove"
+          ],
+          "enumDescriptions": [
+            "%config.onLineDelete.moveToNext%",
+            "%config.onLineDelete.markLost%",
+            "%config.onLineDelete.remove%"
+          ],
+          "default": "moveToNext",
+          "markdownDescription": "%config.onLineDelete%"
+        },
+        "functionBookmarks.hover.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.hover.enabled%"
         }
       }
     },
@@ -455,7 +688,39 @@
         "command": "functionBookmarks.renameDisplayName",
         "key": "f2",
         "when": "focusedView == functionBookmarks.tree"
+      },
+      {
+        "command": "functionBookmarks.toggleBookmark",
+        "key": "ctrl+alt+b",
+        "mac": "cmd+alt+b",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "functionBookmarks.addLabeledBookmark",
+        "key": "ctrl+alt+shift+b",
+        "mac": "cmd+alt+shift+b",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "functionBookmarks.nextBookmark",
+        "key": "ctrl+alt+.",
+        "mac": "cmd+alt+."
+      },
+      {
+        "command": "functionBookmarks.previousBookmark",
+        "key": "ctrl+alt+,",
+        "mac": "cmd+alt+,"
+      },
+      {
+        "command": "functionBookmarks.searchBookmarks",
+        "key": "ctrl+alt+/",
+        "mac": "cmd+alt+/"
       }
+    ],
+    "markdown.markdownItPlugins": true,
+    "markdown.previewScripts": [
+      "./dist/mermaid.min.js",
+      "./media/mermaid-preview.js"
     ]
   },
   "scripts": {
@@ -471,6 +736,7 @@
     "vsix": "vsce package --no-dependencies"
   },
   "devDependencies": {
+    "@types/markdown-it": "^14.2.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.17.0",
     "@types/picomatch": "^3.0.2",
@@ -478,6 +744,8 @@
     "@vscode/test-electron": "^2.4.1",
     "@vscode/vsce": "^3.2.1",
     "esbuild": "^0.24.0",
+    "markdown-it": "^14.3.3",
+    "mermaid": "^12.3.0",
     "mocha": "^10.8.2",
     "typescript": "^5.6.3"
   },

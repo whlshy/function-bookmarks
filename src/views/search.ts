@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { DetectedSymbol } from '../detection/types';
+import { bookmarkTitle, revealLine } from '../bookmarks/commands';
 import { MarkStore } from '../storage/store';
+import { FavoritesModel } from '../symbols/favorites';
 import { ProjectFiles } from '../symbols/projectFiles';
 import { SymbolService } from '../symbols/symbolService';
 import { COMMANDS, ICONS } from './tree';
@@ -10,6 +12,7 @@ export interface SearchEntry {
   rel: string;
   symbol: DetectedSymbol;
   alias?: string;
+  note?: string;
   favorite: boolean;
 }
 
@@ -34,7 +37,7 @@ export async function collectProjectSymbols(
         for (const s of list) {
           if (s.kind !== 'reference') {
             const mark = store.get(f.uri, s);
-            out.push({ uri: f.uri, rel: f.rel, symbol: s, alias: mark?.alias, favorite: !!mark?.favorite });
+            out.push({ uri: f.uri, rel: f.rel, symbol: s, alias: mark?.alias, note: mark?.note, favorite: !!mark?.favorite });
           }
           walk(s.children);
         }
@@ -67,7 +70,9 @@ function toItem(e: SearchEntry): Item {
   } else if (s.path !== s.name) {
     desc.push(s.path);
   }
-  return { label, description: desc.join(' '), detail: `${e.rel}:${s.nameLine + 1}`, entry: e };
+  const firstLine = e.note?.split('\n').find((l) => l.trim())?.trim();
+  const detail = `${e.rel}:${s.nameLine + 1}${firstLine ? `  ·  ${firstLine.slice(0, 80)}` : ''}`;
+  return { label, description: desc.join(' '), detail, entry: e };
 }
 
 /** 「搜尋函式」：同時比對自訂名稱、原本的函式名稱、路徑與檔名。 */
@@ -98,4 +103,54 @@ export async function searchFunctions(project: ProjectFiles, service: SymbolServ
     qp.items = order(entries);
   }, cts.token);
   qp.busy = false;
+}
+
+interface MarkItem extends vscode.QuickPickItem {
+  uri: vscode.Uri;
+  line: number;
+}
+
+/**
+ * 「快速搜尋書籤」：書籤與收藏放在同一個清單，
+ * 可用名稱、標籤、檔名、所在函式、該行內容搜尋。
+ */
+export async function searchMarks(store: MarkStore, favorites: FavoritesModel): Promise<void> {
+  const items: MarkItem[] = [];
+  for (const e of store.allBookmarks().sort((a, b) => a.bookmark.file.localeCompare(b.bookmark.file) || a.bookmark.line - b.bookmark.line)) {
+    const b = e.bookmark;
+    const desc = [b.tags?.map((t) => `#${t}`).join(' '), b.anchor?.symbolPath].filter(Boolean).join('  ');
+    const text = b.label && b.anchor?.text ? `  ·  ${b.anchor.text.slice(0, 80)}` : '';
+    items.push({
+      label: `$(bookmark) ${bookmarkTitle(b)}`,
+      description: desc,
+      detail: `${b.file}:${b.line + 1}${text}`,
+      uri: e.uri,
+      line: b.line,
+    });
+  }
+  for (const f of favorites.all) {
+    const line = f.symbol?.nameLine ?? f.mark.line ?? 0;
+    const name = f.mark.path.split('.').pop() ?? f.mark.path;
+    items.push({
+      label: `$(symbol-function) ${f.mark.alias ?? name}`,
+      description: [f.mark.tags?.map((t) => `#${t}`).join(' '), f.mark.alias || f.mark.path !== name ? f.mark.path : '']
+        .filter(Boolean)
+        .join('  '),
+      detail: `${f.mark.file}:${line + 1}`,
+      uri: f.uri,
+      line,
+    });
+  }
+  if (items.length === 0) {
+    void vscode.window.showInformationMessage(vscode.l10n.t('No bookmarks or favorites yet.'));
+    return;
+  }
+  const pick = await vscode.window.showQuickPick(items, {
+    placeHolder: vscode.l10n.t('Search bookmarks and favorites (name, tag, file, function or line)'),
+    matchOnDescription: true,
+    matchOnDetail: true,
+  });
+  if (pick) {
+    await revealLine(pick.uri, pick.line);
+  }
 }

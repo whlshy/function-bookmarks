@@ -1,4 +1,9 @@
 import * as path from 'path';
+import { openDocumentFor } from '../symbols/documentSource';
+import { bookmarkPreviewLink, previewNoteLink, trustPreviewLink } from './noteEditor';
+import { bookmarkTitle } from '../bookmarks/commands';
+import { allBookmarkItems, BookmarkItem, compareItems, itemTags } from '../bookmarks/unified';
+import { BookmarkEntry } from '../storage/store';
 import { uriKey } from '../util/uris';
 import * as vscode from 'vscode';
 import { OverrideInfo, TemplateResolver } from '../django/resolver';
@@ -11,25 +16,19 @@ import { DirTree } from '../symbols/projectTree';
 import { FileSymbols, SymbolService } from '../symbols/symbolService';
 import { basenamePosix } from '../util/paths';
 
-export type SectionId = 'favorites' | 'currentFile' | 'project';
-export type FilterMode = 'all' | 'favorites';
+export type SectionId = 'bookmarks' | 'currentFile' | 'project';
+export type FilterMode = 'all' | 'bookmarks';
+export type BookmarkGrouping = 'file' | 'tag';
 
 export interface SectionNode {
   type: 'section';
   section: SectionId;
 }
-export interface FavGroupNode {
-  type: 'favGroup';
-  folder: vscode.WorkspaceFolder;
-  uri: vscode.Uri;
-  rel: string;
-  items: ResolvedFavorite[];
-  parent: SectionNode;
-}
+/** 函式書籤（原本的收藏）。 */
 export interface FavoriteNode {
   type: 'favorite';
   fav: ResolvedFavorite;
-  parent: SectionNode | FavGroupNode;
+  parent: SectionNode | BmGroupNode;
 }
 export interface SymbolNode {
   type: 'symbol';
@@ -59,7 +58,30 @@ export interface FileNode {
   rel: string;
   parent: TreeNode;
 }
-export type TreeNode = SectionNode | FavGroupNode | FavoriteNode | SymbolNode | WsFolderNode | DirNode | FileNode;
+export interface BmGroupNode {
+  type: 'bmGroup';
+  /** 依檔案分組時為檔案 uri；依標籤分組時為標籤（沒有標籤為空字串）。 */
+  key: string;
+  by: BookmarkGrouping;
+  uri?: vscode.Uri;
+  rel?: string;
+  items: BookmarkItem[];
+  parent: SectionNode;
+}
+export interface BookmarkNode {
+  type: 'bookmark';
+  entry: BookmarkEntry;
+  parent: SectionNode | BmGroupNode;
+}
+export type TreeNode =
+  | SectionNode
+  | FavoriteNode
+  | BmGroupNode
+  | BookmarkNode
+  | SymbolNode
+  | WsFolderNode
+  | DirNode
+  | FileNode;
 
 export const ICONS: Record<SymbolKindName, string> = {
   function: 'symbol-function',
@@ -68,6 +90,9 @@ export const ICONS: Record<SymbolKindName, string> = {
   block: 'symbol-namespace',
   partial: 'symbol-snippet',
   macro: 'symbol-method',
+  event: 'symbol-event',
+  request: 'cloud',
+  heading: 'symbol-key',
   reference: 'go-to-file',
 };
 
@@ -76,7 +101,14 @@ const REFERENCE_KEYWORD: Record<string, string> = {
   'dj-include': 'include',
 };
 
+/** 有備註的函式，名稱前的圖示改用這個顏色（不另外加圖示，避免擠）。 */
+export const NOTE_COLOR = 'charts.blue';
+
+const EXPANSION_KEY = 'treeExpansion';
+const MAX_EXPANSION = 3000;
+
 export const COMMANDS = {
+  revealLine: 'functionBookmarks.revealLine',
   reveal: 'functionBookmarks.revealSymbol',
   openFavorite: 'functionBookmarks.openFavorite',
   openTemplate: 'functionBookmarks.openTemplate',
@@ -91,7 +123,7 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   readonly onDidChangeTreeData = this.changed.event;
 
   readonly sections: Record<SectionId, SectionNode> = {
-    favorites: { type: 'section', section: 'favorites' },
+    bookmarks: { type: 'section', section: 'bookmarks' },
     currentFile: { type: 'section', section: 'currentFile' },
     project: { type: 'section', section: 'project' },
   };
@@ -100,8 +132,14 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   private currentNodes: SymbolNode[] = [];
   private fileLabel?: string;
   filterMode: FilterMode = 'all';
-  groupByFile = true;
+  bookmarkGrouping: BookmarkGrouping = 'file';
   private disposables: vscode.Disposable[] = [];
+  /** 使用者展開／收合過的節點（以節點 id 記錄），切換檔案、重開編輯器後沿用。 */
+  private expansion: Record<string, boolean>;
+  private saveTimer: NodeJS.Timeout | undefined;
+  /** 「整個專案」中各檔案最上層的函式數量；0 表示沒有函式，不顯示展開鈕。 */
+  private fileCounts = new Map<string, number>();
+  private projectEmpty = false;
 
   constructor(
     private readonly service: SymbolService,
@@ -109,8 +147,12 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     private readonly favorites: FavoritesModel,
     private readonly project: ProjectFiles,
     private readonly resolver: TemplateResolver,
+    private readonly memento?: vscode.Memento,
   ) {
+    this.expansion = { ...(memento?.get<Record<string, boolean>>(EXPANSION_KEY) ?? {}) };
     this.disposables.push(
+      project.onDidChange(() => this.fileCounts.clear()),
+      vscode.workspace.onDidSaveTextDocument((d) => this.fileCounts.delete(uriKey(d.uri))),
       favorites.onDidChange(() => this.fire()),
       store.onDidChange(() => this.fire()),
       project.onDidChange(() => this.fire()),
@@ -118,7 +160,37 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   }
 
   dispose(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      void this.memento?.update(EXPANSION_KEY, this.expansion);
+    }
     [...this.disposables, this.changed].forEach((d) => d.dispose());
+  }
+
+  /** 記錄使用者展開或收合了某個節點。 */
+  setExpanded(node: TreeNode, expanded: boolean): void {
+    const id = this.buildItem(node).id;
+    if (!id) {
+      return;
+    }
+    delete this.expansion[id];
+    this.expansion[id] = expanded;
+    const keys = Object.keys(this.expansion);
+    for (const k of keys.slice(0, Math.max(0, keys.length - MAX_EXPANSION))) {
+      delete this.expansion[k];
+    }
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+    }
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = undefined;
+      void this.memento?.update(EXPANSION_KEY, this.expansion);
+    }, 500);
+  }
+
+  isExpanded(node: TreeNode): boolean | undefined {
+    const id = this.buildItem(node).id;
+    return id ? this.expansion[id] : undefined;
   }
 
   fire(): void {
@@ -135,6 +207,17 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
 
   /** 重新讀取目前編輯器的函式。回傳 true 表示有內容。 */
   async refresh(editor: vscode.TextEditor | undefined): Promise<boolean> {
+    if (!editor && this.current && openDocumentFor(this.current.uri)) {
+      // 焦點暫時移到終端機、設定頁等非文字編輯器：檔案還開著就維持顯示，不清空也不重建
+      const doc = openDocumentFor(this.current.uri)!;
+      if (`v${doc.version}` === this.current.version) {
+        return this.currentNodes.length > 0;
+      }
+      editor = vscode.window.visibleTextEditors.find((e) => e.document === doc);
+      if (!editor) {
+        return this.currentNodes.length > 0;
+      }
+    }
     if (!editor || !['file', 'untitled', 'vscode-remote', 'vscode-vfs'].includes(editor.document.uri.scheme)) {
       this.current = undefined;
       this.fileLabel = undefined;
@@ -209,24 +292,28 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
 
   async getChildren(element?: TreeNode): Promise<TreeNode[]> {
     if (!element) {
-      if (this.filterMode === 'favorites') {
-        return [this.sections.favorites];
+      if (this.filterMode === 'bookmarks') {
+        return [this.sections.bookmarks];
       }
-      return [this.sections.favorites, this.sections.currentFile, this.sections.project];
+      return [this.sections.bookmarks, this.sections.currentFile, this.sections.project];
     }
     switch (element.type) {
       case 'section':
         return this.sectionChildren(element);
-      case 'favGroup':
-        return element.items.map((fav) => ({ type: 'favorite', fav, parent: element }) as FavoriteNode);
+      case 'bmGroup':
+        return element.items.map((i) =>
+          i.kind === 'line'
+            ? ({ type: 'bookmark', entry: i.entry, parent: element } as BookmarkNode)
+            : ({ type: 'favorite', fav: i.fav, parent: element } as FavoriteNode),
+        );
       case 'symbol':
         return element.children;
       case 'wsFolder': {
         const files = await this.project.list(element.folder);
-        return this.dirChildren(element.folder, files.tree, element);
+        return this.withCounts(this.dirChildren(element.folder, files.tree, element));
       }
       case 'dir':
-        return this.dirChildren(element.folder, element.dir, element);
+        return this.withCounts(this.dirChildren(element.folder, element.dir, element));
       case 'file': {
         const file = await this.service.getForUri(element.uri);
         return file ? this.buildSymbolNodes(file.symbols, element.uri, element, 'project') : [];
@@ -240,33 +327,34 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     if (section.section === 'currentFile') {
       return this.currentNodes;
     }
-    if (section.section === 'favorites') {
-      const items = [...this.favorites.all];
-      if (!this.groupByFile) {
-        return items
-          .sort((a, b) => this.favLabel(a).localeCompare(this.favLabel(b)))
-          .map((fav) => ({ type: 'favorite', fav, parent: section }) as FavoriteNode);
-      }
-      const groups = new Map<string, FavGroupNode>();
-      for (const fav of items) {
-        const key = uriKey(fav.uri);
-        let g = groups.get(key);
-        if (!g) {
-          g = { type: 'favGroup', folder: fav.folder, uri: fav.uri, rel: fav.mark.file, items: [], parent: section };
-          groups.set(key, g);
-        }
-        g.items.push(fav);
-      }
-      for (const g of groups.values()) {
-        g.items.sort((a, b) => (a.symbol?.startOffset ?? Infinity) - (b.symbol?.startOffset ?? Infinity) || a.mark.path.localeCompare(b.mark.path));
-      }
-      return [...groups.values()].sort((a, b) => a.rel.localeCompare(b.rel));
+    if (section.section === 'bookmarks') {
+      return this.bookmarkChildren(section);
     }
     const folders = vscode.workspace.workspaceFolders ?? [];
+    const lists = await Promise.all(folders.map((f) => this.project.list(f)));
+    const empty = lists.every((l) => l.rels.length === 0);
+    if (empty !== this.projectEmpty) {
+      this.projectEmpty = empty;
+      setTimeout(() => this.fire(), 0);
+    }
     if (folders.length === 1) {
-      return this.dirChildren(folders[0], (await this.project.list(folders[0])).tree, section);
+      return this.withCounts(this.dirChildren(folders[0], lists[0].tree, section));
     }
     return folders.map((folder) => ({ type: 'wsFolder', folder, parent: section }) as WsFolderNode);
+  }
+
+  /** 先偵測檔案節點的函式數量（有快取），沒有函式的檔案才能不顯示展開鈕。 */
+  private async withCounts(nodes: TreeNode[]): Promise<TreeNode[]> {
+    const files = nodes.filter((n): n is FileNode => n.type === 'file' && !this.fileCounts.has(uriKey(n.uri)));
+    for (let i = 0; i < files.length; i += 16) {
+      await Promise.all(
+        files.slice(i, i + 16).map(async (f) => {
+          const r = await this.service.getForUri(f.uri).catch(() => undefined);
+          this.fileCounts.set(uriKey(f.uri), r?.symbols.length ?? 0);
+        }),
+      );
+    }
+    return nodes;
   }
 
   private dirChildren(folder: vscode.WorkspaceFolder, dir: DirTree, parent: TreeNode): TreeNode[] {
@@ -280,26 +368,57 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     return element.type === 'section' ? undefined : element.parent;
   }
 
+  /** 書籤（函式書籤＋行號書籤）依檔案（預設）或依標籤分組；同一組內依檔名、行號混排。 */
+  private bookmarkChildren(section: SectionNode): TreeNode[] {
+    const all = allBookmarkItems(this.store, this.favorites).sort(compareItems);
+    const groups = new Map<string, BmGroupNode>();
+    const add = (key: string, e: BookmarkItem, extra: Partial<BmGroupNode>) => {
+      let g = groups.get(key);
+      if (!g) {
+        g = { type: 'bmGroup', key, by: this.bookmarkGrouping, items: [], parent: section, ...extra };
+        groups.set(key, g);
+      }
+      g.items.push(e);
+    };
+    for (const e of all) {
+      if (this.bookmarkGrouping === 'tag') {
+        const tags = itemTags(e);
+        for (const tag of tags.length ? tags : ['']) {
+          add(tag, e, {});
+        }
+      } else {
+        add(uriKey(e.uri), e, { uri: e.uri, rel: e.file });
+      }
+    }
+    const list = [...groups.values()];
+    return this.bookmarkGrouping === 'tag'
+      ? list.sort((a, b) => (a.key === '' ? 1 : b.key === '' ? -1 : a.key.localeCompare(b.key)))
+      : list.sort((a, b) => (a.rel ?? '').localeCompare(b.rel ?? ''));
+  }
+
   private favLabel(fav: ResolvedFavorite): string {
     return displayName(fav.mark.path.split('.').pop() ?? fav.mark.path, fav.mark.alias);
   }
 
   getTreeItem(element: TreeNode): vscode.TreeItem {
+    const item = this.buildItem(element);
+    const saved = item.id ? this.expansion[item.id] : undefined;
+    if (saved !== undefined && item.collapsibleState !== vscode.TreeItemCollapsibleState.None) {
+      item.collapsibleState = saved ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed;
+    }
+    return item;
+  }
+
+  private buildItem(element: TreeNode): vscode.TreeItem {
     switch (element.type) {
       case 'section':
         return this.sectionItem(element);
-      case 'favGroup': {
-        const item = new vscode.TreeItem(basenamePosix(element.rel), vscode.TreeItemCollapsibleState.Expanded);
-        item.id = `favGroup:${element.uri.toString()}`;
-        item.resourceUri = element.uri;
-        item.iconPath = vscode.ThemeIcon.File;
-        item.description = path.posix.dirname(element.rel) === '.' ? '' : path.posix.dirname(element.rel);
-        item.tooltip = element.rel;
-        item.contextValue = 'fbFavGroup';
-        return item;
-      }
       case 'favorite':
         return this.favoriteItem(element);
+      case 'bmGroup':
+        return this.bmGroupItem(element);
+      case 'bookmark':
+        return this.bookmarkItem(element);
       case 'symbol':
         return this.symbolItem(element);
       case 'wsFolder': {
@@ -316,29 +435,113 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
         return item;
       }
       case 'file': {
-        const item = new vscode.TreeItem(basenamePosix(element.rel), vscode.TreeItemCollapsibleState.Collapsed);
-        item.id = `file:${element.uri.toString()}`;
+        const empty = this.fileCounts.get(uriKey(element.uri)) === 0;
+        const item = new vscode.TreeItem(
+          basenamePosix(element.rel),
+          empty ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Collapsed,
+        );
+        item.id = `file:${uriKey(element.uri)}`;
         item.resourceUri = element.uri;
         item.iconPath = vscode.ThemeIcon.File;
         item.tooltip = element.rel;
         item.contextValue = 'fbFile';
+        if (empty) {
+          item.description = vscode.l10n.t('no functions');
+          item.command = { command: 'vscode.open', title: vscode.l10n.t('Open file'), arguments: [element.uri] };
+        }
         return item;
       }
     }
   }
 
+  private bmGroupItem(element: BmGroupNode): vscode.TreeItem {
+    if (element.by === 'tag') {
+      const item = new vscode.TreeItem(
+        element.key ? `#${element.key}` : vscode.l10n.t('No tag'),
+        vscode.TreeItemCollapsibleState.Expanded,
+      );
+      item.id = `bmTag:${element.key}`;
+      item.iconPath = new vscode.ThemeIcon('tag');
+      item.description = String(element.items.length);
+      return item;
+    }
+    const rel = element.rel ?? '';
+    const item = new vscode.TreeItem(basenamePosix(rel), vscode.TreeItemCollapsibleState.Expanded);
+    item.id = `bmFile:${element.key}`;
+    item.resourceUri = element.uri;
+    item.iconPath = vscode.ThemeIcon.File;
+    item.description = path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel);
+    item.tooltip = rel;
+    item.contextValue = 'fbBmFile';
+    return item;
+  }
+
+  private bookmarkItem(element: BookmarkNode): vscode.TreeItem {
+    const b = element.entry.bookmark;
+    const item = new vscode.TreeItem(bookmarkTitle(b), vscode.TreeItemCollapsibleState.None);
+    item.id = `bm:${element.parent.type === 'bmGroup' ? element.parent.key : ''}:${b.id}`;
+    const lost = b.status === 'lost';
+    item.iconPath = lost
+      ? new vscode.ThemeIcon('warning', new vscode.ThemeColor('disabledForeground'))
+      : new vscode.ThemeIcon('bookmark', b.note ? new vscode.ThemeColor(NOTE_COLOR) : undefined);
+    const parts: string[] = [];
+    if (lost) {
+      parts.push(vscode.l10n.t('needs checking'));
+    }
+    // 依標籤分組時看不出是哪個檔案，補上檔名
+    parts.push(element.parent.type === 'bmGroup' && element.parent.by === 'tag' ? `${basenamePosix(b.file)}:${b.line + 1}` : String(b.line + 1));
+    if (b.tags?.length && !(element.parent.type === 'bmGroup' && element.parent.by === 'tag')) {
+      parts.push(b.tags.map((t) => `#${t}`).join(' '));
+    }
+    item.description = parts.join(' · ');
+    const md = new vscode.MarkdownString();
+    md.appendMarkdown(`**${escapeMd(bookmarkTitle(b))}**\n\n`);
+    md.appendMarkdown(`${escapeMd(b.file)}:${b.line + 1}`);
+    if (b.label && b.anchor?.text) {
+      md.appendMarkdown('\n\n');
+      md.appendCodeblock(b.anchor.text);
+    }
+    if (b.tags?.length) {
+      md.appendMarkdown(`\n\n${b.tags.map((t) => `#${escapeMd(t)}`).join(' ')}`);
+    }
+    if (lost) {
+      md.appendMarkdown(`\n\n${vscode.l10n.t('The bookmarked line was deleted. Check the position and move the bookmark if needed.')}`);
+    }
+    if (b.note) {
+      md.appendMarkdown('\n\n---\n\n');
+      md.appendMarkdown(b.note);
+      md.appendMarkdown(`\n\n${bookmarkPreviewLink(element.entry.uri, b.id)}`);
+      trustPreviewLink(md);
+    }
+    item.tooltip = md;
+    item.contextValue = `fbBookmark${b.note ? ':note' : ''}${lost ? ':lost' : ''}`;
+    item.command = {
+      command: COMMANDS.revealLine,
+      title: vscode.l10n.t('Go to bookmark'),
+      arguments: [element.entry.uri, b.line],
+    };
+    return item;
+  }
+
   private sectionItem(element: SectionNode): vscode.TreeItem {
-    if (element.section === 'favorites') {
-      const count = this.favorites.all.length;
-      const item = new vscode.TreeItem(vscode.l10n.t('Favorites'), vscode.TreeItemCollapsibleState.Expanded);
-      item.id = 'section:favorites';
-      item.iconPath = new vscode.ThemeIcon('star-full');
-      item.description = count ? String(count) : vscode.l10n.t('Click ☆ on a function to add it');
-      item.contextValue = 'fbSection.favorites';
+    if (element.section === 'bookmarks') {
+      const count = this.store.allBookmarks().length + this.favorites.all.length;
+      const item = new vscode.TreeItem(vscode.l10n.t('Bookmarks'), vscode.TreeItemCollapsibleState.Expanded);
+      item.id = 'section:bookmarks';
+      item.iconPath = new vscode.ThemeIcon('bookmark');
+      item.description = count ? String(count) : vscode.l10n.t('Ctrl+Alt+B, or ☆ on a function');
+      item.contextValue = 'fbSection.bookmarks';
       return item;
     }
     if (element.section === 'project') {
-      const item = new vscode.TreeItem(vscode.l10n.t('Whole project'), vscode.TreeItemCollapsibleState.Collapsed);
+      const none = this.projectEmpty || (vscode.workspace.workspaceFolders ?? []).length === 0;
+      const item = new vscode.TreeItem(
+        vscode.l10n.t('Whole project'),
+        none ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Collapsed,
+      );
+      if (none) {
+        item.description = vscode.l10n.t('No matching files');
+      }
       item.id = 'section:project';
       item.iconPath = new vscode.ThemeIcon('folder-library');
       item.contextValue = 'fbSection.project';
@@ -361,7 +564,16 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     return item;
   }
 
-  private tooltip(name: string, alias: string | undefined, symPath: string, rel: string, line: number | undefined, extra: string[]): vscode.MarkdownString {
+  private tooltip(
+    name: string,
+    alias: string | undefined,
+    symPath: string,
+    rel: string,
+    line: number | undefined,
+    extra: string[],
+    note?: string,
+    previewTarget?: { uri: vscode.Uri; kind: SymbolKindName },
+  ): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
     md.appendMarkdown(`**${escapeMd(alias ?? name)}**\n\n`);
     if (alias) {
@@ -371,6 +583,14 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     md.appendMarkdown(`${escapeMd(rel)}${line !== undefined ? `:${line + 1}` : ''}`);
     for (const e of extra) {
       md.appendMarkdown(`\n\n${e}`);
+    }
+    if (note) {
+      md.appendMarkdown('\n\n---\n\n');
+      md.appendMarkdown(note);
+      if (previewTarget) {
+        md.appendMarkdown(`\n\n${previewNoteLink(previewTarget.uri, { path: symPath, kind: previewTarget.kind })}`);
+        trustPreviewLink(md);
+      }
     }
     return md;
   }
@@ -388,7 +608,7 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
         : vscode.TreeItemCollapsibleState.None,
     );
     item.id = element.id;
-    item.iconPath = new vscode.ThemeIcon(ICONS[s.kind] ?? 'symbol-misc');
+    item.iconPath = new vscode.ThemeIcon(ICONS[s.kind] ?? 'symbol-misc', mark?.note ? new vscode.ThemeColor(NOTE_COLOR) : undefined);
     const prefix = `${mark?.favorite ? '★' : ''}${mark?.alias ? '✎' : ''}`;
     const parts: string[] = [];
     const keyword = REFERENCE_KEYWORD[s.ruleId];
@@ -404,8 +624,11 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     if (element.override) {
       extra.push(vscode.l10n.t('Overrides the block in {0}', element.override.label));
     }
-    item.tooltip = this.tooltip(s.name, mark?.alias, s.path, vscode.workspace.asRelativePath(element.uri, false), s.nameLine, extra);
-    item.contextValue = `fbSymbol:${mark?.favorite ? 'fav' : 'nofav'}${mark?.alias ? ':alias' : ''}${isRef ? ':ref' : ''}${
+    item.tooltip = this.tooltip(s.name, mark?.alias, s.path, vscode.workspace.asRelativePath(element.uri, false), s.nameLine, extra, mark?.note, {
+      uri: element.uri,
+      kind: s.kind,
+    });
+    item.contextValue = `fbSymbol:${mark?.favorite ? 'fav' : 'nofav'}${mark?.alias ? ':alias' : ''}${mark?.note ? ':note' : ''}${isRef ? ':ref' : ''}${
       element.override ? ':override' : ''
     }`;
     item.command = isRef
@@ -422,21 +645,31 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     const { fav } = element;
     const name = fav.mark.path.split('.').pop() ?? fav.mark.path;
     const item = new vscode.TreeItem(this.favLabel(fav), vscode.TreeItemCollapsibleState.None);
-    item.id = `fav:${fav.uri.toString()}::${fav.mark.kind}:${fav.mark.path}`;
+    const byTag = element.parent.type === 'bmGroup' && element.parent.by === 'tag';
+    item.id = `fav:${element.parent.type === 'bmGroup' ? element.parent.key : ''}:${fav.uri.toString()}::${fav.mark.kind}:${fav.mark.path}`;
     const line = fav.symbol?.nameLine ?? fav.mark.line;
     const parts: string[] = [];
     if (fav.mark.alias) {
       parts.push('✎');
     }
     if (fav.status === 'ok') {
-      parts.push(this.groupByFile ? String(line! + 1) : `${basenamePosix(fav.mark.file)}:${line! + 1}`);
-      item.iconPath = new vscode.ThemeIcon(ICONS[fav.mark.kind] ?? 'symbol-misc');
+      parts.push(byTag ? `${basenamePosix(fav.mark.file)}:${line! + 1}` : String(line! + 1));
+      item.iconPath = new vscode.ThemeIcon(
+        ICONS[fav.mark.kind] ?? 'symbol-misc',
+        fav.mark.note ? new vscode.ThemeColor(NOTE_COLOR) : undefined,
+      );
     } else {
       parts.push(fav.status === 'missing' ? vscode.l10n.t('function not found') : vscode.l10n.t('file not found'));
       item.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('disabledForeground'));
     }
+    if (fav.mark.tags?.length && !byTag) {
+      parts.push(`· ${fav.mark.tags.map((t) => `#${t}`).join(' ')}`);
+    }
     item.description = parts.join(' ');
     const extra: string[] = [];
+    if (fav.mark.tags?.length) {
+      extra.push(fav.mark.tags.map((t) => `#${escapeMd(t)}`).join(' '));
+    }
     if (fav.status !== 'ok') {
       extra.push(
         fav.status === 'missing'
@@ -444,8 +677,12 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
           : vscode.l10n.t('The file does not exist.'),
       );
     }
-    item.tooltip = this.tooltip(name, fav.mark.alias, fav.mark.path, fav.mark.file, line, extra);
-    item.contextValue = `fbFavorite:fav${fav.mark.alias ? ':alias' : ''}:${fav.status}`;
+    item.tooltip = this.tooltip(name, fav.mark.alias, fav.mark.path, fav.mark.file, line, extra, fav.mark.note, {
+      uri: fav.uri,
+      kind: fav.mark.kind,
+    });
+    // 與行號書籤共用右鍵選單（fbBookmark），:fn 表示函式書籤
+    item.contextValue = `fbBookmark:fn${fav.mark.alias ? ':alias' : ''}${fav.mark.note ? ':note' : ''}:${fav.status}`;
     item.command = { command: COMMANDS.openFavorite, title: vscode.l10n.t('Go to symbol'), arguments: [fav] };
     return item;
   }

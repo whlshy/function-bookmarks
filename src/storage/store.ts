@@ -5,11 +5,18 @@ import { SECTION, storageMode } from '../config';
 import { DetectedSymbol } from '../detection/types';
 import { BOOKMARKS_FILE } from './gitExclude';
 import { ensureBookmarksFileExcluded } from './gitExcludeFs';
+import { LineBookmark } from '../bookmarks/model';
 import { emptyStore, favorites, findMark, MarkKey, parseStore, renamePath, serializeStore, StoreData, SymbolMark } from './marks';
 
 export interface Located {
   folder: vscode.WorkspaceFolder;
   rel: string;
+}
+
+export interface BookmarkEntry {
+  folder: vscode.WorkspaceFolder;
+  uri: vscode.Uri;
+  bookmark: LineBookmark;
 }
 
 export interface FavoriteEntry {
@@ -28,7 +35,12 @@ export class MarkStore implements vscode.Disposable {
   private data = new Map<string, StoreData>();
   /** 檔案內容壞掉的資料夾：不覆寫，避免把使用者手動修改的內容蓋掉。 */
   private broken = new Set<string>();
-  private lastWritten = new Map<string, string>();
+  /** 最近幾次自己寫入的內容：檔案變更通知可能晚到，讀到這些內容時不重新載入。 */
+  private recentWrites = new Map<string, string[]>();
+  /** 正在寫入的資料夾：寫入途中讀檔可能讀到被截斷的內容，這段期間不重新載入。 */
+  private saving = new Map<string, number>();
+  /** 延後寫入中的資料夾：這段期間記憶體裡的資料比較新，不從檔案重新載入。 */
+  private pendingSaves = new Map<string, NodeJS.Timeout>();
   private excludedChecked = new Set<string>();
   private watchers: vscode.Disposable[] = [];
   private readonly changed = new vscode.EventEmitter<void>();
@@ -51,6 +63,7 @@ export class MarkStore implements vscode.Disposable {
   }
 
   dispose(): void {
+    void this.flush();
     [...this.watchers, ...this.disposables, this.changed].forEach((d) => d.dispose());
   }
 
@@ -87,12 +100,38 @@ export class MarkStore implements vscode.Disposable {
     return out;
   }
 
+  allBookmarks(): BookmarkEntry[] {
+    const out: BookmarkEntry[] = [];
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      for (const bookmark of this.data.get(uriKey(folder.uri))?.bookmarks ?? []) {
+        out.push({ folder, bookmark, uri: this.uriOf(folder, bookmark.file) });
+      }
+    }
+    return out;
+  }
+
+  /** 某個檔案的書籤（依行號排序）。 */
+  bookmarksFor(uri: vscode.Uri): LineBookmark[] {
+    const loc = this.locate(uri);
+    if (!loc) {
+      return [];
+    }
+    return (this.data.get(uriKey(loc.folder.uri))?.bookmarks ?? []).filter((b) => b.file === loc.rel).sort((a, b) => a.line - b.line);
+  }
+
   isBroken(folder: vscode.WorkspaceFolder): boolean {
     return this.broken.has(uriKey(folder.uri));
   }
 
-  /** 修改某個資料夾的資料；回傳同一個物件代表沒有變化，不會存檔。 */
-  async update(folder: vscode.WorkspaceFolder, fn: (data: StoreData) => StoreData): Promise<boolean> {
+  /**
+   * 修改某個資料夾的資料；回傳同一個物件代表沒有變化，不會存檔。
+   * `deferSave`：編輯時頻繁變動（例如行號平移）用，稍後再一次寫檔。
+   */
+  async update(
+    folder: vscode.WorkspaceFolder,
+    fn: (data: StoreData) => StoreData,
+    options: { deferSave?: boolean } = {},
+  ): Promise<boolean> {
     const key = uriKey(folder.uri);
     if (this.broken.has(key)) {
       void vscode.window.showErrorMessage(
@@ -106,9 +145,51 @@ export class MarkStore implements vscode.Disposable {
       return false;
     }
     this.data.set(key, after);
-    await this.save(folder, after);
+    if (options.deferSave) {
+      this.scheduleSave(folder);
+    } else {
+      this.cancelScheduledSave(key);
+      await this.save(folder, after);
+    }
     this.changed.fire();
     return true;
+  }
+
+  private scheduleSave(folder: vscode.WorkspaceFolder): void {
+    const key = uriKey(folder.uri);
+    this.cancelScheduledSave(key);
+    this.pendingSaves.set(
+      key,
+      setTimeout(() => {
+        this.pendingSaves.delete(key);
+        const data = this.data.get(key);
+        if (data) {
+          void this.save(folder, data);
+        }
+      }, 800),
+    );
+  }
+
+  private cancelScheduledSave(key: string): void {
+    const t = this.pendingSaves.get(key);
+    if (t) {
+      clearTimeout(t);
+      this.pendingSaves.delete(key);
+    }
+  }
+
+  /** 立刻寫入延後中的變更（關閉編輯器、測試時用）。 */
+  async flush(): Promise<void> {
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      const key = uriKey(folder.uri);
+      if (this.pendingSaves.has(key)) {
+        this.cancelScheduledSave(key);
+        const data = this.data.get(key);
+        if (data) {
+          await this.save(folder, data);
+        }
+      }
+    }
   }
 
   private fileUri(folder: vscode.WorkspaceFolder): vscode.Uri {
@@ -148,7 +229,10 @@ export class MarkStore implements vscode.Disposable {
     } catch {
       text = undefined;
     }
-    if (text !== undefined && text === this.lastWritten.get(key)) {
+    if (this.saving.get(key) || this.pendingSaves.has(key)) {
+      return false;
+    }
+    if (text !== undefined && this.recentWrites.get(key)?.includes(text)) {
       return false;
     }
     if (text === undefined || text.trim() === '') {
@@ -189,9 +273,14 @@ export class MarkStore implements vscode.Disposable {
         return;
       }
     }
-    this.lastWritten.set(key, text);
-    await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(folder.uri, '.vscode'));
-    await vscode.workspace.fs.writeFile(file, new TextEncoder().encode(text));
+    this.recentWrites.set(key, [...(this.recentWrites.get(key) ?? []), text].slice(-3));
+    this.saving.set(key, (this.saving.get(key) ?? 0) + 1);
+    try {
+      await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(folder.uri, '.vscode'));
+      await vscode.workspace.fs.writeFile(file, new TextEncoder().encode(text));
+    } finally {
+      this.saving.set(key, (this.saving.get(key) ?? 1) - 1);
+    }
     if (!this.excludedChecked.has(key)) {
       this.excludedChecked.add(key);
       await ensureBookmarksFileExcluded(folder.uri).catch(() => undefined);

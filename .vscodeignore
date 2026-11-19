@@ -1,5 +1,6 @@
 **
 !dist/extension.js
+!dist/mermaid.min.js
 !media/**
 !l10n/**
 !package.json
@@ -7,3 +8,4 @@
 !README.md
 !CHANGELOG.md
 !LICENSE
+!ThirdPartyNotices.md

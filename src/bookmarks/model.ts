@@ -1,0 +1,199 @@
+/**
+ * 行號書籤（M3）。位置以行號記錄，另存 anchor（該行內容、前後幾行、所在函式），
+ * 給之後的 git 換算與後備定位（M4、M5）使用。
+ */
+
+export interface BookmarkAnchor {
+  /** 該行內容（去掉頭尾空白）。 */
+  text: string;
+  before: string[];
+  after: string[];
+  /** 所在函式的名稱路徑與距離函式開頭的行數。 */
+  symbolPath?: string;
+  symbolOffset?: number;
+}
+
+export interface LineBookmark {
+  id: string;
+  /** 相對於工作區資料夾、以 / 分隔的路徑。 */
+  file: string;
+  /** 0 起算。 */
+  line: number;
+  label?: string;
+  tags?: string[];
+  /** 多行備註（Markdown）。 */
+  note?: string;
+  anchor?: BookmarkAnchor;
+  /** lost：所在的行被刪除（onLineDelete = markLost）。 */
+  status?: 'ok' | 'lost';
+  createdAt?: string;
+}
+
+export type OnLineDelete = 'moveToNext' | 'markLost' | 'remove';
+
+/** 一次編輯（與 VS Code 的 TextDocumentContentChangeEvent 相同，座標為編輯前的文件）。 */
+export interface LineChange {
+  startLine: number;
+  startChar: number;
+  endLine: number;
+  endChar: number;
+  text: string;
+}
+
+export interface ShiftResult {
+  line: number;
+  /** 書籤所在的行在這次編輯中被刪除。 */
+  deleted: boolean;
+}
+
+function countNewlines(s: string): number {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s.charCodeAt(i) === 10) {
+      n++;
+    }
+  }
+  return n;
+}
+
+/**
+ * 依一次編輯換算書籤行號：
+ * - 編輯範圍之前：不變
+ * - 編輯範圍之後：加上增減的行數
+ * - 在該行開頭插入整行（例如在行首按 Enter）：書籤跟著原本的內容往下
+ * - 該行被整行刪除：移到刪除範圍之後的那一行，並標記 deleted
+ */
+export function shiftLine(line: number, change: LineChange): ShiftResult {
+  const inserted = countNewlines(change.text);
+  const removed = change.endLine - change.startLine;
+  const delta = inserted - removed;
+  if (line < change.startLine) {
+    return { line, deleted: false };
+  }
+  if (line > change.endLine || (line === change.endLine && change.endChar === 0 && change.endLine > change.startLine)) {
+    return { line: line + delta, deleted: false };
+  }
+  if (line === change.startLine) {
+    const pureInsert = change.startLine === change.endLine && change.startChar === change.endChar;
+    if (pureInsert && change.startChar === 0 && change.text.endsWith('\n')) {
+      return { line: line + inserted, deleted: false };
+    }
+    return { line, deleted: false };
+  }
+  // startLine < line <= endLine：這一行整行在刪除範圍內
+  return { line: change.startLine + inserted, deleted: true };
+}
+
+/**
+ * 套用一批編輯（多游標時會有多筆）。由下往上套用，座標才不會互相影響。
+ * 回傳 undefined 表示書籤應被移除（onLineDelete = remove）。
+ */
+export function applyChanges(
+  bookmark: Pick<LineBookmark, 'line' | 'status'>,
+  changes: LineChange[],
+  onDelete: OnLineDelete,
+): { line: number; status?: 'ok' | 'lost' } | undefined {
+  let line = bookmark.line;
+  let deleted = false;
+  const ordered = [...changes].sort((a, b) => b.startLine - a.startLine || b.startChar - a.startChar);
+  for (const c of ordered) {
+    const r = shiftLine(line, c);
+    line = r.line;
+    deleted = deleted || r.deleted;
+  }
+  if (deleted) {
+    if (onDelete === 'remove') {
+      return undefined;
+    }
+    return { line, status: onDelete === 'markLost' ? 'lost' : bookmark.status };
+  }
+  return { line, status: bookmark.status };
+}
+
+export function sortBookmarks<T extends Pick<LineBookmark, 'file' | 'line'>>(list: T[]): T[] {
+  return [...list].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+}
+
+/**
+ * 下一個／上一個書籤（跨檔案，依檔名、行號排序，頭尾相接）。
+ * `file`、`line` 是目前游標位置；沒有開檔時從第一個（或最後一個）開始。
+ */
+export function neighbor<T extends Pick<LineBookmark, 'file' | 'line'>>(
+  list: T[],
+  file: string | undefined,
+  line: number,
+  direction: 1 | -1,
+): T | undefined {
+  const sorted = sortBookmarks(list);
+  if (sorted.length === 0) {
+    return undefined;
+  }
+  if (file === undefined) {
+    return direction === 1 ? sorted[0] : sorted[sorted.length - 1];
+  }
+  const cmp = (b: T) => b.file.localeCompare(file) || b.line - line;
+  if (direction === 1) {
+    return sorted.find((b) => cmp(b) > 0) ?? sorted[0];
+  }
+  return [...sorted].reverse().find((b) => cmp(b) < 0) ?? sorted[sorted.length - 1];
+}
+
+/** 新增書籤時建議的名稱：選取的文字 → 游標所在單字 → 所在函式名稱 → 該行內容。 */
+export function suggestName(input: {
+  selection?: string;
+  word?: string;
+  symbolName?: string;
+  lineText: string;
+}): string {
+  const sel = input.selection?.trim();
+  if (sel && !sel.includes('\n') && sel.length <= 80) {
+    return sel;
+  }
+  if (input.word?.trim()) {
+    return input.word.trim();
+  }
+  if (input.symbolName) {
+    return input.symbolName;
+  }
+  return input.lineText.trim().slice(0, 80);
+}
+
+/** 解析使用者輸入的標籤：以空白或逗號分隔，可加或不加 #，去除重複。 */
+export function parseTags(input: string): string[] {
+  const out: string[] = [];
+  for (const raw of input.split(/[\s,，、]+/)) {
+    const t = raw.replace(/^#+/, '').trim();
+    if (t && !out.includes(t)) {
+      out.push(t);
+    }
+  }
+  return out;
+}
+
+export function newBookmarkId(): string {
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** 從整份文字擷取書籤的 anchor（該行與前後各 2 行）。 */
+export function makeAnchor(lines: string[], line: number, symbolPath?: string, symbolStartLine?: number): BookmarkAnchor {
+  const get = (i: number) => (i >= 0 && i < lines.length ? lines[i].trim() : '');
+  return {
+    text: get(line),
+    before: [get(line - 2), get(line - 1)],
+    after: [get(line + 1), get(line + 2)],
+    symbolPath,
+    symbolOffset: symbolPath !== undefined && symbolStartLine !== undefined ? line - symbolStartLine : undefined,
+  };
+}
+
+/** 整份文件被換掉（重新從磁碟載入、git pull、格式化工具）：先不平移，交給 M4 的 git 換算處理。 */
+export function isWholeDocumentReplace(changes: LineChange[], newLineCount: number): boolean {
+  if (changes.length !== 1) {
+    return false;
+  }
+  const c = changes[0];
+  const removed = c.endLine - c.startLine;
+  const inserted = c.text.split('\n').length - 1;
+  const oldLineCount = newLineCount - inserted + removed;
+  return c.startLine === 0 && c.startChar === 0 && removed >= 5 && removed >= Math.floor(oldLineCount * 0.9) - 1;
+}

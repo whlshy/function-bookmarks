@@ -23,6 +23,8 @@ interface RawSymbol {
   nameOffset: number;
   nameLength: number;
   target?: string;
+  /** 標題層級（body: heading）。 */
+  level?: number;
   children: RawSymbol[];
 }
 
@@ -57,8 +59,8 @@ function compileRules(rules: DetectionRule[], errors: RuleError[]): Compiled[] {
       errors.push({ ruleId: rule.id, message: `pattern: ${start.message}` });
       continue;
     }
-    if (rule.body !== 'embedded' && !/\(\?<name>/.test(rule.pattern)) {
-      errors.push({ ruleId: rule.id, message: 'pattern must contain a (?<name>...) group' });
+    if (rule.body !== 'embedded' && !rule.nameTemplate && !/\(\?<name>/.test(rule.pattern)) {
+      errors.push({ ruleId: rule.id, message: 'pattern must contain a (?<name>...) group or set nameTemplate' });
       continue;
     }
     let end: RegExp | undefined;
@@ -163,6 +165,35 @@ function indentWidth(line: string): number {
     }
   }
   return w;
+}
+
+/** 函式呼叫：規則比對到左括號為止，內容一直到對應的右括號（含裡面的回呼函式）。 */
+function findCallEnd(masked: string, from: number): number {
+  let depth = 1;
+  for (let i = from; i < masked.length; i++) {
+    const c = masked[i];
+    if (c === '(' || c === '[' || c === '{') {
+      depth++;
+    } else if (c === ')' || c === ']' || c === '}') {
+      depth--;
+      if (depth === 0) {
+        return i + 1;
+      }
+    }
+  }
+  return masked.length;
+}
+
+/** 依 nameTemplate 組出名稱；`${g}`、`${g:upper}`、`${g|預設}`、`${g:upper|預設}`。 */
+export function renderNameTemplate(template: string, groups: Record<string, string | undefined>): string {
+  return template
+    .replace(/\$\{(\w+)(:upper)?(?:\|([^}]*))?\}/g, (_m, g: string, upper: string | undefined, def: string | undefined) => {
+      const v = groups[g]?.trim();
+      const value = v ? v : (def ?? '');
+      return upper ? value.toUpperCase() : value;
+    })
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /** 縮排語言（Python）：找到冒號後，縮排回到同層或更外層為止。 */
@@ -280,12 +311,24 @@ function collect(
 
   for (const c of compiled.filter((x) => x.rule.body !== 'embedded')) {
     c.start.lastIndex = 0;
-    for (const m of masked.matchAll(c.start)) {
+    const subject = c.rule.matchRaw ? text : masked;
+    for (const m of subject.matchAll(c.start)) {
       const groups = m.indices?.groups;
       const matchStart = m.index! + leadingWhitespace(m[0]);
       const matchEnd = m.index! + m[0].length;
-      const nameIdx = groups?.name;
-      const name = m.groups?.name;
+      if (c.rule.matchRaw && masked[matchStart] !== text[matchStart]) {
+        continue; // 起點在註解或字串裡
+      }
+      let nameIdx = groups?.name;
+      let name = m.groups?.name;
+      if (c.rule.nameTemplate) {
+        name = renderNameTemplate(c.rule.nameTemplate, m.groups ?? {});
+        if (!nameIdx) {
+          // 沒有 name 群組時，以比對起點到該行結尾（最多 80 字）當作名稱位置
+          const lineEnd = lineEndOffset(subject, matchStart);
+          nameIdx = [matchStart, Math.min(lineEnd, matchStart + 80, matchEnd)];
+        }
+      }
       if (!nameIdx || !name) {
         continue;
       }
@@ -300,6 +343,12 @@ function collect(
         case 'pair':
           endOffset = findPairEnd(masked, c, matchEnd);
           break;
+        case 'call':
+          endOffset = findCallEnd(masked, matchEnd);
+          break;
+        case 'heading':
+          endOffset = lineEndOffset(masked, matchEnd); // 之後由 fixHeadingEnds 補上
+          break;
         default:
           endOffset = lineEndOffset(masked, matchEnd);
       }
@@ -312,11 +361,32 @@ function collect(
         nameOffset: offset + nameIdx[0],
         nameLength: nameIdx[1] - nameIdx[0],
         target: targetIdx ? text.slice(targetIdx[0], targetIdx[1]) : undefined,
+        level: c.rule.body === 'heading' ? headingLevel(m.groups ?? {}) : undefined,
         children: [],
       });
     }
   }
   return out;
+}
+
+function headingLevel(groups: Record<string, string | undefined>): number {
+  if (groups.level) {
+    return groups.level.length;
+  }
+  if (groups.under) {
+    return groups.under.trim().startsWith('=') ? 1 : 2;
+  }
+  return 1;
+}
+
+/** 標題的範圍：到下一個同層或更上層標題之前（沒有的話到檔案結尾）。 */
+function fixHeadingEnds(raw: RawSymbol[], textLength: number): void {
+  const headings = raw.filter((s) => s.level !== undefined).sort((a, b) => a.startOffset - b.startOffset);
+  for (let i = 0; i < headings.length; i++) {
+    const h = headings[i];
+    const next = headings.slice(i + 1).find((x) => x.level! <= h.level!);
+    h.endOffset = Math.max(h.endOffset, next ? next.startOffset - 1 : textLength);
+  }
 }
 
 function nest(raw: RawSymbol[]): RawSymbol[] {
@@ -348,6 +418,21 @@ function applyWithin(nodes: RawSymbol[], parentKind: string | undefined): RawSym
       n.children = applyWithin(n.children, n.rule.kind);
       out.push(n);
     }
+  }
+  return out;
+}
+
+/** 依 `hideChildren` 移除指定規則的子節點，孫節點往上接。 */
+function applyHide(nodes: RawSymbol[], hidden: Set<string> | undefined): RawSymbol[] {
+  const out: RawSymbol[] = [];
+  for (const n of nodes) {
+    if (hidden?.has(n.rule.id)) {
+      out.push(...applyHide(n.children, hidden));
+      continue;
+    }
+    const own = n.rule.hideChildren?.length ? new Set(n.rule.hideChildren) : undefined;
+    n.children = applyHide(n.children, own);
+    out.push(n);
   }
   return out;
 }
@@ -422,7 +507,8 @@ export function detectSymbols(
   const errors: RuleError[] = [];
   const masked = maskText(text, syntaxForLanguage(languageId));
   const raw = collect(text, masked, 0, languageId, rules, options, errors, 0);
-  const tree = dedupe(applyWithin(nest(raw), undefined), new Set());
+  fixHeadingEnds(raw, text.length);
+  const tree = applyHide(dedupe(applyWithin(nest(raw), undefined), new Set()), undefined);
   const uniqueErrors = errors.filter(
     (e, i) => errors.findIndex((x) => x.ruleId === e.ruleId && x.message === e.message) === i,
   );

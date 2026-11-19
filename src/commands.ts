@@ -2,11 +2,13 @@ import * as vscode from 'vscode';
 import { TemplateResolver } from './django/resolver';
 import { findPartial, splitTemplateTarget } from './django/templates';
 import { findByPath, findInnermost } from './detection/engine';
-import { DetectedSymbol } from './detection/types';
-import { MarkKey, setAlias, setFavorite } from './storage/marks';
+import { DetectedSymbol, SymbolKindName } from './detection/types';
+import { parseTags } from './bookmarks/model';
+import { MarkKey, setAlias, setFavorite, setNote, setTags } from './storage/marks';
 import { MarkStore } from './storage/store';
 import { ResolvedFavorite } from './symbols/favorites';
 import { SymbolService } from './symbols/symbolService';
+import { NoteEditor } from './views/noteEditor';
 import { COMMANDS, FavoriteNode, SymbolNode, TreeNode } from './views/tree';
 
 export interface Target {
@@ -30,11 +32,24 @@ export function revealSymbol(uri: vscode.Uri, s: DetectedSymbol): Promise<vscode
   return reveal(uri, s.nameLine, s.nameStartCol, s.nameEndCol);
 }
 
+interface LinkArg {
+  uri: string;
+  path: string;
+  kind: SymbolKindName;
+}
+
+/** 提示中「在預覽中開啟」連結傳來的參數（不是樹狀節點）。 */
+function isLinkArg(arg: unknown): arg is LinkArg {
+  const a = arg as Partial<LinkArg> | undefined;
+  return !!a && typeof a.uri === 'string' && typeof a.path === 'string' && typeof a.kind === 'string';
+}
+
 export class Commands {
   constructor(
     private readonly service: SymbolService,
     private readonly store: MarkStore,
     private readonly resolver: TemplateResolver,
+    private readonly notes: NoteEditor,
   ) {}
 
   /** 從樹狀節點，或（沒有節點時）從游標所在位置取得目標函式。 */
@@ -117,6 +132,97 @@ export class Commands {
       return;
     }
     await this.store.update(loc.folder, (d) => setAlias(d, loc.key, input, t.name, t.line));
+  }
+
+  /** 函式上方「加入書籤」可點文字：切換指定函式的書籤。 */
+  async toggleFavoriteAt(uri: vscode.Uri, path: string, kind: SymbolKindName, line: number): Promise<void> {
+    const loc = this.store.locate(uri);
+    if (!loc) {
+      return;
+    }
+    const key: MarkKey = { file: loc.rel, path, kind };
+    const on = !!this.store.get(uri, { path, kind })?.favorite;
+    await this.store.update(loc.folder, (d) => setFavorite(d, key, !on, line));
+  }
+
+  /** 編輯函式書籤的標籤。 */
+  async editTags(node?: TreeNode, value?: string): Promise<void> {
+    const t = await this.target(node);
+    if (!t) {
+      return;
+    }
+    const loc = this.located(t);
+    if (!loc) {
+      return;
+    }
+    const mark = this.store.get(t.uri, t.key);
+    const current = (mark?.tags ?? []).map((x) => `#${x}`).join(' ');
+    const input =
+      value ??
+      (await vscode.window.showInputBox({
+        title: vscode.l10n.t('Tags'),
+        prompt: vscode.l10n.t('Separate with spaces or commas, e.g. #auth #todo'),
+        value: current ? `${current} ` : '',
+      }));
+    if (input === undefined) {
+      return;
+    }
+    const tags = parseTags(input);
+    // 加標籤代表要當成書籤，順便加入函式書籤
+    await this.store.update(loc.folder, (d) => setTags(tags.length ? setFavorite(d, loc.key, true, t.line) : d, loc.key, tags));
+  }
+
+  /** 開啟備註編輯分頁；`value` 有值時直接寫入（測試用）。 */
+  async editNote(node?: TreeNode, value?: string): Promise<void> {
+    const t = await this.target(node);
+    if (!t || t.symbol?.kind === 'reference') {
+      return;
+    }
+    const loc = this.located(t);
+    if (!loc) {
+      return;
+    }
+    if (value !== undefined) {
+      await this.store.update(loc.folder, (d) => setNote(d, loc.key, value, t.line));
+      return;
+    }
+    const mark = this.store.get(t.uri, t.key);
+    await this.notes.open({
+      id: `${loc.folder.uri.toString()}|${loc.key.file}|${loc.key.kind}|${loc.key.path}`,
+      title: mark?.alias ?? t.name,
+      subject: t.key.path,
+      current: mark?.note,
+      apply: async (text) => {
+        await this.store.update(loc.folder, (d) => setNote(d, loc.key, text, t.line));
+      },
+    });
+  }
+
+  /** 用 Markdown 預覽分頁查看備註；可從樹狀節點、游標，或提示中的連結（帶 uri／path／kind）呼叫。 */
+  async previewNote(arg?: TreeNode | LinkArg): Promise<void> {
+    let uri: vscode.Uri;
+    let key: Pick<MarkKey, 'path' | 'kind'>;
+    let name: string;
+    let line: number | undefined;
+    if (isLinkArg(arg)) {
+      uri = vscode.Uri.parse(arg.uri);
+      key = { path: arg.path, kind: arg.kind };
+      name = arg.path.split('.').pop() ?? arg.path;
+    } else {
+      const t = await this.target(arg as TreeNode | undefined);
+      if (!t) {
+        return;
+      }
+      ({ uri, key, name, line } = t);
+    }
+    const mark = this.store.get(uri, key);
+    if (!mark?.note) {
+      void vscode.window.showInformationMessage(vscode.l10n.t('There is no note on {0}.', key.path));
+      return;
+    }
+    const at = line ?? mark.line;
+    const subtitle = `\`${key.path}\` · ${vscode.workspace.asRelativePath(uri, false)}${at !== undefined ? `:${at + 1}` : ''}`;
+    await this.notes.preview(mark.alias ?? name, subtitle, mark.note);
   }
 
   async openFavorite(fav: ResolvedFavorite): Promise<void> {

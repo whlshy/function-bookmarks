@@ -9,6 +9,7 @@ import {
   serializeStore,
   setAlias,
   setFavorite,
+  setNote,
   updateLine,
 } from '../../src/storage/marks';
 
@@ -36,6 +37,22 @@ describe('收藏與自訂名稱資料', () => {
     let d = setAlias(setFavorite(emptyStore(), key, true, 1, now), key, '文章', 'get');
     d = setFavorite(d, key, false);
     assert.deepStrictEqual(findMark(d, key), { ...key, alias: '文章', line: 1 });
+  });
+
+  it('備註：保留多行與內部縮排，去掉頭尾空行；清空即移除', () => {
+    let d = setNote(emptyStore(), key, '\r\n\n第一行\r\n  - 縮排項目\n\n', 11);
+    assert.strictEqual(findMark(d, key)?.note, '第一行\n  - 縮排項目');
+    assert.strictEqual(findMark(d, key)?.line, 11);
+    d = setNote(d, key, '   \n  ');
+    assert.strictEqual(findMark(d, key), undefined);
+  });
+
+  it('備註可與收藏、自訂名稱並存，並能存檔再讀回', () => {
+    let d = setFavorite(emptyStore(), key, true, 1, now);
+    d = setNote(setAlias(d, key, '文章', 'get'), key, 'a\nb');
+    const back = parseStore(serializeStore(d));
+    assert.deepStrictEqual(findMark(back!, key), { ...key, favorite: true, alias: '文章', note: 'a\nb', line: 1, addedAt: now.toISOString() });
+    assert.strictEqual(findMark(setFavorite(d, key, false), key)?.note, 'a\nb');
   });
 
   it('同名但種類不同視為不同項目', () => {

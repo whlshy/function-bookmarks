@@ -4,11 +4,13 @@
 
 Bookmarks that survive `git pull` and branch switches, plus a customizable function list with favorites. Works in VS Code and Cursor.
 
-## Current features (0.0.2)
+## Current features (0.2.2)
 
+- **Bookmarks on functions or lines** — `Ctrl+Alt+B` (or right-click a line number) bookmarks the function whose name is on that line, otherwise the line itself; names, tags, notes, next / previous (`Ctrl+Alt+.` / `Ctrl+Alt+,`), search (`Ctrl+Alt+/`); bookmarks follow your edits
 - **Function list** for the current file in its own side bar
-- **Favorites** — star a function and find it in the Favorites section without opening the file; favorites follow edits and `git pull`
+- **Function bookmarks** — hover a function name and click **☆ Add bookmark** (or ☆ in the side bar); listed without opening the file and found again by name after edits and `git pull`
 - **Display names** — rename how a function is shown (F2); hover to see the original name and path
+- **Notes** — multi-line Markdown notes on functions, shown on hover; a gutter icon marks favorites and notes
 - **Whole project** browser and **Search Functions** across the workspace
 - **Django templates** — click `extends` / `include` to open the template; see which blocks override the parent template
 - **Customizable detection rules** — decide what counts as a function with regular expressions
@@ -16,6 +18,8 @@ Bookmarks that survive `git pull` and branch switches, plus a customizable funct
   - TypeScript / JavaScript: `function`, arrow functions, function expressions, classes, methods, object methods
   - Python: `def`, `async def`, `class`, methods
   - Django templates: `{% block %}`, `{% partialdef %}`, `{% extends %}`, `{% include %}`, functions inside `<script>`
+  - Event listeners and requests: jQuery `.on()` / `.click()`, `addEventListener`, `onclick`, `$.ajax`, `fetch`, `axios` — shown as `#toggleBtn click`, `GET /do_action`
+  - Markdown: headings as a nested table of contents
 - Languages without rules fall back to the language server
 - Click to jump; the function under the cursor is highlighted
 
@@ -28,6 +32,8 @@ Bookmarks that survive `git pull` and branch switches, plus a customizable funct
 | `functionBookmarks.detection.disabledRules` | `["html-id"]` | Built-in rule IDs to turn off |
 | `functionBookmarks.detection.templateFiles` | `["**/templates/**"]` | Where the Django / HTML rules apply |
 | `functionBookmarks.followCursor` | `true` | Highlight the function under the cursor |
+| `functionBookmarks.bookmarks.onLineDelete` | `moveToNext` | When a bookmarked line is deleted: `moveToNext`, `markLost` or `remove` |
+| `functionBookmarks.hover.enabled` | `true` | Popup on function names to add a bookmark, rename, edit the note |
 | `functionBookmarks.storage` | `file` | `file` (`.vscode/function-bookmarks.json`) or `workspaceState` |
 | `functionBookmarks.project.include` | `**/*.{ts,tsx,…,py,html,htm}` | Files listed under Whole project and used by search |
 | `functionBookmarks.project.exclude` | `node_modules`, `.venv`, `dist`, … | Excluded from Whole project and search |

@@ -15,7 +15,7 @@ export interface Settings {
   followCursor: boolean;
 }
 
-export const DEFAULT_PROJECT_INCLUDE = '**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,html,htm}';
+export const DEFAULT_PROJECT_INCLUDE = '**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,html,htm,md,markdown}';
 export const DEFAULT_PROJECT_EXCLUDE = [
   '**/node_modules/**',
   '**/.git/**',

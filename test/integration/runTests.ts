@@ -15,7 +15,13 @@ async function main(): Promise<void> {
     await runTests({
       extensionDevelopmentPath: root,
       extensionTestsPath: path.resolve(__dirname, 'suite', 'index'),
-      launchArgs: [workspace, '--disable-extensions', '--skip-welcome', '--skip-release-notes'],
+      // Cursor 的登入依賴內建擴充，停用擴充會讀不到已存的登入；KEEP_EXTENSIONS=1 時不停用
+      launchArgs: [
+        workspace,
+        ...(process.env.KEEP_EXTENSIONS ? [] : ['--disable-extensions']),
+        '--skip-welcome',
+        '--skip-release-notes',
+      ],
       ...(exe && fs.existsSync(exe) ? { vscodeExecutablePath: exe } : { version: process.env.VSCODE_VERSION ?? 'stable' }),
     });
   } catch (err) {

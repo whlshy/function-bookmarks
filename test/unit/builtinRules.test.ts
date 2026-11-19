@@ -151,6 +151,194 @@ describe('內建規則', () => {
     });
   });
 
+  describe('事件監聽與 ajax（老闆回饋的實際程式碼）', () => {
+    const snippet = lines(
+      "$('#toggleBtn').on('click', function(e) {", // 0
+      '    e.preventDefault();  // 防止按鈕預設行為', // 1
+      "    $('#featureBox').slideToggle(300);", // 2
+      "    const btnText = $(this).find('.btn-text');", // 3
+      "    if (btnText.text() === '收合功能區') {", // 4
+      "        btnText.text('展開功能區');", // 5
+      '    }', // 6
+      '});', // 7
+      '', // 8
+      '$.ajax({', // 9
+      "    url: '/do_action',", // 10
+      "    type: 'GET',", // 11
+      "    data: { 'ip': select_ip, 'request': \"share_device\" },", // 12
+      "    dataType: 'json',", // 13
+      '    success: function (data) {', // 14
+      "        if (data.status == 'success') {", // 15
+      '            showPassMessage(requestData);', // 16
+      '        }', // 17
+      '    },', // 18
+      '    error: function (jqXHR, textStatus, errorThrown) {', // 19
+      "        console.error('Error fetching screenshot:', textStatus);", // 20
+      '    }', // 21
+      '});', // 22
+    );
+
+    it('jQuery 事件顯示成「#toggleBtn click」；ajax 顯示成「GET /do_action」，不顯示 success、error 回呼', () => {
+      const r = detect(snippet, 'javascript');
+      assert.deepStrictEqual(outline(r.symbols), {
+        'event #toggleBtn click@0-7': {},
+        'request GET /do_action@9-22': {},
+      });
+    });
+
+    it('在 Django template 的 <script> 裡也一樣', () => {
+      const r = detect(lines('{% block scripts %}', '<script>', snippet, '</script>', '{% endblock %}'), 'html');
+      assert.deepStrictEqual(Object.keys(outline(r.symbols[0].children, false)), ['event #toggleBtn click', 'request GET /do_action']);
+    });
+
+    it('各種事件寫法', () => {
+      const r = detect(
+        lines(
+          '$(document).on("click", ".delete-btn", function () {});',
+          "$('#form').off('submit').on('submit', (e) => {});",
+          "$('.item').click(function () {});",
+          '$(window).resize(() => {});',
+          '$(document).ready(function () {});',
+          '$(function () {});',
+          "document.getElementById('save').addEventListener('click', async (e) => {});",
+          "btn.addEventListener('keyup', handler => {});",
+          'window.onload = function () {};',
+          "el.onclick = () => { go(); };",
+          "// $('#nope').on('click', function () {});",
+          "const s = \"$('#nope2').click(function () {})\";",
+          "$('#x').on('click', namedHandler);",
+        ),
+        'javascript',
+      );
+      assert.deepStrictEqual(r.symbols.map((x) => `${x.kind} ${x.name}`), [
+        'event document click .delete-btn',
+        'event #form submit',
+        'event .item click',
+        'event window resize',
+        'event document ready',
+        'event document ready',
+        "event document.getElementById('save') click",
+        'event btn keyup',
+        'event window load',
+        'event el click',
+      ]);
+    });
+
+    it('各種請求寫法', () => {
+      const r = detect(
+        lines(
+          "$.ajax({ type: 'post', data: { type: 'inner' }, url: '/api/save', success: function () {} });",
+          '$.ajax({ url: apiUrl, method: "DELETE" });',
+          '$.ajax({ dataType: "json" });',
+          "$.get('/api/list', function (data) {});",
+          "$.post(`/api/${id}`, payload);",
+          "fetch('/api/items');",
+          "fetch('/api/items', { method: 'PUT', body: x });",
+          "axios.delete('/api/items/1');",
+        ),
+        'javascript',
+      );
+      assert.deepStrictEqual(Object.keys(outline(r.symbols, false)), [
+        'request POST /api/save',
+        'request DELETE apiUrl',
+        'request AJAX',
+        'request GET /api/list',
+        'request POST /api/${id}',
+        'request GET /api/items',
+        'request PUT /api/items',
+        'request DELETE /api/items/1',
+      ]);
+      assert.deepStrictEqual(r.symbols[0].children, [], 'ajax 底下不顯示回呼');
+    });
+
+    it('回呼裡的 ajax、事件監聽仍然顯示（只隱藏回呼本身）', () => {
+      const r = detect(
+        lines(
+          "$('#save').on('click', function () {",
+          "  $.ajax({ url: '/save', type: 'POST', success: function () {",
+          "    $.get('/reload', function () {});",
+          '  } });',
+          '});',
+          'setTimeout(function () {}, 100);',
+          '[1, 2].forEach(function (x) {});',
+        ),
+        'javascript',
+      );
+      assert.deepStrictEqual(outline(r.symbols, false), {
+        'event #save click': { 'request POST /save': { 'request GET /reload': {} } },
+      });
+    });
+
+    it('HTML 的 onclick 等屬性', () => {
+      const r = detect(
+        lines('<button type="button" onclick="toggleMenu()">選單</button>', '<form onsubmit="return check(this)">', '</form>'),
+        'html',
+      );
+      assert.deepStrictEqual(Object.keys(outline(r.symbols, false)), [
+        'event button onclick → toggleMenu()',
+        'event form onsubmit → return check(this)',
+      ]);
+    });
+  });
+
+  describe('Markdown 目錄結構', () => {
+    it('# 標題依層級形成上下層，範圍到下一個同層或更上層標題之前（不含結尾空行）', () => {
+      const r = detect(
+        lines(
+          '# 專案說明', // 0
+          '介紹文字', // 1
+          '## 安裝', // 2
+          '### 使用 npm', // 3
+          'npm i', // 4
+          '### 手動安裝 ###', // 5
+          '', // 6
+          '## 使用方式', // 7
+          '#### 跳一層也可以', // 8
+          '# 附錄', // 9
+        ),
+        'markdown',
+      );
+      assert.deepStrictEqual(outline(r.symbols), {
+        'heading 專案說明@0-8': {
+          'heading 安裝@2-5': { 'heading 使用 npm@3-4': {}, 'heading 手動安裝@5-5': {} },
+          'heading 使用方式@7-8': { 'heading 跳一層也可以@8-8': {} },
+        },
+        'heading 附錄@9-9': {},
+      });
+      assert.strictEqual(r.symbols[0].children[0].children[0].path, '專案說明.安裝.使用 npm');
+    });
+
+    it('底線寫法（=== 第 1 層、--- 第 2 層）', () => {
+      const r = detect(lines('Title', '=====', 'text', 'Sub', '---', 'more'), 'markdown');
+      assert.deepStrictEqual(outline(r.symbols), { 'heading Title@0-5': { 'heading Sub@3-5': {} } });
+    });
+
+    it('程式碼區塊、HTML 註解、front matter 裡的 # 不算標題；清單後的 --- 不算底線標題', () => {
+      const r = detect(
+        lines(
+          '---',
+          'title: x',
+          '# not heading',
+          '---',
+          '# 真的標題',
+          '```bash',
+          '# 這是註解',
+          '```',
+          '~~~',
+          '## 也不是',
+          '~~~',
+          '<!-- # 註解 -->',
+          '- 清單項目',
+          '---',
+          '#沒有空白不算',
+          '## 結尾',
+        ),
+        'markdown',
+      );
+      assert.deepStrictEqual(outline(r.symbols, false), { 'heading 真的標題': { 'heading 結尾': {} } });
+    });
+  });
+
   describe('Python', () => {
     it('py-class、py-method、py-def：Django view 與 class-based view', () => {
       const r = detect(

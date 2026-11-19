@@ -1,0 +1,138 @@
+import * as assert from 'assert';
+import { applyChanges, isWholeDocumentReplace, LineChange, makeAnchor, neighbor, parseTags, shiftLine, suggestName } from '../../src/bookmarks/model';
+import { addBookmark, emptyStore, parseStore, removeBookmarks, renamePath, serializeStore, setAlias, setFavorite, updateBookmark } from '../../src/storage/marks';
+
+const ins = (line: number, ch: number, text: string): LineChange => ({ startLine: line, startChar: ch, endLine: line, endChar: ch, text });
+const del = (sl: number, sc: number, el: number, ec: number, text = ''): LineChange => ({
+  startLine: sl,
+  startChar: sc,
+  endLine: el,
+  endChar: ec,
+  text,
+});
+
+describe('行號書籤：編輯時平移', () => {
+  it('在書籤上方插入行，書籤往下', () => {
+    assert.deepStrictEqual(shiftLine(10, ins(3, 5, 'a\nb\n')), { line: 12, deleted: false });
+  });
+
+  it('在書籤下方編輯，不變', () => {
+    assert.deepStrictEqual(shiftLine(10, ins(11, 0, 'x\n')), { line: 10, deleted: false });
+  });
+
+  it('在書籤那一行的行首按 Enter：書籤跟著原內容往下', () => {
+    assert.deepStrictEqual(shiftLine(10, ins(10, 0, '\n')), { line: 11, deleted: false });
+  });
+
+  it('在書籤那一行的中間或行尾按 Enter：書籤留在原行', () => {
+    assert.deepStrictEqual(shiftLine(10, ins(10, 4, '\n')), { line: 10, deleted: false });
+  });
+
+  it('刪除書籤上方的行，書籤往上', () => {
+    assert.deepStrictEqual(shiftLine(10, del(2, 0, 5, 0)), { line: 7, deleted: false });
+  });
+
+  it('整行刪除書籤所在的行：移到下一行並標記 deleted', () => {
+    // 選取第 9～10 行整行刪除（從 9:0 到 11:0）
+    assert.deepStrictEqual(shiftLine(10, del(9, 0, 11, 0)), { line: 9, deleted: true });
+  });
+
+  it('刪除範圍剛好結束在書籤行的開頭：書籤那行沒被刪，只是往上', () => {
+    assert.deepStrictEqual(shiftLine(10, del(8, 0, 10, 0)), { line: 8, deleted: false });
+  });
+
+  it('合併行（在上一行行尾按 Delete）：書籤併到上一行', () => {
+    assert.deepStrictEqual(shiftLine(10, del(9, 20, 10, 0)), { line: 9, deleted: false });
+  });
+
+  it('多筆編輯（多游標）由下往上套用', () => {
+    const r = applyChanges({ line: 10 }, [ins(2, 0, 'a\n'), ins(5, 0, 'b\n'), ins(20, 0, 'c\n')], 'moveToNext');
+    assert.deepStrictEqual(r, { line: 12, status: undefined });
+  });
+
+  it('onLineDelete：moveToNext／markLost／remove', () => {
+    const change = [del(9, 0, 11, 0)];
+    assert.deepStrictEqual(applyChanges({ line: 10 }, change, 'moveToNext'), { line: 9, status: undefined });
+    assert.deepStrictEqual(applyChanges({ line: 10 }, change, 'markLost'), { line: 9, status: 'lost' });
+    assert.strictEqual(applyChanges({ line: 10 }, change, 'remove'), undefined);
+  });
+});
+
+describe('行號書籤：存檔與讀回', () => {
+  it('書籤與函式標記存在同一份檔案，可完整讀回；沒有書籤時不輸出 bookmarks 欄位', () => {
+    let d = setFavorite(emptyStore(), { file: 'a.py', path: 'f', kind: 'function' }, true, 1, new Date('2026-11-19T00:00:00Z'));
+    assert.ok(!serializeStore(d).includes('bookmarks'));
+    d = addBookmark(d, {
+      id: 'x1',
+      file: 'a.py',
+      line: 5,
+      label: '登入',
+      tags: ['auth'],
+      note: 'n',
+      anchor: { text: 'login()', before: ['', 'a'], after: ['b', ''], symbolPath: 'f', symbolOffset: 2 },
+      createdAt: 't',
+    });
+    const back = parseStore(serializeStore(d))!;
+    assert.deepStrictEqual(back.bookmarks, d.bookmarks);
+    assert.strictEqual(back.symbols.length, 1);
+  });
+
+  it('修改函式標記不會弄丟書籤；檔案改名時書籤跟著改', () => {
+    let d = addBookmark(emptyStore(), { id: 'x1', file: 'app/a.py', line: 1 });
+    d = setAlias(d, { file: 'app/a.py', path: 'f', kind: 'function' }, '名', 'f');
+    assert.strictEqual(d.bookmarks.length, 1);
+    d = renamePath(d, 'app', 'core');
+    assert.strictEqual(d.bookmarks[0].file, 'core/a.py');
+  });
+
+  it('updateBookmark：沒有變化回傳原物件；回傳 undefined 即刪除', () => {
+    const d = addBookmark(emptyStore(), { id: 'x1', file: 'a.py', line: 1 });
+    assert.strictEqual(updateBookmark(d, 'x1', (b) => b), d);
+    assert.strictEqual(updateBookmark(d, 'x1', (b) => ({ ...b, label: 'L' })).bookmarks[0].label, 'L');
+    assert.strictEqual(updateBookmark(d, 'x1', () => undefined).bookmarks.length, 0);
+    assert.strictEqual(removeBookmarks(d, ['nope']), d);
+  });
+
+  it('整份文件被換掉（git pull、格式化）時不平移', () => {
+    assert.ok(isWholeDocumentReplace([del(0, 0, 99, 0, 'x\n'.repeat(120))], 121));
+    assert.ok(!isWholeDocumentReplace([del(0, 0, 3, 0)], 97));
+    assert.ok(!isWholeDocumentReplace([ins(0, 0, 'x\n'), ins(5, 0, 'y\n')], 102));
+  });
+});
+
+describe('行號書籤：其他工具', () => {
+  const list = [
+    { file: 'b.py', line: 3 },
+    { file: 'a.py', line: 10 },
+    { file: 'a.py', line: 2 },
+  ];
+
+  it('下一個／上一個：跨檔案依序、頭尾相接', () => {
+    assert.deepStrictEqual(neighbor(list, 'a.py', 2, 1), { file: 'a.py', line: 10 });
+    assert.deepStrictEqual(neighbor(list, 'a.py', 5, 1), { file: 'a.py', line: 10 });
+    assert.deepStrictEqual(neighbor(list, 'a.py', 10, 1), { file: 'b.py', line: 3 });
+    assert.deepStrictEqual(neighbor(list, 'b.py', 3, 1), { file: 'a.py', line: 2 });
+    assert.deepStrictEqual(neighbor(list, 'a.py', 2, -1), { file: 'b.py', line: 3 });
+    assert.deepStrictEqual(neighbor(list, 'b.py', 0, -1), { file: 'a.py', line: 10 });
+    assert.deepStrictEqual(neighbor(list, undefined, 0, 1), { file: 'a.py', line: 2 });
+    assert.strictEqual(neighbor([], 'a.py', 0, 1), undefined);
+  });
+
+  it('名稱建議：選取文字 → 游標單字 → 函式名稱 → 該行內容', () => {
+    assert.strictEqual(suggestName({ selection: ' user.save() ', word: 'user', symbolName: 'login', lineText: 'x' }), 'user.save()');
+    assert.strictEqual(suggestName({ selection: 'a\nb', word: 'user', lineText: 'x' }), 'user');
+    assert.strictEqual(suggestName({ symbolName: 'login', lineText: 'x' }), 'login');
+    assert.strictEqual(suggestName({ lineText: '    return render(request)  ' }), 'return render(request)');
+  });
+
+  it('標籤：空白或逗號分隔，# 可有可無，去除重複', () => {
+    assert.deepStrictEqual(parseTags('#auth, api  #auth，待修'), ['auth', 'api', '待修']);
+    assert.deepStrictEqual(parseTags('  '), []);
+  });
+
+  it('anchor：該行、前後各 2 行、函式內偏移', () => {
+    const lines = ['a', ' b ', 'c', 'd', 'e'];
+    assert.deepStrictEqual(makeAnchor(lines, 0, 'f', 0), { text: 'a', before: ['', ''], after: ['b', 'c'], symbolPath: 'f', symbolOffset: 0 });
+    assert.deepStrictEqual(makeAnchor(lines, 3), { text: 'd', before: ['b', 'c'], after: ['e', ''], symbolPath: undefined, symbolOffset: undefined });
+  });
+});

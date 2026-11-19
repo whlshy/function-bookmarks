@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import { BUILTIN_RULES } from '../../src/detection/builtinRules';
-import { detectSymbols, findInnermost, mergeRules } from '../../src/detection/engine';
+import { detectSymbols, findInnermost, mergeRules, renderNameTemplate } from '../../src/detection/engine';
 import { DetectionRule } from '../../src/detection/types';
 import { detect, lines, outline } from './helpers';
 
@@ -164,6 +164,15 @@ describe('detectSymbols 規則引擎', () => {
     assert.strictEqual(findInnermost(r.symbols, 2)?.path, 'C.m');
     assert.strictEqual(findInnermost(r.symbols, 0)?.path, 'C');
     assert.strictEqual(findInnermost(r.symbols, 4), undefined);
+  });
+});
+
+describe('renderNameTemplate 名稱樣板', () => {
+  it('群組、轉大寫、預設值，並整理空白', () => {
+    assert.strictEqual(renderNameTemplate('${type:upper|AJAX} ${url}', { type: 'get', url: '/x' }), 'GET /x');
+    assert.strictEqual(renderNameTemplate('${type:upper|AJAX} ${url}', { url: '/x' }), 'AJAX /x');
+    assert.strictEqual(renderNameTemplate('${a}${b}  ${c}', { b: 'B' }), 'B');
+    assert.strictEqual(renderNameTemplate('fixed', {}), 'fixed');
   });
 });
 

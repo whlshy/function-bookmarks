@@ -1,3 +1,4 @@
+import { LineBookmark } from '../bookmarks/model';
 import { SymbolKindName } from '../detection/types';
 
 /**
@@ -12,6 +13,10 @@ export interface SymbolMark {
   kind: SymbolKindName;
   favorite?: boolean;
   alias?: string;
+  /** 多行備註（Markdown），滑鼠移上去時顯示。 */
+  note?: string;
+  /** 函式書籤的標籤。 */
+  tags?: string[];
   /** 最後已知的名稱所在行（0 起算），找不到函式時的退路。 */
   line?: number;
   addedAt?: string;
@@ -20,6 +25,8 @@ export interface SymbolMark {
 export interface StoreData {
   version: 1;
   symbols: SymbolMark[];
+  /** 行號書籤（M3）。 */
+  bookmarks: LineBookmark[];
 }
 
 export interface MarkKey {
@@ -29,10 +36,10 @@ export interface MarkKey {
 }
 
 export function emptyStore(): StoreData {
-  return { version: 1, symbols: [] };
+  return { version: 1, symbols: [], bookmarks: [] };
 }
 
-const KINDS = new Set<string>(['function', 'method', 'class', 'block', 'partial', 'macro', 'reference']);
+const KINDS = new Set<string>(['function', 'method', 'class', 'block', 'partial', 'macro', 'event', 'request', 'heading', 'reference']);
 
 /** 解析書籤檔；格式不對的項目略過，整份壞掉時回傳 undefined。 */
 export function parseStore(text: string): StoreData | undefined {
@@ -63,6 +70,15 @@ export function parseStore(text: string): StoreData | undefined {
       if (typeof m.alias === 'string' && m.alias.trim()) {
         mark.alias = m.alias;
       }
+      if (typeof m.note === 'string' && m.note.trim()) {
+        mark.note = m.note;
+      }
+      if (Array.isArray(m.tags)) {
+        const tags = m.tags.filter((t): t is string => typeof t === 'string' && !!t.trim());
+        if (tags.length) {
+          mark.tags = tags;
+        }
+      }
       if (typeof m.line === 'number' && m.line >= 0) {
         mark.line = Math.floor(m.line);
       }
@@ -72,7 +88,7 @@ export function parseStore(text: string): StoreData | undefined {
       symbols.push(mark);
     }
   }
-  return { version: 1, symbols: prune(symbols) };
+  return { version: 1, symbols: prune(symbols), bookmarks: parseBookmarks((raw as { bookmarks?: unknown }).bookmarks) };
 }
 
 /** 輸出時依檔案、路徑排序，讓檔案內容穩定、好比對。 */
@@ -88,6 +104,12 @@ export function serializeStore(data: StoreData): string {
       if (m.alias) {
         o.alias = m.alias;
       }
+      if (m.note) {
+        o.note = m.note;
+      }
+      if (m.tags?.length) {
+        o.tags = m.tags;
+      }
       if (m.line !== undefined) {
         o.line = m.line;
       }
@@ -96,16 +118,18 @@ export function serializeStore(data: StoreData): string {
       }
       return o;
     });
-  return `${JSON.stringify({ version: 1, symbols }, null, 2)}\n`;
+  const bookmarks = serializeBookmarks(data.bookmarks ?? []);
+  const out = bookmarks.length ? { version: 1, symbols, bookmarks } : { version: 1, symbols };
+  return `${JSON.stringify(out, null, 2)}\n`;
 }
 
 function same(m: MarkKey, k: MarkKey): boolean {
   return m.file === k.file && m.path === k.path && m.kind === k.kind;
 }
 
-/** 沒有收藏也沒有自訂名稱的項目不必保存。 */
+/** 沒有收藏、自訂名稱、備註的項目不必保存。 */
 function prune(list: SymbolMark[]): SymbolMark[] {
-  return list.filter((m) => m.favorite || m.alias);
+  return list.filter((m) => m.favorite || m.alias || m.note);
 }
 
 export function findMark(data: StoreData, key: MarkKey): SymbolMark | undefined {
@@ -116,7 +140,7 @@ function upsert(data: StoreData, key: MarkKey, patch: (m: SymbolMark) => SymbolM
   const existing = findMark(data, key);
   const next = patch(existing ? { ...existing } : { ...key });
   const others = data.symbols.filter((m) => !same(m, key));
-  return { version: 1, symbols: prune([...others, next]) };
+  return { ...data, symbols: prune([...others, next]) };
 }
 
 export function setFavorite(data: StoreData, key: MarkKey, favorite: boolean, line?: number, now = new Date()): StoreData {
@@ -125,8 +149,10 @@ export function setFavorite(data: StoreData, key: MarkKey, favorite: boolean, li
       m.favorite = true;
       m.addedAt = m.addedAt ?? now.toISOString();
     } else {
+      // 取消書籤時標籤一併移除（自訂名稱與備註保留）
       delete m.favorite;
       delete m.addedAt;
+      delete m.tags;
     }
     if (line !== undefined) {
       m.line = line;
@@ -143,6 +169,51 @@ export function setAlias(data: StoreData, key: MarkKey, alias: string | undefine
       m.alias = value;
     } else {
       delete m.alias;
+    }
+    if (line !== undefined) {
+      m.line = line;
+    }
+    return m;
+  });
+}
+
+/** 設定函式書籤的標籤；空陣列即清除。 */
+export function setTags(data: StoreData, key: MarkKey, tags: string[]): StoreData {
+  return upsert(data, key, (m) => {
+    if (tags.length) {
+      m.tags = tags;
+    } else {
+      delete m.tags;
+    }
+    return m;
+  });
+}
+
+/** 取消某個檔案（或全部檔案）的函式書籤；自訂名稱與備註保留。 */
+export function unfavoriteFiles(data: StoreData, file?: string): StoreData {
+  let changed = false;
+  const symbols = data.symbols.map((m) => {
+    if (!m.favorite || (file !== undefined && m.file !== file)) {
+      return m;
+    }
+    changed = true;
+    const next = { ...m };
+    delete next.favorite;
+    delete next.addedAt;
+    delete next.tags;
+    return next;
+  });
+  return changed ? { ...data, symbols: prune(symbols) } : data;
+}
+
+/** 設定備註；去掉頭尾空白後是空的就清除。保留內部的換行與縮排。 */
+export function setNote(data: StoreData, key: MarkKey, note: string | undefined, line?: number): StoreData {
+  const value = note?.replace(/\r\n/g, '\n').replace(/^\s*\n/, '').trimEnd();
+  return upsert(data, key, (m) => {
+    if (value && value.trim()) {
+      m.note = value;
+    } else {
+      delete m.note;
     }
     if (line !== undefined) {
       m.line = line;
@@ -174,9 +245,170 @@ export function renamePath(data: StoreData, oldRel: string, newRel: string): Sto
     }
     return m;
   });
-  return changed ? { version: 1, symbols } : data;
+  let bmChanged = false;
+  const bookmarks = (data.bookmarks ?? []).map((b) => {
+    if (b.file === oldRel) {
+      bmChanged = true;
+      return { ...b, file: newRel };
+    }
+    if (b.file.startsWith(`${oldRel}/`)) {
+      bmChanged = true;
+      return { ...b, file: newRel + b.file.slice(oldRel.length) };
+    }
+    return b;
+  });
+  return changed || bmChanged ? { ...data, symbols, bookmarks } : data;
 }
 
 export function favorites(data: StoreData): SymbolMark[] {
   return data.symbols.filter((m) => m.favorite);
+}
+
+// ---------------- 行號書籤 ----------------
+
+function strings(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+}
+
+function parseBookmarks(list: unknown): LineBookmark[] {
+  const out: LineBookmark[] = [];
+  if (!Array.isArray(list)) {
+    return out;
+  }
+  for (const item of list) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+    const b = item as Record<string, unknown>;
+    if (typeof b.id !== 'string' || typeof b.file !== 'string' || typeof b.line !== 'number' || b.line < 0) {
+      continue;
+    }
+    const bm: LineBookmark = { id: b.id, file: b.file, line: Math.floor(b.line) };
+    if (typeof b.label === 'string' && b.label.trim()) {
+      bm.label = b.label;
+    }
+    const tags = strings(b.tags).filter((t) => t.trim());
+    if (tags.length) {
+      bm.tags = tags;
+    }
+    if (typeof b.note === 'string' && b.note.trim()) {
+      bm.note = b.note;
+    }
+    const a = b.anchor as Record<string, unknown> | undefined;
+    if (a && typeof a === 'object' && typeof a.text === 'string') {
+      bm.anchor = {
+        text: a.text,
+        before: strings(a.before),
+        after: strings(a.after),
+        symbolPath: typeof a.symbolPath === 'string' ? a.symbolPath : undefined,
+        symbolOffset: typeof a.symbolOffset === 'number' ? a.symbolOffset : undefined,
+      };
+    }
+    if (b.status === 'lost') {
+      bm.status = 'lost';
+    }
+    if (typeof b.createdAt === 'string') {
+      bm.createdAt = b.createdAt;
+    }
+    out.push(bm);
+  }
+  return out;
+}
+
+function serializeBookmarks(list: LineBookmark[]): LineBookmark[] {
+  return [...list]
+    .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.id.localeCompare(b.id))
+    .map((b) => {
+      const o: LineBookmark = { id: b.id, file: b.file, line: b.line };
+      if (b.label) {
+        o.label = b.label;
+      }
+      if (b.tags?.length) {
+        o.tags = b.tags;
+      }
+      if (b.note) {
+        o.note = b.note;
+      }
+      if (b.status === 'lost') {
+        o.status = 'lost';
+      }
+      if (b.anchor) {
+        const a: LineBookmark['anchor'] = { text: b.anchor.text, before: b.anchor.before, after: b.anchor.after };
+        if (b.anchor.symbolPath !== undefined) {
+          a.symbolPath = b.anchor.symbolPath;
+          a.symbolOffset = b.anchor.symbolOffset;
+        }
+        o.anchor = a;
+      }
+      if (b.createdAt) {
+        o.createdAt = b.createdAt;
+      }
+      return o;
+    });
+}
+
+export function findBookmark(data: StoreData, id: string): LineBookmark | undefined {
+  return (data.bookmarks ?? []).find((b) => b.id === id);
+}
+
+export function addBookmark(data: StoreData, bookmark: LineBookmark): StoreData {
+  return { ...data, bookmarks: [...(data.bookmarks ?? []), bookmark] };
+}
+
+export function removeBookmarks(data: StoreData, ids: string[]): StoreData {
+  const set = new Set(ids);
+  const bookmarks = (data.bookmarks ?? []).filter((b) => !set.has(b.id));
+  return bookmarks.length === (data.bookmarks ?? []).length ? data : { ...data, bookmarks };
+}
+
+/** 修改一個書籤；patch 回傳 undefined 表示刪除。沒有變化時回傳原物件。 */
+export function updateBookmark(
+  data: StoreData,
+  id: string,
+  patch: (b: LineBookmark) => LineBookmark | undefined,
+): StoreData {
+  let changed = false;
+  const bookmarks: LineBookmark[] = [];
+  for (const b of data.bookmarks ?? []) {
+    if (b.id !== id) {
+      bookmarks.push(b);
+      continue;
+    }
+    const next = patch({ ...b });
+    if (!next) {
+      changed = true;
+      continue;
+    }
+    if (JSON.stringify(next) !== JSON.stringify(b)) {
+      changed = true;
+    }
+    bookmarks.push(next);
+  }
+  return changed ? { ...data, bookmarks } : data;
+}
+
+/** 一次修改同一個檔案的所有書籤（編輯時平移行號用）。 */
+export function updateBookmarksInFile(
+  data: StoreData,
+  file: string,
+  patch: (b: LineBookmark) => LineBookmark | undefined,
+): StoreData {
+  let changed = false;
+  const bookmarks: LineBookmark[] = [];
+  for (const b of data.bookmarks ?? []) {
+    if (b.file !== file) {
+      bookmarks.push(b);
+      continue;
+    }
+    const next = patch({ ...b });
+    if (!next) {
+      changed = true;
+      continue;
+    }
+    if (next.line !== b.line || next.status !== b.status || JSON.stringify(next.anchor) !== JSON.stringify(b.anchor)) {
+      changed = true;
+    }
+    bookmarks.push(next);
+  }
+  return changed ? { ...data, bookmarks } : data;
 }

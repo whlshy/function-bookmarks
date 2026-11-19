@@ -17,6 +17,8 @@ const EXT_LANGUAGE: Record<string, string> = {
   '.jinja': 'jinja-html',
   '.jinja2': 'jinja-html',
   '.j2': 'jinja-html',
+  '.md': 'markdown',
+  '.markdown': 'markdown',
 };
 
 /**
