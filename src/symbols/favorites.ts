@@ -3,6 +3,7 @@ import { uriKey } from '../util/uris';
 import { findByPath } from '../detection/engine';
 import { DetectedSymbol } from '../detection/types';
 import { updateLine } from '../storage/marks';
+import { reconcileFile } from '../storage/reconcile';
 import { FavoriteEntry, MarkStore } from '../storage/store';
 import { SymbolService } from './symbolService';
 
@@ -96,9 +97,21 @@ export class FavoritesModel implements vscode.Disposable {
   }
 
   private async resolveAll(): Promise<void> {
+    const byFile = new Map<string, Awaited<ReturnType<SymbolService['getForUri']>>>();
+    // 先讀取各檔案的函式，並處理程式碼中改名的情況（把標記轉到新名稱）
+    for (const entry of this.store.allFavorites()) {
+      const key = uriKey(entry.uri);
+      if (byFile.has(key)) {
+        continue;
+      }
+      const file = await this.service.getForUri(entry.uri);
+      byFile.set(key, file);
+      if (file) {
+        await this.store.update(entry.folder, (d) => reconcileFile(d, entry.mark.file, file.symbols));
+      }
+    }
     const entries = this.store.allFavorites();
     const resolved: ResolvedFavorite[] = [];
-    const byFile = new Map<string, Awaited<ReturnType<SymbolService['getForUri']>>>();
     for (const entry of entries) {
       const key = uriKey(entry.uri);
       if (!byFile.has(key)) {

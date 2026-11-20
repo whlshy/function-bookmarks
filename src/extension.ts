@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { BookmarkCommands, isBookmarkLinkArg, revealLine } from './bookmarks/commands';
 import { BookmarkTracker } from './bookmarks/tracker';
+import { ReconcileWatcher } from './storage/reconcileWatcher';
 import { Commands, reveal } from './commands';
 import { readSettings, SECTION } from './config';
 import { TemplateResolver } from './django/resolver';
@@ -40,6 +41,7 @@ export interface ExtensionApi {
   commands: Commands;
   bookmarks: BookmarkCommands;
   tracker: BookmarkTracker;
+  reconciler: ReconcileWatcher;
   gutter: FavoriteGutter;
   notes: NoteEditor;
   refreshNow(): Promise<void>;
@@ -63,6 +65,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
   const commands = new Commands(service, store, resolver, notes);
   const bookmarks = new BookmarkCommands(store, service, notes, favorites);
   const tracker = new BookmarkTracker(store, service);
+  const reconciler = new ReconcileWatcher(store, service);
   const gutter = new FavoriteGutter(context.extensionUri, service, store);
   const hover = new BookmarkHoverProvider(service, store);
   const treeView = vscode.window.createTreeView<TreeNode>(VIEW_ID, {
@@ -184,6 +187,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     vscode.languages.registerHoverProvider({ scheme: 'file' }, hover),
     notes,
     tracker,
+    reconciler,
     treeView,
     reg('functionBookmarks.refresh', () => {
       service.invalidate();
@@ -321,6 +325,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     commands,
     bookmarks,
     tracker,
+    reconciler,
     gutter,
     notes,
     refreshNow,

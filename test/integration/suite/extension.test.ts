@@ -221,10 +221,11 @@ describe('Function Bookmarks（整合測試）', () => {
     it('自訂顯示名稱：樹狀檢視顯示新名稱，提示中保留原名與路徑；清空即恢復', async () => {
       await open(workspaceFile('app', 'views.py'), api);
       const get = findNode(api.provider.currentSymbolNodes, 'ArticleView.get')!;
+      await vscode.commands.executeCommand('functionBookmarks.addFavorite', get);
       await api.commands.rename(get, '文章頁 GET');
       const item = api.provider.getTreeItem(get);
       assert.strictEqual(item.label, '文章頁 GET');
-      assert.ok(item.description?.toString().startsWith('✎'));
+      assert.ok(item.description?.toString().startsWith('★✎'));
       const tip = (item.tooltip as vscode.MarkdownString).value;
       assert.ok(tip.includes('`get`') && tip.includes('`ArticleView.get`'), tip);
       assert.ok(item.contextValue?.includes(':alias'));
@@ -415,6 +416,7 @@ describe('Function Bookmarks（整合測試）', () => {
       const editor = await open(workspaceFile('app', 'views.py'), api);
       const viewsUri = editor.document.uri;
       const post = findNode(api.provider.currentSymbolNodes, 'ArticleView.post')!;
+      await vscode.commands.executeCommand('functionBookmarks.addFavorite', post);
       await vscode.commands.executeCommand('functionBookmarks.editNote', post);
       const noteEditor = vscode.window.activeTextEditor!;
       assert.ok(api.notes.isNoteDocument(noteEditor.document.uri), '應開啟備註分頁');
@@ -445,7 +447,7 @@ describe('Function Bookmarks（整合測試）', () => {
 
       await vscode.window.showTextDocument(viewsUri);
       await api.gutter.update();
-      assert.deepStrictEqual(api.gutter.linesFor(viewsUri, 'note'), [post.symbol.nameLine]);
+      assert.deepStrictEqual(api.gutter.linesFor(viewsUri, 'favorite'), [post.symbol.nameLine], '已加入書籤的函式顯示書籤圖示');
 
       await api.commands.editNote(post, '');
       assert.strictEqual(api.store.get(viewsUri, post.symbol)?.note, undefined);
@@ -465,6 +467,7 @@ describe('Function Bookmarks（整合測試）', () => {
     it('備註分頁不存檔直接關閉：不變更', async () => {
       await open(workspaceFile('app', 'views.py'), api);
       const get = findNode(api.provider.currentSymbolNodes, 'ArticleView.get')!;
+      await vscode.commands.executeCommand('functionBookmarks.addFavorite', get);
       await api.commands.editNote(get, '原本的備註');
       await vscode.commands.executeCommand('functionBookmarks.editNote', get);
       const noteEditor = vscode.window.activeTextEditor!;
@@ -727,6 +730,66 @@ describe('Function Bookmarks（整合測試）', () => {
         assert.deepStrictEqual(await waitFor(() => ours(0, 5), (h) => h.length === 0), [], '設定關閉後不顯示');
       } finally {
         await cfg.update('hover.enabled', undefined, vscode.ConfigurationTarget.Workspace);
+      }
+    });
+
+    it('沒加入書籤的函式不能改名、寫備註；滑鼠提示只顯示「加入書籤」', async () => {
+      await at(0);
+      const node = findNode(api.provider.currentSymbolNodes, 'alpha')!;
+      await api.commands.rename(node, '不該成功');
+      await api.commands.editNote(node, '不該成功');
+      assert.strictEqual(api.store.get(fileC(), node.symbol), undefined);
+      const item = api.provider.getTreeItem(node);
+      assert.ok(/^fbSymbol:nofav/.test(item.contextValue ?? ''), '右鍵選單依此隱藏改名與備註');
+      const hover = ((await vscode.commands.executeCommand<vscode.Hover[]>('vscode.executeHoverProvider', fileC(), new vscode.Position(0, 5))) ?? [])
+        .flatMap((h) => h.contents)
+        .map((c) => (typeof c === 'string' ? c : (c as vscode.MarkdownString).value))
+        .find((v) => v.includes('command:functionBookmarks.hoverAction'))!;
+      assert.ok(hover.includes('%22toggle%22'));
+      assert.ok(!hover.includes('%22rename%22') && !hover.includes('%22note%22'), '未加入書籤時不顯示改名與備註');
+      await vscode.commands.executeCommand('functionBookmarks.addFavorite', node);
+      await api.commands.rename(node, '第一個');
+      assert.strictEqual(api.store.get(fileC(), node.symbol)?.alias, '第一個', '加入書籤後就能改名');
+    });
+
+    it('程式碼中改了函式名稱：書籤、自訂名稱、備註、標籤自動轉到新名稱', async () => {
+      const editor = await at(5);
+      await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+      const beta = findNode(api.provider.currentSymbolNodes, 'beta')!;
+      await api.commands.rename(beta, '第二個');
+      await api.commands.editNote(beta, '說明');
+      await api.commands.editTags(beta, '#api');
+      // 在編輯器裡把 beta 改成 beta_v2（同一行）
+      await editor.edit((b) => b.replace(new vscode.Range(5, 4, 5, 8), 'beta_v2'));
+      const moved = await waitFor(
+        () => api.store.allFavorites().find((f) => f.mark.file === 'app/tmp_mix.py'),
+        (f) => f?.mark.path === 'beta_v2',
+      );
+      assert.deepStrictEqual(
+        { path: moved?.mark.path, alias: moved?.mark.alias, note: moved?.mark.note, tags: moved?.mark.tags },
+        { path: 'beta_v2', alias: '第二個', note: '說明', tags: ['api'] },
+      );
+      await api.favorites.refresh();
+      assert.strictEqual(api.favorites.all.find((f) => f.mark.path === 'beta_v2')?.status, 'ok', '不再顯示找不到函式');
+      await vscode.commands.executeCommand('workbench.action.files.revert');
+    });
+
+    it('檔案沒開著時被外部改了函式名稱（例如 git pull）：背景確認時也會轉移', async () => {
+      await at(0);
+      await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await vscode.workspace.fs.writeFile(fileC(), new TextEncoder().encode(src.replace('def alpha(', 'def alpha_renamed(')));
+      try {
+        const f = await waitFor(
+          async () => {
+            await api.favorites.refresh();
+            return api.favorites.all.find((x) => x.mark.file === 'app/tmp_mix.py');
+          },
+          (x) => x?.mark.path === 'alpha_renamed',
+        );
+        assert.strictEqual(f?.status, 'ok');
+      } finally {
+        await vscode.workspace.fs.writeFile(fileC(), new TextEncoder().encode(src));
       }
     });
 

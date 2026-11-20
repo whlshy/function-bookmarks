@@ -78,16 +78,20 @@ export class BookmarkHoverProvider implements vscode.HoverProvider {
       md.appendMarkdown(`  ${mark.tags.map((t) => `#${escapeMd(t)}`).join(' ')}`);
     }
     md.appendMarkdown('\n\n');
-    md.appendMarkdown(
-      [
-        link(
-          mark?.favorite ? `$(star-full) ${vscode.l10n.t('Remove bookmark')}` : `$(star-empty) ${vscode.l10n.t('Add bookmark')}`,
-          { ...base, action: 'toggle' },
-        ),
-        link(`$(edit) ${vscode.l10n.t('Rename')}`, { ...base, action: 'rename' }),
-        link(`$(note) ${mark?.note ? vscode.l10n.t('Edit note') : vscode.l10n.t('Add note')}`, { ...base, action: 'note' }),
-      ].join(' &nbsp;·&nbsp; '),
-    );
+    // 重新命名、備註只給已加入書籤的函式；已經有名稱或備註的舊資料仍可編輯
+    const links = [
+      link(
+        mark?.favorite ? `$(star-full) ${vscode.l10n.t('Remove bookmark')}` : `$(star-empty) ${vscode.l10n.t('Add bookmark')}`,
+        { ...base, action: 'toggle' },
+      ),
+    ];
+    if (mark?.favorite || mark?.alias) {
+      links.push(link(`$(edit) ${vscode.l10n.t('Rename')}`, { ...base, action: 'rename' }));
+    }
+    if (mark?.favorite || mark?.note) {
+      links.push(link(`$(note) ${mark?.note ? vscode.l10n.t('Edit note') : vscode.l10n.t('Add note')}`, { ...base, action: 'note' }));
+    }
+    md.appendMarkdown(links.join(' &nbsp;·&nbsp; '));
     if (mark?.note) {
       md.appendMarkdown('\n\n---\n\n');
       md.appendMarkdown(mark.note);

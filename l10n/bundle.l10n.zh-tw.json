@@ -62,5 +62,6 @@
   "Remove bookmark": "移除書籤",
   "Rename": "重新命名",
   "Edit note": "編輯備註",
-  "Add note": "加入備註"
+  "Add note": "加入備註",
+  "Add \"{0}\" to bookmarks first to rename it or write a note.": "請先把「{0}」加入書籤，才能重新命名或寫備註。"
 }

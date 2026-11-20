@@ -110,6 +110,12 @@ export class MarkStore implements vscode.Disposable {
     return out;
   }
 
+  /** 這個檔案有沒有函式標記（書籤、自訂名稱、備註）。 */
+  hasSymbolMarks(uri: vscode.Uri): boolean {
+    const loc = this.locate(uri);
+    return !!loc && (this.data.get(uriKey(loc.folder.uri))?.symbols ?? []).some((m) => m.file === loc.rel);
+  }
+
   /** 某個檔案的書籤（依行號排序）。 */
   bookmarksFor(uri: vscode.Uri): LineBookmark[] {
     const loc = this.locate(uri);

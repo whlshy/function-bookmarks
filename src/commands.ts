@@ -110,6 +110,29 @@ export class Commands {
     await this.store.update(loc.folder, (d) => setFavorite(d, loc.key, next, t.line));
   }
 
+  /**
+   * 重新命名、備註只給已加入書籤的函式（老闆 2026-11-20 決定）；已經有名稱或備註的舊資料仍可編輯。
+   * 沒加入書籤時：互動操作會提示並提供「加入書籤」按鈕；帶 value 的非互動呼叫直接略過。
+   */
+  private async requireBookmark(t: Target, loc: { folder: vscode.WorkspaceFolder; key: MarkKey }, existing: boolean, value?: string): Promise<boolean> {
+    if (this.store.get(t.uri, t.key)?.favorite || existing) {
+      return true;
+    }
+    if (value !== undefined) {
+      return false;
+    }
+    const add = vscode.l10n.t('Add bookmark');
+    const pick = await vscode.window.showInformationMessage(
+      vscode.l10n.t('Add "{0}" to bookmarks first to rename it or write a note.', t.key.path),
+      add,
+    );
+    if (pick !== add) {
+      return false;
+    }
+    await this.store.update(loc.folder, (d) => setFavorite(d, loc.key, true, t.line));
+    return true;
+  }
+
   async rename(node?: TreeNode, value?: string): Promise<void> {
     const t = await this.target(node);
     if (!t) {
@@ -117,6 +140,9 @@ export class Commands {
     }
     const loc = this.located(t);
     if (!loc) {
+      return;
+    }
+    if (!(await this.requireBookmark(t, loc, !!this.store.get(t.uri, t.key)?.alias, value))) {
       return;
     }
     const currentAlias = this.store.get(t.uri, t.key)?.alias;
@@ -180,6 +206,9 @@ export class Commands {
     }
     const loc = this.located(t);
     if (!loc) {
+      return;
+    }
+    if (!(await this.requireBookmark(t, loc, !!this.store.get(t.uri, t.key)?.note, value))) {
       return;
     }
     if (value !== undefined) {

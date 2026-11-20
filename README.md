@@ -4,11 +4,11 @@
 
 Bookmarks that survive `git pull` and branch switches, plus a customizable function list with favorites. Works in VS Code and Cursor.
 
-## Current features (0.2.2)
+## Current features (0.2.3)
 
 - **Bookmarks on functions or lines** — `Ctrl+Alt+B` (or right-click a line number) bookmarks the function whose name is on that line, otherwise the line itself; names, tags, notes, next / previous (`Ctrl+Alt+.` / `Ctrl+Alt+,`), search (`Ctrl+Alt+/`); bookmarks follow your edits
 - **Function list** for the current file in its own side bar
-- **Function bookmarks** — hover a function name and click **☆ Add bookmark** (or ☆ in the side bar); listed without opening the file and found again by name after edits and `git pull`
+- **Function bookmarks** — hover a function name and click **☆ Add bookmark** (or ☆ in the side bar); listed without opening the file and found again by name after edits and `git pull` — even when you rename the function
 - **Display names** — rename how a function is shown (F2); hover to see the original name and path
 - **Notes** — multi-line Markdown notes on functions, shown on hover; a gutter icon marks favorites and notes
 - **Whole project** browser and **Search Functions** across the workspace

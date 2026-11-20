@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3 (unreleased)
+
+- **Renaming a function in code no longer breaks its bookmark**: when a function's name changes (in the editor or from outside, e.g. `git pull`), its bookmark, display name, note and tags move to the new name. Matched by the last known line (same line first, then within 3 lines) and kind; only when there is exactly one candidate. Renaming a class carries over its methods too
+- Rename and notes now require the function to be bookmarked first: the hover shows only *☆ Add bookmark* until then, the side bar menu hides *Rename* / *Edit Note*, and the editor commands offer to add the bookmark. Existing display names and notes stay editable
+- "Toggle Bookmark" is now labeled **Add / Remove Bookmark**
+
 ## 0.2.2 (unreleased)
 
 - **Hover a function name** to get a popup with **☆ Add bookmark / ★ Remove bookmark**, **Rename** and **Note** — no extra line above the code. The note is shown in the same popup. Turn off with `functionBookmarks.hover.enabled`

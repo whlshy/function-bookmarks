@@ -2,7 +2,7 @@
   "name": "function-bookmarks",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "publisher": "function-bookmarks",
   "license": "MIT",
   "preview": true,
@@ -301,12 +301,12 @@
         },
         {
           "command": "functionBookmarks.renameDisplayName",
-          "when": "view == functionBookmarks.tree && (viewItem =~ /^fbSymbol(?!.*:ref)/ || viewItem =~ /^fbFavorite/)",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbSymbol:(fav|nofav:alias)/",
           "group": "1_favorite@2"
         },
         {
           "command": "functionBookmarks.editNote",
-          "when": "view == functionBookmarks.tree && (viewItem =~ /^fbSymbol(?!.*:ref)/ || viewItem =~ /^fbFavorite/)",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbSymbol:(fav|nofav(:alias)?:note)/",
           "group": "1_favorite@3"
         },
         {
