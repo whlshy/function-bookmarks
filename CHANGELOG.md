@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0 (unreleased) — everyday comfort (M7) and Marketplace preparation (M8)
+
+- **Numbered bookmarks**: `Ctrl+Alt+Shift+1`–`9` sets (or removes) a number on the current line — adding a bookmark there if needed — and `Ctrl+Alt+1`–`9` jumps to it, across files and workspace folders. Also *Set Bookmark Number…* in the context menus and *Go to Numbered Bookmark…*. Asks before moving a number that is already used. New setting `functionBookmarks.bookmarks.autoNumber` gives new bookmarks the next free number
+- **Colors**: *Set Bookmark Color…* and *Set Tag Color…* (also on a tag when grouping by tag). A bookmark uses its own color, otherwise its first colored tag. The gutter icon, overview ruler and side bar follow
+- The gutter icon shows the bookmark number
+- **Bookmark name at the end of the line** (faint); setting `functionBookmarks.bookmarks.showLabelAtLineEnd`
+- **Hide Bookmark Icons Temporarily** (side bar `…` menu), e.g. to set breakpoints
+- **Status bar**: bookmarks in the current file, plus the source filter and hidden-icon state; click to search. Setting `functionBookmarks.statusBar.enabled`
+- **Test Detection Rules on This File**: highlights what each rule finds, with the rule id at the end and details on hover; updates while you edit
+- Settings are grouped (Bookmarks, Function Detection, Whole Project, Storage and Sharing) and every command has the *Function Bookmarks* category in the Command Palette
+- Extension icon, English and Traditional Chinese README, release workflow for the Marketplace and Open VSX
+- Fix: in a project with only line bookmarks (no function bookmarks), `.vscode/function-bookmarks.json` was never created, so the bookmarks were lost after reopening
+- Tested in a multi-root workspace
+
 ## 0.5.1 (unreleased)
 
 - **Import Bookmarks…** also recognizes the `.vscode/bookmarks.json` of the Bookmarks extension (alefragnani) and adds them as your own bookmarks; the file dialog opens there when the file exists. The separate *Import from Bookmarks (alefragnani)* command is removed

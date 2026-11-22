@@ -25,6 +25,11 @@ export interface FavoriteEntry {
   mark: SymbolMark;
 }
 
+/** 有號碼的書籤。 */
+export type NumberedEntry =
+  | { kind: 'line'; folder: vscode.WorkspaceFolder; uri: vscode.Uri; bookmark: LineBookmark }
+  | { kind: 'symbol'; folder: vscode.WorkspaceFolder; uri: vscode.Uri; mark: SymbolMark };
+
 const STATE_KEY = 'marks:';
 
 /**
@@ -145,6 +150,38 @@ export class MarkStore implements vscode.Disposable {
       }
     }
     return [...out].sort((a, b) => a.localeCompare(b));
+  }
+
+  /** 所有資料夾的標籤顏色（同一個標籤在不同資料夾設了不同顏色時，以第一個資料夾為準）。 */
+  tagColors(): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      for (const [tag, color] of Object.entries(this.data.get(uriKey(folder.uri))?.tagColors ?? {})) {
+        if (!out.has(tag)) {
+          out.set(tag, color);
+        }
+      }
+    }
+    return out;
+  }
+
+  /** 已經用掉的號碼：號碼 → 書籤（行號書籤或函式書籤）。包含目前隱藏的書籤（號碼仍被佔用）。 */
+  numbered(): Map<number, NumberedEntry> {
+    const out = new Map<number, NumberedEntry>();
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      const d = this.data.get(uriKey(folder.uri));
+      for (const bookmark of d?.bookmarks ?? []) {
+        if (bookmark.number && !out.has(bookmark.number)) {
+          out.set(bookmark.number, { kind: 'line', folder, uri: this.uriOf(folder, bookmark.file), bookmark });
+        }
+      }
+      for (const mark of d?.symbols ?? []) {
+        if (mark.favorite && mark.number && !out.has(mark.number)) {
+          out.set(mark.number, { kind: 'symbol', folder, uri: this.uriOf(folder, mark.file), mark });
+        }
+      }
+    }
+    return out;
   }
 
   /** 通知畫面重新整理（例如切換分支後，顯示的書籤不同了）。 */
@@ -327,8 +364,9 @@ export class MarkStore implements vscode.Disposable {
       return;
     }
     const file = this.fileUri(folder);
-    if (data.symbols.length === 0) {
+    if (data.symbols.length === 0 && !(data.bookmarks ?? []).length && !Object.keys(data.tagColors ?? {}).length) {
       // 沒有任何資料時不主動建立檔案；已存在的檔案則更新為空清單
+      // （之前只看函式書籤：專案裡只有行號書籤時不會建立檔案，重開後書籤就不見了）
       const exists = await vscode.workspace.fs.stat(file).then(
         () => true,
         () => false,

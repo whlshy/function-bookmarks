@@ -15,6 +15,7 @@ import { ProjectFiles } from '../symbols/projectFiles';
 import { DirTree } from '../symbols/projectTree';
 import { FileSymbols, SymbolService } from '../symbols/symbolService';
 import { basenamePosix } from '../util/paths';
+import { circled, effectiveColor, paletteColor } from '../bookmarks/decor';
 
 export type SectionId = 'bookmarks' | 'currentFile' | 'project';
 export type FilterMode = 'all' | 'bookmarks';
@@ -482,7 +483,9 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
         vscode.TreeItemCollapsibleState.Expanded,
       );
       item.id = `bmTag:${element.key}`;
-      item.iconPath = new vscode.ThemeIcon('tag');
+      const tc = paletteColor(this.store.tagColors().get(element.key));
+      item.iconPath = new vscode.ThemeIcon('tag', tc ? new vscode.ThemeColor(tc.theme) : undefined);
+      item.contextValue = element.key ? 'fbBmTag' : undefined;
       item.description = String(element.items.length);
       return item;
     }
@@ -499,7 +502,8 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
 
   private bookmarkItem(element: BookmarkNode): vscode.TreeItem {
     const b = element.entry.bookmark;
-    const item = new vscode.TreeItem(bookmarkTitle(b), vscode.TreeItemCollapsibleState.None);
+    const item = new vscode.TreeItem(b.number ? `${circled(b.number)} ${bookmarkTitle(b)}` : bookmarkTitle(b), vscode.TreeItemCollapsibleState.None);
+    const color = paletteColor(effectiveColor(b, this.store.tagColors()));
     item.id = `bm:${element.parent.type === 'bmGroup' ? element.parent.key : ''}:${b.id}`;
     const lost = b.status === 'lost';
     const away = b.status === 'notOnBranch';
@@ -507,9 +511,10 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
       ? new vscode.ThemeIcon('warning', new vscode.ThemeColor('disabledForeground'))
       : away
         ? new vscode.ThemeIcon('git-branch', new vscode.ThemeColor('disabledForeground'))
-        : b.source
-          ? new vscode.ThemeIcon(b.symbol ? 'symbol-method' : 'bookmark', new vscode.ThemeColor(FOREIGN_COLOR))
-          : new vscode.ThemeIcon('bookmark', b.note ? new vscode.ThemeColor(NOTE_COLOR) : undefined);
+        : new vscode.ThemeIcon(
+            b.source && b.symbol ? 'symbol-method' : 'bookmark',
+            color ? new vscode.ThemeColor(color.theme) : b.note ? new vscode.ThemeColor(NOTE_COLOR) : undefined,
+          );
     const parts: string[] = [];
     if (lost) {
       parts.push(vscode.l10n.t('needs checking'));
@@ -689,7 +694,11 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   private favoriteItem(element: FavoriteNode): vscode.TreeItem {
     const { fav } = element;
     const name = fav.mark.path.split('.').pop() ?? fav.mark.path;
-    const item = new vscode.TreeItem(this.favLabel(fav), vscode.TreeItemCollapsibleState.None);
+    const item = new vscode.TreeItem(
+      fav.mark.number ? `${circled(fav.mark.number)} ${this.favLabel(fav)}` : this.favLabel(fav),
+      vscode.TreeItemCollapsibleState.None,
+    );
+    const color = paletteColor(effectiveColor(fav.mark, this.store.tagColors()));
     const byTag = element.parent.type === 'bmGroup' && element.parent.by === 'tag';
     item.id = `fav:${element.parent.type === 'bmGroup' ? element.parent.key : ''}:${fav.uri.toString()}::${fav.mark.kind}:${fav.mark.path}`;
     const line = fav.symbol?.nameLine ?? fav.mark.line;
@@ -701,7 +710,7 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
       parts.push(byTag ? `${basenamePosix(fav.mark.file)}:${line! + 1}` : String(line! + 1));
       item.iconPath = new vscode.ThemeIcon(
         ICONS[fav.mark.kind] ?? 'symbol-misc',
-        fav.mark.note ? new vscode.ThemeColor(NOTE_COLOR) : undefined,
+        color ? new vscode.ThemeColor(color.theme) : fav.mark.note ? new vscode.ThemeColor(NOTE_COLOR) : undefined,
       );
     } else {
       parts.push(fav.status === 'missing' ? vscode.l10n.t('function not found') : vscode.l10n.t('file not found'));

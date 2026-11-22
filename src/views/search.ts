@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { DetectedSymbol } from '../detection/types';
 import { bookmarkTitle, revealLine } from '../bookmarks/commands';
+import { circled } from '../bookmarks/decor';
 import { MarkStore } from '../storage/store';
 import { FavoritesModel } from '../symbols/favorites';
 import { ProjectFiles } from '../symbols/projectFiles';
@@ -121,7 +122,7 @@ export async function searchMarks(store: MarkStore, favorites: FavoritesModel): 
     const desc = [b.tags?.map((t) => `#${t}`).join(' '), b.anchor?.symbolPath].filter(Boolean).join('  ');
     const text = b.label && b.anchor?.text ? `  ·  ${b.anchor.text.slice(0, 80)}` : '';
     items.push({
-      label: `$(bookmark) ${bookmarkTitle(b)}`,
+      label: `$(bookmark) ${b.number ? `${circled(b.number)} ` : ''}${bookmarkTitle(b)}`,
       description: desc,
       detail: `${b.file}:${b.line + 1}${text}`,
       uri: e.uri,
@@ -132,7 +133,7 @@ export async function searchMarks(store: MarkStore, favorites: FavoritesModel): 
     const line = f.symbol?.nameLine ?? f.mark.line ?? 0;
     const name = f.mark.path.split('.').pop() ?? f.mark.path;
     items.push({
-      label: `$(symbol-function) ${f.mark.alias ?? name}`,
+      label: `$(symbol-function) ${f.mark.number ? `${circled(f.mark.number)} ` : ''}${f.mark.alias ?? name}`,
       description: [f.mark.tags?.map((t) => `#${t}`).join(' '), f.mark.alias || f.mark.path !== name ? f.mark.path : '']
         .filter(Boolean)
         .join('  '),

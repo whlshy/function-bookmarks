@@ -17,6 +17,10 @@ export interface SymbolMark {
   note?: string;
   /** 函式書籤的標籤。 */
   tags?: string[];
+  /** 數字快速書籤 1～9。 */
+  number?: number;
+  /** 書籤顏色（色盤 id）。 */
+  color?: string;
   /** 最後已知的名稱所在行（0 起算），找不到函式時的退路。 */
   line?: number;
   addedAt?: string;
@@ -27,6 +31,8 @@ export interface StoreData {
   symbols: SymbolMark[];
   /** 行號書籤（M3）。 */
   bookmarks: LineBookmark[];
+  /** 標籤顏色：標籤 → 色盤 id。 */
+  tagColors?: Record<string, string>;
 }
 
 export interface MarkKey {
@@ -79,6 +85,12 @@ export function parseStore(text: string): StoreData | undefined {
           mark.tags = tags;
         }
       }
+      if (validNumber(m.number)) {
+        mark.number = m.number;
+      }
+      if (typeof m.color === 'string' && m.color) {
+        mark.color = m.color;
+      }
       if (typeof m.line === 'number' && m.line >= 0) {
         mark.line = Math.floor(m.line);
       }
@@ -88,7 +100,29 @@ export function parseStore(text: string): StoreData | undefined {
       symbols.push(mark);
     }
   }
-  return { version: 1, symbols: prune(symbols), bookmarks: parseBookmarks((raw as { bookmarks?: unknown }).bookmarks) };
+  const out: StoreData = { version: 1, symbols: prune(symbols), bookmarks: parseBookmarks((raw as { bookmarks?: unknown }).bookmarks) };
+  const tc = parseTagColors((raw as { tagColors?: unknown }).tagColors);
+  if (tc) {
+    out.tagColors = tc;
+  }
+  return out;
+}
+
+function validNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 9;
+}
+
+function parseTagColors(v: unknown): Record<string, string> | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) {
+    return undefined;
+  }
+  const out: Record<string, string> = {};
+  for (const [tag, color] of Object.entries(v as Record<string, unknown>)) {
+    if (tag && typeof color === 'string' && color) {
+      out[tag] = color;
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 /** 輸出時依檔案、路徑排序，讓檔案內容穩定、好比對。 */
@@ -110,6 +144,12 @@ export function serializeStore(data: StoreData): string {
       if (m.tags?.length) {
         o.tags = m.tags;
       }
+      if (m.number) {
+        o.number = m.number;
+      }
+      if (m.color) {
+        o.color = m.color;
+      }
       if (m.line !== undefined) {
         o.line = m.line;
       }
@@ -119,7 +159,11 @@ export function serializeStore(data: StoreData): string {
       return o;
     });
   const bookmarks = serializeBookmarks(data.bookmarks ?? []);
-  const out = bookmarks.length ? { version: 1, symbols, bookmarks } : { version: 1, symbols };
+  const out: Record<string, unknown> = bookmarks.length ? { version: 1, symbols, bookmarks } : { version: 1, symbols };
+  const tagColors = Object.entries(data.tagColors ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  if (tagColors.length) {
+    out.tagColors = Object.fromEntries(tagColors);
+  }
   return `${JSON.stringify(out, null, 2)}\n`;
 }
 
@@ -149,10 +193,12 @@ export function setFavorite(data: StoreData, key: MarkKey, favorite: boolean, li
       m.favorite = true;
       m.addedAt = m.addedAt ?? now.toISOString();
     } else {
-      // 取消書籤時標籤一併移除（自訂名稱與備註保留）
+      // 取消書籤時標籤、號碼、顏色一併移除（自訂名稱與備註保留）
       delete m.favorite;
       delete m.addedAt;
       delete m.tags;
+      delete m.number;
+      delete m.color;
     }
     if (line !== undefined) {
       m.line = line;
@@ -201,9 +247,70 @@ export function unfavoriteFiles(data: StoreData, file?: string): StoreData {
     delete next.favorite;
     delete next.addedAt;
     delete next.tags;
+    delete next.number;
+    delete next.color;
     return next;
   });
   return changed ? { ...data, symbols: prune(symbols) } : data;
+}
+
+/** 設定函式書籤的號碼與顏色（null 表示清除；undefined 表示不變）。 */
+export function setSymbolExtras(data: StoreData, key: MarkKey, patch: { number?: number | null; color?: string | null }): StoreData {
+  return upsert(data, key, (m) => {
+    if (patch.number === null) {
+      delete m.number;
+    } else if (patch.number !== undefined) {
+      m.number = patch.number;
+    }
+    if (patch.color === null) {
+      delete m.color;
+    } else if (patch.color !== undefined) {
+      m.color = patch.color;
+    }
+    return m;
+  });
+}
+
+/** 從這份資料拿掉某個號碼（交給別的書籤之前先清掉）；`except` 是要保留號碼的那個書籤。 */
+export function clearNumber(data: StoreData, n: number, except?: { bookmarkId?: string; key?: MarkKey }): StoreData {
+  let changed = false;
+  const symbols = data.symbols.map((m) => {
+    if (m.number !== n || (except?.key && same(m, except.key))) {
+      return m;
+    }
+    changed = true;
+    const next = { ...m };
+    delete next.number;
+    return next;
+  });
+  const bookmarks = (data.bookmarks ?? []).map((b) => {
+    if (b.number !== n || b.id === except?.bookmarkId) {
+      return b;
+    }
+    changed = true;
+    const next = { ...b };
+    delete next.number;
+    return next;
+  });
+  return changed ? { ...data, symbols, bookmarks } : data;
+}
+
+/** 設定標籤顏色；color 為 undefined 表示清除。 */
+export function setTagColor(data: StoreData, tag: string, color: string | undefined): StoreData {
+  const next = { ...(data.tagColors ?? {}) };
+  if (color) {
+    next[tag] = color;
+  } else {
+    delete next[tag];
+  }
+  if (JSON.stringify(next) === JSON.stringify(data.tagColors ?? {})) {
+    return data;
+  }
+  const out: StoreData = { ...data, tagColors: next };
+  if (!Object.keys(next).length) {
+    delete out.tagColors;
+  }
+  return out;
 }
 
 /** 設定備註；去掉頭尾空白後是空的就清除。保留內部的換行與縮排。 */
@@ -346,6 +453,12 @@ function parseBookmarks(list: unknown): LineBookmark[] {
     if (sym && typeof sym === 'object' && typeof sym.path === 'string' && typeof sym.kind === 'string') {
       bm.symbol = { path: sym.path, kind: sym.kind };
     }
+    if (validNumber(b.number)) {
+      bm.number = b.number;
+    }
+    if (typeof b.color === 'string' && b.color) {
+      bm.color = b.color;
+    }
     if (typeof b.createdAt === 'string') {
       bm.createdAt = b.createdAt;
     }
@@ -380,6 +493,12 @@ function serializeBookmarks(list: LineBookmark[]): LineBookmark[] {
       }
       if (b.symbol) {
         o.symbol = { ...b.symbol };
+      }
+      if (b.number) {
+        o.number = b.number;
+      }
+      if (b.color) {
+        o.color = b.color;
       }
       if (b.positions && Object.keys(b.positions).length) {
         o.positions = Object.fromEntries(Object.entries(b.positions).sort(([x], [y]) => x.localeCompare(y)));

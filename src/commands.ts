@@ -4,7 +4,8 @@ import { findPartial, splitTemplateTarget } from './django/templates';
 import { findByPath, findInnermost } from './detection/engine';
 import { DetectedSymbol, SymbolKindName } from './detection/types';
 import { parseTags } from './bookmarks/model';
-import { MarkKey, setAlias, setFavorite, setNote, setTags } from './storage/marks';
+import { autoNumbers } from './bookmarks/commands';
+import { MarkKey, setAlias, setFavorite, setNote, setSymbolExtras, setTags, StoreData } from './storage/marks';
 import { MarkStore } from './storage/store';
 import { ResolvedFavorite } from './symbols/favorites';
 import { SymbolService } from './symbols/symbolService';
@@ -107,7 +108,7 @@ export class Commands {
     }
     const current = !!this.store.get(t.uri, t.key)?.favorite;
     const next = value === 'toggle' ? !current : value;
-    await this.store.update(loc.folder, (d) => setFavorite(d, loc.key, next, t.line));
+    await this.store.update(loc.folder, (d) => withAutoNumber(this.store, setFavorite(d, loc.key, next, t.line), loc.key, !current && next));
   }
 
   /**
@@ -168,7 +169,7 @@ export class Commands {
     }
     const key: MarkKey = { file: loc.rel, path, kind };
     const on = !!this.store.get(uri, { path, kind })?.favorite;
-    await this.store.update(loc.folder, (d) => setFavorite(d, key, !on, line));
+    await this.store.update(loc.folder, (d) => withAutoNumber(this.store, setFavorite(d, key, !on, line), key, !on));
   }
 
   /** 編輯函式書籤的標籤。 */
@@ -308,6 +309,12 @@ export class Commands {
     }
     await revealSymbol(n.override.uri, n.override.symbol);
   }
+}
+
+/** 剛加入的函式書籤：設定 autoNumber 開啟時給下一個空號。 */
+function withAutoNumber(store: MarkStore, d: StoreData, key: MarkKey, added: boolean): StoreData {
+  const n = added ? autoNumbers(store, 1)[0] : undefined;
+  return n ? setSymbolExtras(d, key, { number: n }) : d;
 }
 
 export type { FavoriteNode };

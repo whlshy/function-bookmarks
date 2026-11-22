@@ -13,19 +13,23 @@ async function main(): Promise<void> {
   // 切換分支的測試會在工作區裡建立臨時 git 專案；上次中斷留下的先刪掉
   fs.rmSync(path.join(workspace, '.git'), { recursive: true, force: true });
   const exe = process.env.VSCODE_EXECUTABLE;
-  try {
-    await runTests({
+  const run = (target: string, suite: string) =>
+    runTests({
       extensionDevelopmentPath: root,
-      extensionTestsPath: path.resolve(__dirname, 'suite', 'index'),
+      extensionTestsPath: path.resolve(__dirname, suite, 'index'),
       // Cursor 的登入依賴內建擴充，停用擴充會讀不到已存的登入；KEEP_EXTENSIONS=1 時不停用
       launchArgs: [
-        workspace,
+        target,
         ...(process.env.KEEP_EXTENSIONS ? [] : ['--disable-extensions']),
         '--skip-welcome',
         '--skip-release-notes',
       ],
       ...(exe && fs.existsSync(exe) ? { vscodeExecutablePath: exe } : { version: process.env.VSCODE_VERSION ?? 'stable' }),
     });
+  try {
+    await run(workspace, 'suite');
+    // 多資料夾工作區（workspace + workspace2）
+    await run(path.join(root, 'test', 'fixtures', 'multi.code-workspace'), 'multi');
   } catch (err) {
     console.error('整合測試失敗', err);
     process.exit(1);

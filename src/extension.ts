@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import { BookmarkCommands, isBookmarkLinkArg, revealLine } from './bookmarks/commands';
 import { BookmarkTracker } from './bookmarks/tracker';
+import { BookmarkExtras } from './bookmarks/extras';
+import { BookmarkStatusBar } from './views/statusBar';
+import { RuleTester } from './views/ruleTester';
 import { ExternalChangeWatcher } from './bookmarks/externalWatcher';
 import { watchGitHead } from './bookmarks/gitHead';
 import { BranchService } from './git/branchService';
@@ -54,6 +57,9 @@ export interface ExtensionApi {
   branches: BranchService;
   reconciler: ReconcileWatcher;
   gutter: FavoriteGutter;
+  extras: BookmarkExtras;
+  statusBar: BookmarkStatusBar;
+  ruleTester: RuleTester;
   notes: NoteEditor;
   refreshNow(): Promise<void>;
   /** 立即執行一次游標跟隨，回傳被標示的節點。 */
@@ -84,6 +90,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
   const reconciler = new ReconcileWatcher(store, service);
   const gutter = new FavoriteGutter(context.extensionUri, service, store);
   const hover = new BookmarkHoverProvider(service, store);
+  const extras = new BookmarkExtras(store, service, favorites, bookmarks, (fav) => commands.openFavorite(fav));
+  const statusBar = new BookmarkStatusBar(store, favorites, gutter);
+  const ruleTester = new RuleTester(service);
+  const setIconsHidden = async (hide: boolean) => {
+    gutter.hidden = hide;
+    await vscode.commands.executeCommand('setContext', 'functionBookmarks.iconsHidden', hide);
+    statusBar.update();
+  };
+  /** 快捷鍵傳入 { number: 1 }，也可直接傳數字。 */
+  /** 行號右鍵選單傳入 { lineNumber, uri }；編輯器右鍵傳入檔案 Uri（改用游標所在的行）。 */
+  const extrasArg = (arg: unknown) => {
+    const at = lineArg(arg);
+    return at ? { type: 'line', ...at } : arg instanceof vscode.Uri ? undefined : arg;
+  };
+  const numberArg = (arg: unknown): number | undefined =>
+    typeof arg === 'number' ? arg : typeof (arg as { number?: unknown } | undefined)?.number === 'number' ? (arg as { number: number }).number : undefined;
   const treeView = vscode.window.createTreeView<TreeNode>(VIEW_ID, {
     treeDataProvider: provider,
     showCollapseAll: true,
@@ -238,6 +260,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     resolver,
     provider,
     gutter,
+    statusBar,
+    ruleTester,
     vscode.languages.registerHoverProvider({ scheme: 'file' }, hover),
     notes,
     tracker,
@@ -339,6 +363,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     reg('functionBookmarks.renameBookmarkSource', (arg?: unknown, newName?: string) => renameSource(store, sourceArg(arg), newName)),
     reg('functionBookmarks.makeBookmarkMine', (node?: TreeNode) => makeMine(store, entryArg(node))),
     reg('functionBookmarks.clearAllBookmarks', () => bookmarks.clearAll()),
+    // M7：數字快速書籤、顏色、暫時隱藏圖示
+    reg('functionBookmarks.setBookmarkNumber', (node?: unknown, value?: number | 'next' | null, confirmed?: boolean) =>
+      extras.setNumber(extrasArg(node), value, confirmed),
+    ),
+    reg('functionBookmarks.toggleNumberedBookmark', (arg?: unknown, confirmed?: boolean) => {
+      const n = numberArg(arg);
+      return n === undefined ? extras.setNumber(undefined) : extras.toggleNumber(n, confirmed);
+    }),
+    reg('functionBookmarks.goToNumberedBookmark', (arg?: unknown) => extras.goToNumber(numberArg(arg))),
+    reg('functionBookmarks.setBookmarkColor', (node?: unknown, value?: string | null) =>
+      extras.setColor(extrasArg(node), value),
+    ),
+    reg('functionBookmarks.setTagColor', (arg?: unknown, value?: string | null) => extras.setTagColor(arg, value)),
+    reg('functionBookmarks.hideBookmarkIcons', () => setIconsHidden(true)),
+    reg('functionBookmarks.showBookmarkIcons', () => setIconsHidden(false)),
+    reg('functionBookmarks.toggleBookmarkIcons', () => setIconsHidden(!gutter.hidden)),
+    // M8：測試偵測規則
+    reg('functionBookmarks.testDetectionRules', (keep?: boolean) => ruleTester.toggle(keep === true)),
+    reg('functionBookmarks.stopTestingDetectionRules', () => ruleTester.stop()),
     reg('functionBookmarks.nextBookmark', () => bookmarks.go(1)),
     reg('functionBookmarks.previousBookmark', () => bookmarks.go(-1)),
     reg('functionBookmarks.searchBookmarks', () => searchMarks(store, favorites)),
@@ -416,6 +459,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     branches,
     reconciler,
     gutter,
+    extras,
+    statusBar,
+    ruleTester,
     notes,
     refreshNow,
     followCursor,

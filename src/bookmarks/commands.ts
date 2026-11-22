@@ -1,7 +1,20 @@
 import * as vscode from 'vscode';
 import { findInnermost } from '../detection/engine';
 import { DetectedSymbol } from '../detection/types';
-import { addBookmark, findMark, MarkKey, removeBookmarks, setAlias, setFavorite, unfavoriteFiles, updateBookmark, updateBookmarksInFile } from '../storage/marks';
+import { SECTION } from '../config';
+import {
+  addBookmark,
+  findMark,
+  MarkKey,
+  removeBookmarks,
+  setAlias,
+  setFavorite,
+  setSymbolExtras,
+  unfavoriteFiles,
+  updateBookmark,
+  updateBookmarksInFile,
+} from '../storage/marks';
+import { nextFreeNumber } from './decor';
 import { BookmarkEntry, MarkStore } from '../storage/store';
 import { FavoritesModel } from '../symbols/favorites';
 import { SymbolService } from '../symbols/symbolService';
@@ -123,10 +136,16 @@ export class BookmarkCommands {
         toAdd.push(await this.newBookmark(editor.document, rel, line));
       }
     }
+    const numbers = autoNumbers(this.store, toAdd.length + symbolKeys.length);
     await this.store.update(folder, (d) => {
-      let next = toAdd.reduce((acc, b) => addBookmark(acc, b), removeBookmarks(d, toRemove));
+      let next = toAdd.reduce((acc, b) => addBookmark(acc, withNumber(b, numbers)), removeBookmarks(d, toRemove));
       for (const { key, line } of symbolKeys) {
-        next = setFavorite(next, key, !findMark(next, key)?.favorite, line);
+        const on = !findMark(next, key)?.favorite;
+        next = setFavorite(next, key, on, line);
+        const n = on ? numbers.shift() : undefined;
+        if (n) {
+          next = setSymbolExtras(next, key, { number: n });
+        }
       }
       return next;
     });
@@ -168,14 +187,19 @@ export class BookmarkCommands {
     }
     if (namedKey) {
       // 函式名稱那一行：建立函式書籤，名稱即自訂顯示名稱
-      await this.store.update(folder, (d) => setAlias(setFavorite(d, namedKey, true, line), namedKey, label, named!.name, line));
+      const wasOn = !!this.store.get(doc.uri, namedKey)?.favorite;
+      const n = wasOn ? undefined : autoNumbers(this.store, 1)[0];
+      await this.store.update(folder, (d) => {
+        const next = setAlias(setFavorite(d, namedKey, true, line), namedKey, label, named!.name, line);
+        return n ? setSymbolExtras(next, namedKey, { number: n }) : next;
+      });
       return;
     }
     if (existing) {
       await this.store.update(folder, (d) => updateBookmark(d, existing.id, (b) => withLabel(b, label)));
       return;
     }
-    const bm = await this.newBookmark(doc, rel, line, label);
+    const bm = withNumber(await this.newBookmark(doc, rel, line, label), autoNumbers(this.store, 1));
     await this.store.update(folder, (d) => addBookmark(d, bm));
   }
 
@@ -443,6 +467,29 @@ export class BookmarkCommands {
     const subtitle = `${vscode.workspace.asRelativePath(e.uri, false)}:${b.line + 1}${b.tags?.length ? ` · ${b.tags.map((t) => `#${t}`).join(' ')}` : ''}`;
     await this.notes.preview(bookmarkTitle(b), subtitle, b.note ?? '');
   }
+}
+
+/** 設定 `bookmarks.autoNumber` 開啟時，新書籤依序取得的空號（最多 count 個）。 */
+export function autoNumbers(store: MarkStore, count: number): number[] {
+  if (!count || !vscode.workspace.getConfiguration(SECTION).get<boolean>('bookmarks.autoNumber', false)) {
+    return [];
+  }
+  const used = new Set(store.numbered().keys());
+  const out: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const n = nextFreeNumber(used);
+    if (!n) {
+      break;
+    }
+    used.add(n);
+    out.push(n);
+  }
+  return out;
+}
+
+function withNumber(b: LineBookmark, numbers: number[]): LineBookmark {
+  const n = numbers.shift();
+  return n ? { ...b, number: n } : b;
 }
 
 function withLabel(b: LineBookmark, label: string): LineBookmark {

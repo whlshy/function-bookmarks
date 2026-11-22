@@ -38,6 +38,10 @@ export interface LineBookmark {
   source?: BookmarkSource;
   /** 從別人的「函式書籤」匯入：函式的名稱路徑與種類（顯示用；位置照行號書籤跟隨）。 */
   symbol?: { path: string; kind: string };
+  /** 數字快速書籤 1～9（整個視窗內不重複）。 */
+  number?: number;
+  /** 書籤顏色（色盤 id，見 decor.ts）；沒有設定時用標籤的顏色。 */
+  color?: string;
   createdAt?: string;
 }
 

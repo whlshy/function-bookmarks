@@ -1571,6 +1571,235 @@ describe('Function Bookmarks（整合測試）', () => {
     });
   });
 
+  describe('M7：數字快速書籤、顏色、行尾名稱、隱藏圖示、狀態列', () => {
+    const fsp = require('fs/promises') as typeof import('fs/promises');
+    const fileN = () => workspaceFile('app', 'tmp_m7.py');
+    const relN = 'app/tmp_m7.py';
+    const LINES = ['import os', 'x = 1', '', 'def helper(a):', '    return a + 1', '', 'y = 2', 'z = 3'];
+
+    before(async () => {
+      await fsp.writeFile(fileN().fsPath, LINES.join('\n') + '\n');
+    });
+    after(async () => {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await vscode.workspace.getConfiguration('functionBookmarks').update('bookmarks.autoNumber', undefined, vscode.ConfigurationTarget.Workspace);
+      await vscode.workspace.getConfiguration('functionBookmarks').update('bookmarks.showLabelAtLineEnd', undefined, vscode.ConfigurationTarget.Workspace);
+      await vscode.commands.executeCommand('functionBookmarks.showBookmarkIcons');
+      await fsp.rm(fileN().fsPath, { force: true });
+    });
+
+    async function at(line: number): Promise<vscode.TextEditor> {
+      const editor = await vscode.window.showTextDocument(fileN());
+      editor.selection = new vscode.Selection(line, 0, line, 0);
+      await api.refreshNow();
+      return editor;
+    }
+    const lineBm = (line: number) => api.store.bookmarksFor(fileN()).find((b) => b.line === line);
+    const helperMark = () => api.store.get(fileN(), { path: 'helper', kind: 'function' });
+    async function children(): Promise<TreeNode[]> {
+      await api.favorites.refresh();
+      const groups = (await api.provider.getChildren(api.provider.sections.bookmarks)) as BmGroupNode[];
+      const group = groups.find((g) => g.rel === relN);
+      return group ? api.provider.getChildren(group) : [];
+    }
+    const label = (n: TreeNode) => String(api.provider.getTreeItem(n).label);
+    const iconColor = (n: TreeNode) => ((api.provider.getTreeItem(n).iconPath as vscode.ThemeIcon).color as unknown as { id: string } | undefined)?.id;
+
+    it('Ctrl+Alt+Shift+數字：沒有書籤的行直接加入並給號碼；側邊欄與行號旁圖示顯示號碼', async () => {
+      await at(1);
+      await vscode.commands.executeCommand('functionBookmarks.toggleNumberedBookmark', { number: 3 });
+      assert.strictEqual(lineBm(1)?.number, 3);
+      const kids = await children();
+      assert.ok(kids.some((k) => k.type === 'bookmark' && label(k) === '③ x = 1'), kids.map(label).join(', '));
+      await api.gutter.update();
+      assert.strictEqual(api.gutter.iconAt(fileN(), 1), 'bookmark|teal|3');
+      // 再按一次同一個號碼：拿掉號碼，書籤保留
+      await vscode.commands.executeCommand('functionBookmarks.toggleNumberedBookmark', { number: 3 });
+      assert.ok(lineBm(1));
+      assert.strictEqual(lineBm(1)?.number, undefined);
+    });
+
+    it('號碼已被使用：確認後移過來（函式名稱那一行建立函式書籤），取消則不動', async () => {
+      await at(1);
+      await vscode.commands.executeCommand('functionBookmarks.toggleNumberedBookmark', { number: 2 });
+      await at(3);
+      await vscode.commands.executeCommand('functionBookmarks.toggleNumberedBookmark', { number: 2 }, false);
+      assert.strictEqual(helperMark()?.favorite, true, '已建立函式書籤');
+      assert.strictEqual(helperMark()?.number, undefined, '取消時號碼不移動');
+      assert.strictEqual(lineBm(1)?.number, 2);
+      await vscode.commands.executeCommand('functionBookmarks.toggleNumberedBookmark', { number: 2 }, true);
+      assert.strictEqual(helperMark()?.number, 2);
+      assert.strictEqual(lineBm(1)?.number, undefined, '同一個號碼只留一個');
+      const kids = await children();
+      assert.ok(kids.some((k) => k.type === 'favorite' && label(k) === '② helper'), kids.map(label).join(', '));
+      await api.gutter.update();
+      assert.strictEqual(api.gutter.iconAt(fileN(), 3), 'favorite|teal|2');
+    });
+
+    it('Ctrl+Alt+數字跳到書籤（行號書籤與函式書籤）；沒有這個號碼時不跳', async () => {
+      await at(6);
+      await vscode.commands.executeCommand('functionBookmarks.toggleNumberedBookmark', { number: 5 });
+      await at(3);
+      await vscode.commands.executeCommand('functionBookmarks.toggleNumberedBookmark', { number: 1 });
+      await at(0);
+      const r = await vscode.commands.executeCommand<{ line: number }>('functionBookmarks.goToNumberedBookmark', { number: 5 });
+      assert.strictEqual(r?.line, 6);
+      assert.strictEqual(vscode.window.activeTextEditor!.selection.active.line, 6);
+      await vscode.commands.executeCommand('functionBookmarks.goToNumberedBookmark', { number: 1 });
+      assert.strictEqual(vscode.window.activeTextEditor!.selection.active.line, 3, '函式書籤跳到函式名稱');
+      assert.strictEqual(await vscode.commands.executeCommand('functionBookmarks.goToNumberedBookmark', { number: 9 }), undefined);
+      // 從右鍵選單「設定書籤號碼」：下一個空號、拿掉號碼
+      const node = (await children()).find((k) => k.type === 'bookmark') as BookmarkNode;
+      await vscode.commands.executeCommand('functionBookmarks.setBookmarkNumber', node, null);
+      assert.strictEqual(lineBm(6)?.number, undefined);
+      await vscode.commands.executeCommand('functionBookmarks.setBookmarkNumber', node, 'next');
+      assert.strictEqual(lineBm(6)?.number, 2, '下一個空號（1 已被使用）');
+      // 取消函式書籤時號碼一併拿掉
+      await at(3);
+      await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+      assert.strictEqual(helperMark()?.number, undefined);
+      assert.ok(!api.store.numbered().has(1));
+    });
+
+    it('設定 autoNumber：新增的書籤自動給下一個空號', async () => {
+      await vscode.workspace.getConfiguration('functionBookmarks').update('bookmarks.autoNumber', true, vscode.ConfigurationTarget.Workspace);
+      await at(1);
+      await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+      await at(3);
+      await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+      assert.strictEqual(lineBm(1)?.number, 1);
+      assert.strictEqual(helperMark()?.number, 2);
+      // 快捷鍵直接指定號碼時，用指定的號碼（不會因為剛自動給了號碼就當成要拿掉）
+      await at(7);
+      await vscode.commands.executeCommand('functionBookmarks.toggleNumberedBookmark', { number: 3 });
+      assert.strictEqual(lineBm(7)?.number, 3);
+      await vscode.workspace.getConfiguration('functionBookmarks').update('bookmarks.autoNumber', undefined, vscode.ConfigurationTarget.Workspace);
+    });
+
+    it('書籤顏色與標籤顏色：書籤自己的顏色優先，其次是標籤的顏色', async () => {
+      await at(1);
+      await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+      await at(6);
+      await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+      let kids = await children();
+      const first = kids.find((k) => k.type === 'bookmark' && (k as BookmarkNode).entry.bookmark.line === 1) as BookmarkNode;
+      const second = kids.find((k) => k.type === 'bookmark' && (k as BookmarkNode).entry.bookmark.line === 6) as BookmarkNode;
+      await api.bookmarks.editTags(first, '#todo');
+      await api.bookmarks.editTags(second, '#todo');
+      await vscode.commands.executeCommand('functionBookmarks.setTagColor', 'todo', 'green');
+      await vscode.commands.executeCommand('functionBookmarks.setBookmarkColor', second, 'red');
+      kids = await children();
+      const byLine = (l: number) => kids.find((k) => k.type === 'bookmark' && (k as BookmarkNode).entry.bookmark.line === l)!;
+      assert.strictEqual(iconColor(byLine(1)), 'charts.green', '用標籤的顏色');
+      assert.strictEqual(iconColor(byLine(6)), 'charts.red', '書籤自己的顏色優先');
+      await api.gutter.update();
+      assert.strictEqual(api.gutter.iconAt(fileN(), 1), 'bookmark|green|');
+      assert.strictEqual(api.gutter.iconAt(fileN(), 6), 'bookmark|red|');
+      assert.ok((await readStoreFile())?.includes('"tagColors"'), '標籤顏色存在書籤檔');
+      // 依標籤分組時，標籤節點也是這個顏色，可從右鍵設定
+      await vscode.commands.executeCommand('functionBookmarks.groupBookmarksByTag');
+      const tags = (await api.provider.getChildren(api.provider.sections.bookmarks)) as BmGroupNode[];
+      const todo = tags.find((t) => t.key === 'todo')!;
+      assert.strictEqual(api.provider.getTreeItem(todo).contextValue, 'fbBmTag');
+      assert.strictEqual(iconColor(todo), 'charts.green');
+      await vscode.commands.executeCommand('functionBookmarks.setTagColor', todo, null);
+      await vscode.commands.executeCommand('functionBookmarks.groupBookmarksByFile');
+      await vscode.commands.executeCommand('functionBookmarks.setBookmarkColor', second, null);
+      await api.gutter.update();
+      assert.strictEqual(api.gutter.iconAt(fileN(), 1), 'bookmark|teal|', '清除後恢復預設');
+      assert.strictEqual(api.gutter.iconAt(fileN(), 6), 'bookmark|teal|');
+    });
+
+    it('行尾顯示名稱（與號碼），可在設定關閉', async () => {
+      await at(6);
+      await api.bookmarks.addLabeled('第二個變數');
+      await at(1);
+      await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+      await vscode.commands.executeCommand('functionBookmarks.toggleNumberedBookmark', { number: 4 });
+      await api.gutter.update();
+      assert.strictEqual(api.gutter.labelAt(fileN(), 6), '第二個變數');
+      assert.strictEqual(api.gutter.labelAt(fileN(), 1), '④', '沒有名稱時只顯示號碼');
+      await vscode.workspace.getConfiguration('functionBookmarks').update('bookmarks.showLabelAtLineEnd', false, vscode.ConfigurationTarget.Workspace);
+      await api.gutter.update();
+      assert.strictEqual(api.gutter.labelAt(fileN(), 6), undefined);
+      await vscode.workspace.getConfiguration('functionBookmarks').update('bookmarks.showLabelAtLineEnd', undefined, vscode.ConfigurationTarget.Workspace);
+    });
+
+    it('暫時隱藏全部圖示；狀態列顯示目前檔案的書籤數與隱藏、篩選狀態', async () => {
+      await at(1);
+      await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+      await at(3);
+      await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+      await api.favorites.refresh();
+      api.statusBar.update();
+      assert.strictEqual(api.statusBar.text, '$(bookmark) 2');
+      await vscode.commands.executeCommand('functionBookmarks.hideBookmarkIcons');
+      await api.gutter.update();
+      assert.deepStrictEqual(api.gutter.linesFor(fileN(), 'bookmark'), []);
+      assert.deepStrictEqual(api.gutter.linesFor(fileN(), 'favorite'), []);
+      assert.ok(api.statusBar.text?.includes('$(eye-closed)'));
+      assert.ok(api.store.bookmarksFor(fileN()).length === 1, '書籤不受影響');
+      await vscode.commands.executeCommand('functionBookmarks.showBookmarkIcons');
+      await api.gutter.update();
+      assert.deepStrictEqual(api.gutter.linesFor(fileN(), 'bookmark'), [1]);
+      assert.deepStrictEqual(api.gutter.linesFor(fileN(), 'favorite'), [3]);
+      await vscode.commands.executeCommand('functionBookmarks.filterBookmarkSources', ['someone']);
+      api.statusBar.update();
+      assert.ok(api.statusBar.text?.includes('$(filter)'));
+      await vscode.commands.executeCommand('functionBookmarks.filterBookmarkSources', []);
+      api.statusBar.update();
+      assert.strictEqual(api.statusBar.text, '$(bookmark) 2');
+    });
+  });
+
+  describe('M8：測試偵測規則、設定整理', () => {
+    after(async () => {
+      api.ruleTester.stop();
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    });
+
+    it('在目前檔案標示每條規則抓到的函式；再執行一次關閉', async () => {
+      await open(workspaceFile('app', 'views.py'), api);
+      const hits = await vscode.commands.executeCommand<{ ruleId: string; name: string; nameLine: number }[]>('functionBookmarks.testDetectionRules');
+      assert.ok(hits, '應有結果');
+      const got = hits.map((h) => `${h.ruleId}:${h.name}:${h.nameLine}`);
+      assert.ok(got.includes('py-def:index:4'), got.join(', '));
+      assert.ok(got.some((g) => g.startsWith('py-class:ArticleView:')), got.join(', '));
+      assert.ok(got.some((g) => g.endsWith(':get:11')), got.join(', '));
+      assert.ok(api.ruleTester.testing);
+      // 編輯後自動更新
+      const editor = vscode.window.activeTextEditor!;
+      await editor.edit((e) => e.insert(new vscode.Position(0, 0), 'def added():\n    pass\n'));
+      const after = await waitFor(
+        () => api.ruleTester.results,
+        (r) => r.some((h) => h.name === 'added'),
+      );
+      assert.ok(after.some((h) => h.name === 'added' && h.nameLine === 0));
+      await vscode.commands.executeCommand('undo');
+      await vscode.commands.executeCommand('functionBookmarks.testDetectionRules');
+      assert.strictEqual(api.ruleTester.testing, undefined, '再執行一次關閉');
+      assert.deepStrictEqual(api.ruleTester.results, []);
+      await vscode.commands.executeCommand('workbench.action.files.revert');
+    });
+
+    it('設定分成幾個分類並有順序；每個指令在命令選擇區都有分類', () => {
+      const pkg = findExtension()!.packageJSON as {
+        contributes: { configuration: { title: string; properties: Record<string, { order?: number }> }[]; commands: { category?: string }[] };
+      };
+      assert.ok(Array.isArray(pkg.contributes.configuration) && pkg.contributes.configuration.length >= 4);
+      for (const group of pkg.contributes.configuration) {
+        for (const [k, v] of Object.entries(group.properties)) {
+          assert.strictEqual(typeof v.order, 'number', `${k} 沒有 order`);
+        }
+      }
+      assert.ok(pkg.contributes.commands.every((c) => c.category));
+      const all = Object.assign({}, ...pkg.contributes.configuration.map((g) => g.properties));
+      for (const k of ['functionBookmarks.bookmarks.autoNumber', 'functionBookmarks.bookmarks.showLabelAtLineEnd', 'functionBookmarks.statusBar.enabled']) {
+        assert.ok(k in all, k);
+      }
+    });
+  });
+
   describe('M2：Django template 連結與繼承', () => {
     it('點擊 extends 開啟父 template；include 開啟被引入的 template', async () => {
       await open(workspaceFile('app', 'templates', 'app', 'login.html'), api);

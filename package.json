@@ -2,10 +2,15 @@
   "name": "function-bookmarks",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "publisher": "function-bookmarks",
-  "license": "MIT",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#1F3B4D",
+    "theme": "dark"
+  },
   "preview": true,
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/whlshy/function-bookmarks.git"
@@ -22,14 +27,19 @@
   ],
   "keywords": [
     "bookmarks",
+    "bookmark",
     "functions",
     "symbols",
     "outline",
+    "navigation",
+    "git",
+    "branch",
     "django",
     "markdown",
     "jquery",
     "ajax",
-    "mermaid"
+    "numbered bookmarks",
+    "share"
   ],
   "extensionKind": [
     "workspace"
@@ -61,243 +71,300 @@
       {
         "command": "functionBookmarks.refresh",
         "title": "%command.refresh%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(refresh)"
       },
       {
         "command": "functionBookmarks.revealSymbol",
         "title": "%command.revealSymbol%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.openFavorite",
         "title": "%command.revealSymbol%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.openTemplate",
         "title": "%command.openTemplate%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(go-to-file)"
       },
       {
         "command": "functionBookmarks.addFavorite",
         "title": "%command.addFavorite%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(star-empty)"
       },
       {
         "command": "functionBookmarks.removeFavorite",
         "title": "%command.removeFavorite%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(star-full)"
       },
       {
         "command": "functionBookmarks.toggleFavorite",
         "title": "%command.toggleFavorite%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(star)"
       },
       {
         "command": "functionBookmarks.renameDisplayName",
         "title": "%command.renameDisplayName%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(edit)"
       },
       {
         "command": "functionBookmarks.editNote",
         "title": "%command.editNote%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(note)"
       },
       {
         "command": "functionBookmarks.previewNote",
         "title": "%command.previewNote%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(open-preview)"
       },
       {
         "command": "functionBookmarks.goToReferenceLine",
         "title": "%command.goToReferenceLine%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.goToParentBlock",
         "title": "%command.goToParentBlock%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(arrow-up)"
       },
       {
         "command": "functionBookmarks.showAll",
         "title": "%command.showAll%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(filter-filled)"
       },
       {
         "command": "functionBookmarks.searchFunctions",
         "title": "%command.searchFunctions%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(search)"
       },
       {
         "command": "functionBookmarks.revealLine",
         "title": "%command.revealSymbol%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.toggleBookmark",
         "title": "%command.toggleBookmark%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(bookmark)"
       },
       {
         "command": "functionBookmarks.addLabeledBookmark",
         "title": "%command.addLabeledBookmark%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.renameBookmark",
         "title": "%command.renameBookmark%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(edit)"
       },
       {
         "command": "functionBookmarks.setBookmarkBranchOnly",
         "title": "%command.setBookmarkBranchOnly%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.setBookmarkAllBranches",
         "title": "%command.setBookmarkAllBranches%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.hideNotOnBranch",
         "title": "%command.hideNotOnBranch%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.showNotOnBranch",
         "title": "%command.showNotOnBranch%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.cleanBranchRecords",
         "title": "%command.cleanBranchRecords%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.exportBookmarks",
         "title": "%command.exportBookmarks%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(export)"
       },
       {
         "command": "functionBookmarks.importBookmarks",
         "title": "%command.importBookmarks%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(cloud-download)"
       },
       {
         "command": "functionBookmarks.filterBookmarkSources",
         "title": "%command.filterBookmarkSources%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(filter)"
       },
       {
         "command": "functionBookmarks.filterBookmarkSourcesActive",
         "title": "%command.filterBookmarkSourcesActive%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(filter-filled)"
       },
       {
         "command": "functionBookmarks.groupBookmarksBySource",
         "title": "%command.groupBookmarksBySource%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.deleteBookmarkSource",
         "title": "%command.deleteBookmarkSource%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.renameBookmarkSource",
         "title": "%command.renameBookmarkSource%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.makeBookmarkMine",
         "title": "%command.makeBookmarkMine%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.moveBookmarkToCursor",
         "title": "%command.moveBookmarkToCursor%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(target)"
       },
       {
         "command": "functionBookmarks.editBookmarkTags",
         "title": "%command.editBookmarkTags%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(tag)"
       },
       {
         "command": "functionBookmarks.removeBookmark",
         "title": "%command.removeBookmark%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(close)"
       },
       {
         "command": "functionBookmarks.clearBookmarksInFile",
         "title": "%command.clearBookmarksInFile%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(clear-all)"
       },
       {
         "command": "functionBookmarks.clearAllBookmarks",
         "title": "%command.clearAllBookmarks%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(clear-all)"
       },
       {
         "command": "functionBookmarks.nextBookmark",
         "title": "%command.nextBookmark%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(arrow-down)"
       },
       {
         "command": "functionBookmarks.previousBookmark",
         "title": "%command.previousBookmark%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(arrow-up)"
       },
       {
         "command": "functionBookmarks.searchBookmarks",
         "title": "%command.searchBookmarks%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(list-filter)"
       },
       {
         "command": "functionBookmarks.showBookmarksOnly",
         "title": "%command.showBookmarksOnly%",
-        "category": "Function Bookmarks",
+        "category": "%command.category%",
         "icon": "$(bookmark)"
       },
       {
         "command": "functionBookmarks.groupBookmarksByTag",
         "title": "%command.groupBookmarksByTag%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.groupBookmarksByFile",
         "title": "%command.groupBookmarksByFile%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.hoverAction",
         "title": "%command.addFavorite%",
-        "category": "Function Bookmarks"
+        "category": "%command.category%"
+      },
+      {
+        "command": "functionBookmarks.setBookmarkNumber",
+        "title": "%command.setBookmarkNumber%",
+        "icon": "$(symbol-numeric)",
+        "category": "%command.category%"
+      },
+      {
+        "command": "functionBookmarks.toggleNumberedBookmark",
+        "title": "%command.toggleNumberedBookmark%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "functionBookmarks.goToNumberedBookmark",
+        "title": "%command.goToNumberedBookmark%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "functionBookmarks.setBookmarkColor",
+        "title": "%command.setBookmarkColor%",
+        "icon": "$(symbol-color)",
+        "category": "%command.category%"
+      },
+      {
+        "command": "functionBookmarks.setTagColor",
+        "title": "%command.setTagColor%",
+        "icon": "$(symbol-color)",
+        "category": "%command.category%"
+      },
+      {
+        "command": "functionBookmarks.hideBookmarkIcons",
+        "title": "%command.hideBookmarkIcons%",
+        "icon": "$(eye-closed)",
+        "category": "%command.category%"
+      },
+      {
+        "command": "functionBookmarks.showBookmarkIcons",
+        "title": "%command.showBookmarkIcons%",
+        "icon": "$(eye)",
+        "category": "%command.category%"
+      },
+      {
+        "command": "functionBookmarks.toggleBookmarkIcons",
+        "title": "%command.toggleBookmarkIcons%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "functionBookmarks.testDetectionRules",
+        "title": "%command.testDetectionRules%",
+        "icon": "$(beaker)",
+        "category": "%command.category%"
+      },
+      {
+        "command": "functionBookmarks.stopTestingDetectionRules",
+        "title": "%command.stopTestingDetectionRules%",
+        "icon": "$(beaker-stop)",
+        "category": "%command.category%"
       }
     ],
     "menus": {
@@ -381,6 +448,36 @@
           "command": "functionBookmarks.clearAllBookmarks",
           "when": "view == functionBookmarks.tree",
           "group": "3_clear@1"
+        },
+        {
+          "command": "functionBookmarks.goToNumberedBookmark",
+          "when": "view == functionBookmarks.tree",
+          "group": "2_bookmarks@1"
+        },
+        {
+          "command": "functionBookmarks.hideBookmarkIcons",
+          "when": "view == functionBookmarks.tree && !functionBookmarks.iconsHidden",
+          "group": "2_bookmarks@4"
+        },
+        {
+          "command": "functionBookmarks.showBookmarkIcons",
+          "when": "view == functionBookmarks.tree && functionBookmarks.iconsHidden",
+          "group": "2_bookmarks@4"
+        },
+        {
+          "command": "functionBookmarks.setTagColor",
+          "when": "view == functionBookmarks.tree",
+          "group": "2_bookmarks@5"
+        },
+        {
+          "command": "functionBookmarks.testDetectionRules",
+          "when": "view == functionBookmarks.tree && !functionBookmarks.testingRules",
+          "group": "5_tools@1"
+        },
+        {
+          "command": "functionBookmarks.stopTestingDetectionRules",
+          "when": "view == functionBookmarks.tree && functionBookmarks.testingRules",
+          "group": "5_tools@1"
         }
       ],
       "view/item/context": [
@@ -518,6 +615,26 @@
           "command": "functionBookmarks.clearBookmarksInFile",
           "when": "view == functionBookmarks.tree && viewItem == fbBmFile",
           "group": "2_remove@1"
+        },
+        {
+          "command": "functionBookmarks.setBookmarkNumber",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/",
+          "group": "1_style@1"
+        },
+        {
+          "command": "functionBookmarks.setBookmarkColor",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/",
+          "group": "1_style@2"
+        },
+        {
+          "command": "functionBookmarks.setTagColor",
+          "when": "view == functionBookmarks.tree && viewItem == fbBmTag",
+          "group": "inline@1"
+        },
+        {
+          "command": "functionBookmarks.setTagColor",
+          "when": "view == functionBookmarks.tree && viewItem == fbBmTag",
+          "group": "1_tag@1"
         }
       ],
       "editor/context": [
@@ -550,6 +667,16 @@
           "command": "functionBookmarks.previewNote",
           "when": "editorTextFocus",
           "group": "functionBookmarks@4"
+        },
+        {
+          "command": "functionBookmarks.setBookmarkNumber",
+          "when": "editorTextFocus",
+          "group": "functionBookmarks@5"
+        },
+        {
+          "command": "functionBookmarks.setBookmarkColor",
+          "when": "editorTextFocus",
+          "group": "functionBookmarks@6"
         }
       ],
       "commandPalette": [
@@ -608,6 +735,18 @@
         {
           "command": "functionBookmarks.hoverAction",
           "when": "false"
+        },
+        {
+          "command": "functionBookmarks.stopTestingDetectionRules",
+          "when": "functionBookmarks.testingRules"
+        },
+        {
+          "command": "functionBookmarks.hideBookmarkIcons",
+          "when": "!functionBookmarks.iconsHidden"
+        },
+        {
+          "command": "functionBookmarks.showBookmarkIcons",
+          "when": "functionBookmarks.iconsHidden"
         }
       ],
       "explorer/context": [
@@ -624,239 +763,298 @@
         {
           "command": "functionBookmarks.addLabeledBookmark",
           "group": "functionBookmarks@2"
+        },
+        {
+          "command": "functionBookmarks.setBookmarkNumber",
+          "group": "functionBookmarks@3"
+        },
+        {
+          "command": "functionBookmarks.setBookmarkColor",
+          "group": "functionBookmarks@4"
         }
       ]
     },
-    "configuration": {
-      "title": "Function Bookmarks",
-      "properties": {
-        "functionBookmarks.detection.source": {
-          "type": "string",
-          "enum": [
-            "rules",
-            "languageServer",
-            "both"
-          ],
-          "enumDescriptions": [
-            "%config.detection.source.rules%",
-            "%config.detection.source.languageServer%",
-            "%config.detection.source.both%"
-          ],
-          "default": "rules",
-          "markdownDescription": "%config.detection.source%"
-        },
-        "functionBookmarks.detection.rules": {
-          "type": "array",
-          "default": [],
-          "markdownDescription": "%config.detection.rules%",
-          "items": {
-            "type": "object",
-            "required": [
-              "id",
-              "languages",
-              "pattern",
-              "kind",
-              "body"
+    "configuration": [
+      {
+        "id": "functionBookmarks.bookmarks",
+        "title": "%config.category.bookmarks%",
+        "properties": {
+          "functionBookmarks.bookmarks.onLineDelete": {
+            "type": "string",
+            "enum": [
+              "moveToNext",
+              "markLost",
+              "remove"
             ],
-            "properties": {
-              "id": {
-                "type": "string",
-                "description": "%config.rule.id%"
-              },
-              "label": {
-                "type": "string",
-                "description": "%config.rule.label%"
-              },
-              "languages": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "%config.rule.languages%"
-              },
-              "pattern": {
-                "type": "string",
-                "description": "%config.rule.pattern%"
-              },
-              "flags": {
-                "type": "string",
-                "description": "%config.rule.flags%"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "function",
-                  "method",
-                  "class",
-                  "block",
-                  "partial",
-                  "macro",
-                  "event",
-                  "request",
-                  "heading",
-                  "reference"
-                ],
-                "description": "%config.rule.kind%"
-              },
-              "body": {
-                "type": "string",
-                "enum": [
-                  "brace",
-                  "indent",
-                  "pair",
-                  "line",
-                  "call",
-                  "heading",
-                  "embedded"
-                ],
-                "description": "%config.rule.body%"
-              },
-              "end": {
-                "type": "string",
-                "description": "%config.rule.end%"
-              },
-              "embeddedLanguage": {
-                "type": "string",
-                "description": "%config.rule.embeddedLanguage%"
-              },
-              "within": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "%config.rule.within%"
-              },
-              "include": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "%config.rule.include%"
-              },
-              "enabled": {
-                "type": "boolean",
-                "default": true,
-                "description": "%config.rule.enabled%"
-              },
-              "nameTemplate": {
-                "type": "string",
-                "description": "%config.rule.nameTemplate%"
-              },
-              "matchRaw": {
-                "type": "boolean",
-                "description": "%config.rule.matchRaw%"
-              },
-              "hideChildren": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "%config.rule.hideChildren%"
-              }
-            }
+            "enumDescriptions": [
+              "%config.onLineDelete.moveToNext%",
+              "%config.onLineDelete.markLost%",
+              "%config.onLineDelete.remove%"
+            ],
+            "default": "moveToNext",
+            "markdownDescription": "%config.onLineDelete%",
+            "order": 0
+          },
+          "functionBookmarks.bookmarks.autoNumber": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "%config.bookmarks.autoNumber%",
+            "order": 1
+          },
+          "functionBookmarks.bookmarks.showLabelAtLineEnd": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "%config.bookmarks.showLabelAtLineEnd%",
+            "order": 2
+          },
+          "functionBookmarks.statusBar.enabled": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "%config.statusBar.enabled%",
+            "order": 3
+          },
+          "functionBookmarks.hover.enabled": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "%config.hover.enabled%",
+            "order": 4
+          },
+          "functionBookmarks.followCursor": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "%config.followCursor%",
+            "order": 5
           }
-        },
-        "functionBookmarks.detection.disabledRules": {
-          "type": "array",
-          "items": {
-            "type": "string"
+        }
+      },
+      {
+        "id": "functionBookmarks.detection",
+        "title": "%config.category.detection%",
+        "properties": {
+          "functionBookmarks.detection.source": {
+            "type": "string",
+            "enum": [
+              "rules",
+              "languageServer",
+              "both"
+            ],
+            "enumDescriptions": [
+              "%config.detection.source.rules%",
+              "%config.detection.source.languageServer%",
+              "%config.detection.source.both%"
+            ],
+            "default": "rules",
+            "markdownDescription": "%config.detection.source%",
+            "order": 0
           },
-          "default": [
-            "html-id"
-          ],
-          "markdownDescription": "%config.detection.disabledRules%"
-        },
-        "functionBookmarks.detection.templateFiles": {
-          "type": "array",
-          "items": {
-            "type": "string"
+          "functionBookmarks.detection.rules": {
+            "type": "array",
+            "default": [],
+            "markdownDescription": "%config.detection.rules%",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "languages",
+                "pattern",
+                "kind",
+                "body"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "%config.rule.id%"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "%config.rule.label%"
+                },
+                "languages": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "%config.rule.languages%"
+                },
+                "pattern": {
+                  "type": "string",
+                  "description": "%config.rule.pattern%"
+                },
+                "flags": {
+                  "type": "string",
+                  "description": "%config.rule.flags%"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "function",
+                    "method",
+                    "class",
+                    "block",
+                    "partial",
+                    "macro",
+                    "event",
+                    "request",
+                    "heading",
+                    "reference"
+                  ],
+                  "description": "%config.rule.kind%"
+                },
+                "body": {
+                  "type": "string",
+                  "enum": [
+                    "brace",
+                    "indent",
+                    "pair",
+                    "line",
+                    "call",
+                    "heading",
+                    "embedded"
+                  ],
+                  "description": "%config.rule.body%"
+                },
+                "end": {
+                  "type": "string",
+                  "description": "%config.rule.end%"
+                },
+                "embeddedLanguage": {
+                  "type": "string",
+                  "description": "%config.rule.embeddedLanguage%"
+                },
+                "within": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "%config.rule.within%"
+                },
+                "include": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "%config.rule.include%"
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "%config.rule.enabled%"
+                },
+                "nameTemplate": {
+                  "type": "string",
+                  "description": "%config.rule.nameTemplate%"
+                },
+                "matchRaw": {
+                  "type": "boolean",
+                  "description": "%config.rule.matchRaw%"
+                },
+                "hideChildren": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "%config.rule.hideChildren%"
+                }
+              }
+            },
+            "order": 1
           },
-          "default": [
-            "**/templates/**"
-          ],
-          "markdownDescription": "%config.detection.templateFiles%"
-        },
-        "functionBookmarks.django.templateDirs": {
-          "type": "array",
-          "items": {
-            "type": "string"
+          "functionBookmarks.detection.disabledRules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "html-id"
+            ],
+            "markdownDescription": "%config.detection.disabledRules%",
+            "order": 2
           },
-          "default": [],
-          "markdownDescription": "%config.django.templateDirs%"
-        },
-        "functionBookmarks.authorName": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "%config.authorName%"
-        },
-        "functionBookmarks.followCursor": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "%config.followCursor%"
-        },
-        "functionBookmarks.storage": {
-          "type": "string",
-          "enum": [
-            "file",
-            "workspaceState"
-          ],
-          "enumDescriptions": [
-            "%config.storage.file%",
-            "%config.storage.workspaceState%"
-          ],
-          "default": "file",
-          "markdownDescription": "%config.storage%"
-        },
-        "functionBookmarks.project.include": {
-          "type": "string",
-          "default": "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,html,htm,md,markdown}",
-          "markdownDescription": "%config.project.include%"
-        },
-        "functionBookmarks.project.exclude": {
-          "type": "array",
-          "items": {
-            "type": "string"
+          "functionBookmarks.detection.templateFiles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "**/templates/**"
+            ],
+            "markdownDescription": "%config.detection.templateFiles%",
+            "order": 3
           },
-          "default": [
-            "**/node_modules/**",
-            "**/.git/**",
-            "**/.venv/**",
-            "**/venv/**",
-            "**/env/**",
-            "**/__pycache__/**",
-            "**/site-packages/**",
-            "**/dist/**",
-            "**/build/**",
-            "**/out/**",
-            "**/staticfiles/**",
-            "**/.next/**",
-            "**/coverage/**",
-            "**/*.min.js"
-          ],
-          "markdownDescription": "%config.project.exclude%"
-        },
-        "functionBookmarks.bookmarks.onLineDelete": {
-          "type": "string",
-          "enum": [
-            "moveToNext",
-            "markLost",
-            "remove"
-          ],
-          "enumDescriptions": [
-            "%config.onLineDelete.moveToNext%",
-            "%config.onLineDelete.markLost%",
-            "%config.onLineDelete.remove%"
-          ],
-          "default": "moveToNext",
-          "markdownDescription": "%config.onLineDelete%"
-        },
-        "functionBookmarks.hover.enabled": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "%config.hover.enabled%"
+          "functionBookmarks.django.templateDirs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "markdownDescription": "%config.django.templateDirs%",
+            "order": 4
+          }
+        }
+      },
+      {
+        "id": "functionBookmarks.project",
+        "title": "%config.category.project%",
+        "properties": {
+          "functionBookmarks.project.include": {
+            "type": "string",
+            "default": "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,html,htm,md,markdown}",
+            "markdownDescription": "%config.project.include%",
+            "order": 0
+          },
+          "functionBookmarks.project.exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "**/node_modules/**",
+              "**/.git/**",
+              "**/.venv/**",
+              "**/venv/**",
+              "**/env/**",
+              "**/__pycache__/**",
+              "**/site-packages/**",
+              "**/dist/**",
+              "**/build/**",
+              "**/out/**",
+              "**/staticfiles/**",
+              "**/.next/**",
+              "**/coverage/**",
+              "**/*.min.js"
+            ],
+            "markdownDescription": "%config.project.exclude%",
+            "order": 1
+          }
+        }
+      },
+      {
+        "id": "functionBookmarks.storage",
+        "title": "%config.category.storage%",
+        "properties": {
+          "functionBookmarks.storage": {
+            "type": "string",
+            "enum": [
+              "file",
+              "workspaceState"
+            ],
+            "enumDescriptions": [
+              "%config.storage.file%",
+              "%config.storage.workspaceState%"
+            ],
+            "default": "file",
+            "markdownDescription": "%config.storage%",
+            "order": 0
+          },
+          "functionBookmarks.authorName": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "%config.authorName%",
+            "order": 1
+          }
         }
       }
-    },
+    ],
     "keybindings": [
       {
         "command": "functionBookmarks.renameDisplayName",
@@ -889,6 +1087,141 @@
         "command": "functionBookmarks.searchBookmarks",
         "key": "ctrl+alt+/",
         "mac": "cmd+alt+/"
+      },
+      {
+        "command": "functionBookmarks.goToNumberedBookmark",
+        "key": "ctrl+alt+1",
+        "args": {
+          "number": 1
+        }
+      },
+      {
+        "command": "functionBookmarks.goToNumberedBookmark",
+        "key": "ctrl+alt+2",
+        "args": {
+          "number": 2
+        }
+      },
+      {
+        "command": "functionBookmarks.goToNumberedBookmark",
+        "key": "ctrl+alt+3",
+        "args": {
+          "number": 3
+        }
+      },
+      {
+        "command": "functionBookmarks.goToNumberedBookmark",
+        "key": "ctrl+alt+4",
+        "args": {
+          "number": 4
+        }
+      },
+      {
+        "command": "functionBookmarks.goToNumberedBookmark",
+        "key": "ctrl+alt+5",
+        "args": {
+          "number": 5
+        }
+      },
+      {
+        "command": "functionBookmarks.goToNumberedBookmark",
+        "key": "ctrl+alt+6",
+        "args": {
+          "number": 6
+        }
+      },
+      {
+        "command": "functionBookmarks.goToNumberedBookmark",
+        "key": "ctrl+alt+7",
+        "args": {
+          "number": 7
+        }
+      },
+      {
+        "command": "functionBookmarks.goToNumberedBookmark",
+        "key": "ctrl+alt+8",
+        "args": {
+          "number": 8
+        }
+      },
+      {
+        "command": "functionBookmarks.goToNumberedBookmark",
+        "key": "ctrl+alt+9",
+        "args": {
+          "number": 9
+        }
+      },
+      {
+        "command": "functionBookmarks.toggleNumberedBookmark",
+        "key": "ctrl+alt+shift+1",
+        "when": "editorTextFocus",
+        "args": {
+          "number": 1
+        }
+      },
+      {
+        "command": "functionBookmarks.toggleNumberedBookmark",
+        "key": "ctrl+alt+shift+2",
+        "when": "editorTextFocus",
+        "args": {
+          "number": 2
+        }
+      },
+      {
+        "command": "functionBookmarks.toggleNumberedBookmark",
+        "key": "ctrl+alt+shift+3",
+        "when": "editorTextFocus",
+        "args": {
+          "number": 3
+        }
+      },
+      {
+        "command": "functionBookmarks.toggleNumberedBookmark",
+        "key": "ctrl+alt+shift+4",
+        "when": "editorTextFocus",
+        "args": {
+          "number": 4
+        }
+      },
+      {
+        "command": "functionBookmarks.toggleNumberedBookmark",
+        "key": "ctrl+alt+shift+5",
+        "when": "editorTextFocus",
+        "args": {
+          "number": 5
+        }
+      },
+      {
+        "command": "functionBookmarks.toggleNumberedBookmark",
+        "key": "ctrl+alt+shift+6",
+        "when": "editorTextFocus",
+        "args": {
+          "number": 6
+        }
+      },
+      {
+        "command": "functionBookmarks.toggleNumberedBookmark",
+        "key": "ctrl+alt+shift+7",
+        "when": "editorTextFocus",
+        "args": {
+          "number": 7
+        }
+      },
+      {
+        "command": "functionBookmarks.toggleNumberedBookmark",
+        "key": "ctrl+alt+shift+8",
+        "when": "editorTextFocus",
+        "args": {
+          "number": 8
+        }
+      },
+      {
+        "command": "functionBookmarks.toggleNumberedBookmark",
+        "key": "ctrl+alt+shift+9",
+        "when": "editorTextFocus",
+        "args": {
+          "number": 9
+        }
       }
     ],
     "markdown.markdownItPlugins": true,

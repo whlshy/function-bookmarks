@@ -1,48 +1,102 @@
 # Function Bookmarks
 
-> Preview — under active development. The roadmap is in PLAN.md in the repository (Traditional Chinese).
+**Bookmarks that stay on the right line after `git pull`, branch switches and AI edits — plus a function list you can bookmark, rename and annotate.** Works in VS Code and Cursor.
 
-Bookmarks that survive `git pull` and branch switches, plus a customizable function list with favorites. Works in VS Code and Cursor.
+[繁體中文說明](README.zh-TW.md)
 
-## Current features (0.5.0)
+> Preview (0.x). Feedback and bug reports are welcome in the [issue tracker](https://github.com/whlshy/function-bookmarks/issues).
 
-- **Bookmarks on functions or lines** — `Ctrl+Alt+B` (or right-click a line number) bookmarks the function whose name is on that line, otherwise the line itself; names, tags, notes, next / previous (`Ctrl+Alt+.` / `Ctrl+Alt+,`), search (`Ctrl+Alt+/`); bookmarks follow your edits
-- **Follows changes made outside the editor** — `git pull`, branch switches, merges, formatters, scripts and AI edits, even for files that are not open; bookmarks that cannot be found (or sit inside a merge conflict) are marked *needs checking* and can be put back with **Move Bookmark to Cursor**
-- **Branch aware** — each branch remembers its own positions; bookmarks on code that is not on the current branch are shown as *not on this branch* and come back when you switch back; bookmarks can belong to one branch only
-- **Share bookmarks** — export to a file, the clipboard, Markdown or CSV; import a colleague's bookmarks with a source note, filter and group by source; imported bookmarks are placed correctly even if your files differ
-- **Coming from Bookmarks (alefragnani)?** — *Import Bookmarks…* also reads its `.vscode/bookmarks.json` (turn on `bookmarks.saveBookmarksInProject` there first)
-- **Function list** for the current file in its own side bar
-- **Function bookmarks** — hover a function name and click **☆ Add bookmark** (or ☆ in the side bar); listed without opening the file and found again by name after edits and `git pull` — even when you rename the function
-- **Display names** — rename how a function is shown (F2); hover to see the original name and path
-- **Notes** — multi-line Markdown notes on functions, shown on hover; a gutter icon marks favorites and notes
-- **Whole project** browser and **Search Functions** across the workspace
-- **Django templates** — click `extends` / `include` to open the template; see which blocks override the parent template
-- **Customizable detection rules** — decide what counts as a function with regular expressions
-- **Built-in rules**
-  - TypeScript / JavaScript: `function`, arrow functions, function expressions, classes, methods, object methods
-  - Python: `def`, `async def`, `class`, methods
-  - Django templates: `{% block %}`, `{% partialdef %}`, `{% extends %}`, `{% include %}`, functions inside `<script>`
-  - Event listeners and requests: jQuery `.on()` / `.click()`, `addEventListener`, `onclick`, `$.ajax`, `fetch`, `axios` — shown as `#toggleBtn click`, `GET /do_action`
-  - Markdown: headings as a nested table of contents
-- Languages without rules fall back to the language server
-- Click to jump; the function under the cursor is highlighted
+## Why
+
+Most bookmark extensions store a line number and only adjust it while you type. When a file changes on disk — `git pull`, `git checkout`, a merge, a formatter, an AI assistant writing the file — the bookmark stays on the old line number and points at the wrong code.
+
+Function Bookmarks remembers the content around each bookmark and compares the old and new versions of the file, so bookmarks follow the code wherever it moves.
+
+## Features
+
+### Bookmarks that follow the code
+
+- `Ctrl+Alt+B` (or right-click a line number) — on a function name it bookmarks the **function**, anywhere else the **line**
+- Follows edits, `git pull`, branch switches, merges, stashes, formatters, scripts and AI edits — even for files that are not open
+- A bookmark that cannot be found (or sits inside a merge conflict) is marked *needs checking*; put it back with **Move Bookmark to Cursor**
+- **Branch aware**: each branch remembers its own positions; bookmarks on code that is not on the current branch wait until you switch back; a bookmark can belong to one branch only
+- Function bookmarks are found again by name, even after the function is renamed
+
+### Organize and jump
+
+- Names, **tags**, multi-line **Markdown notes** (shown on hover)
+- **Numbered bookmarks**: `Ctrl+Alt+Shift+1`–`9` sets a number on the current line, `Ctrl+Alt+1`–`9` jumps to it
+- **Colors** for bookmarks and tags — the gutter icon and side bar follow
+- The bookmark name shown faintly at the end of the line
+- Next / previous (`Ctrl+Alt+.` / `Ctrl+Alt+,`), search (`Ctrl+Alt+/`), group by file, tag or source
+- **Hide bookmark icons temporarily** (to set breakpoints) from the side bar's `…` menu
+- Status bar: bookmarks in the current file; click to search
+
+### Function list
+
+- The functions of the current file in their own side bar, a **whole project** browser, and **Search Functions**
+- **Display names** (F2) without changing the code; hover to see the original name
+- Built-in detection for TypeScript / JavaScript, Python, Django templates (`{% block %}`, `{% partialdef %}`, `extends` / `include` links, overridden blocks), event listeners and requests (`.on('click')`, `addEventListener`, `$.ajax`, `fetch`, `axios`), and Markdown headings
+- **Your own detection rules** with regular expressions; **Test Detection Rules on This File** shows what each rule finds
+- Other languages fall back to the language server
+
+### Share
+
+- **Export** bookmarks to a file or the clipboard, or as a Markdown table / CSV
+- **Import** a colleague's bookmarks with a source note — they land on the right lines even if your copy of the files is different (no git needed)
+- Filter and group by source; others' bookmarks are purple
+- Coming from **Bookmarks (alefragnani)**? *Import Bookmarks…* reads its `.vscode/bookmarks.json` (turn on `bookmarks.saveBookmarksInProject` there first)
+
+## Keyboard shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+Alt+B` | Add / remove a bookmark (function or line) |
+| `Ctrl+Alt+Shift+B` | Add a named bookmark |
+| `Ctrl+Alt+.` / `Ctrl+Alt+,` | Next / previous bookmark |
+| `Ctrl+Alt+/` | Search bookmarks |
+| `Ctrl+Alt+Shift+1`–`9` | Set / remove number 1–9 on this line |
+| `Ctrl+Alt+1`–`9` | Go to bookmark 1–9 |
+| `F2` (side bar) | Rename display name |
+
+On keyboard layouts where `Ctrl+Alt` works as `AltGr` (for example German), `Ctrl+Alt+digit` may type characters; change these shortcuts in *Keyboard Shortcuts* if needed.
 
 ## Settings
+
+**Bookmarks**
+
+| Setting | Default | Description |
+|---|---|---|
+| `functionBookmarks.bookmarks.onLineDelete` | `moveToNext` | When a bookmarked line is deleted: `moveToNext`, `markLost` or `remove` |
+| `functionBookmarks.bookmarks.autoNumber` | `false` | Give new bookmarks the next free number |
+| `functionBookmarks.bookmarks.showLabelAtLineEnd` | `true` | Show the bookmark name at the end of the line |
+| `functionBookmarks.statusBar.enabled` | `true` | Show bookmark count in the status bar |
+| `functionBookmarks.hover.enabled` | `true` | Popup on function names to add a bookmark, rename, edit the note |
+| `functionBookmarks.followCursor` | `true` | Highlight the function under the cursor in the side bar |
+
+**Function detection**
 
 | Setting | Default | Description |
 |---|---|---|
 | `functionBookmarks.detection.source` | `rules` | `rules`, `languageServer` or `both` |
-| `functionBookmarks.detection.rules` | `[]` | Your own rules; same `id` overrides a built-in rule |
+| `functionBookmarks.detection.rules` | `[]` | Your own rules; the same `id` overrides a built-in rule |
 | `functionBookmarks.detection.disabledRules` | `["html-id"]` | Built-in rule IDs to turn off |
 | `functionBookmarks.detection.templateFiles` | `["**/templates/**"]` | Where the Django / HTML rules apply |
-| `functionBookmarks.authorName` | git `user.name` | Your name in exported bookmarks |
-| `functionBookmarks.followCursor` | `true` | Highlight the function under the cursor |
-| `functionBookmarks.bookmarks.onLineDelete` | `moveToNext` | When a bookmarked line is deleted: `moveToNext`, `markLost` or `remove` |
-| `functionBookmarks.hover.enabled` | `true` | Popup on function names to add a bookmark, rename, edit the note |
-| `functionBookmarks.storage` | `file` | `file` (`.vscode/function-bookmarks.json`) or `workspaceState` |
-| `functionBookmarks.project.include` | `**/*.{ts,tsx,…,py,html,htm}` | Files listed under Whole project and used by search |
-| `functionBookmarks.project.exclude` | `node_modules`, `.venv`, `dist`, … | Excluded from Whole project and search |
 | `functionBookmarks.django.templateDirs` | `[]` | Extra template folders (folders named `templates` are found automatically) |
+
+**Whole project**
+
+| Setting | Default | Description |
+|---|---|---|
+| `functionBookmarks.project.include` | `**/*.{ts,tsx,…,py,html,md}` | Files listed under Whole project and used by search |
+| `functionBookmarks.project.exclude` | `node_modules`, `.venv`, `dist`, … | Excluded from Whole project and search |
+
+**Storage and sharing**
+
+| Setting | Default | Description |
+|---|---|---|
+| `functionBookmarks.storage` | `file` | `file` (`.vscode/function-bookmarks.json`, kept out of git through `.git/info/exclude`) or `workspaceState` |
+| `functionBookmarks.authorName` | git `user.name` | Your name in exported bookmarks |
 
 ### Example rule
 
@@ -58,14 +112,16 @@ Bookmarks that survive `git pull` and branch switches, plus a customizable funct
 ]
 ```
 
-`body` decides how the end of a symbol is found: `brace`, `indent`, `pair` (with `end`), `line` or `embedded` (with `end` and `embeddedLanguage`).
+`body` decides how the end of a symbol is found: `brace`, `indent`, `pair` (with `end`), `line` or `embedded` (with `end` and `embeddedLanguage`). Run **Test Detection Rules on This File** to see what each rule finds.
+
+## Multi-root workspaces and remote development
+
+Each workspace folder keeps its own bookmarks file with relative paths. The extension runs where your files are (`extensionKind: workspace`), so it works over SSH, WSL and Dev Containers.
 
 ## Privacy
 
-This extension does not collect any data.
+This extension does not collect or send any data. Bookmarks are stored in your workspace (`.vscode/function-bookmarks.json`) or in VS Code's workspace storage.
 
----
+## License
 
-## 繁體中文
-
-函式書籤：`git pull`、切換分支都不會位移的書籤，加上可自訂的函式列表與收藏，VS Code 與 Cursor 都能使用。目前為預覽版，開發規劃請見原始碼中的 PLAN.md。
+[MIT](LICENSE)

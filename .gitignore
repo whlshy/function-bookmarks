@@ -6,3 +6,5 @@ out/
 .vscode/function-bookmarks.json
 test/fixtures/workspace/.vscode/
 test/fixtures/workspace/**/tmp_*
+test/fixtures/workspace2/.vscode/
+test/fixtures/workspace2/**/tmp_*

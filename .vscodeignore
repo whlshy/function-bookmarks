@@ -6,6 +6,7 @@
 !package.json
 !package.nls*.json
 !README.md
+!README.zh-TW.md
 !CHANGELOG.md
 !LICENSE
 !ThirdPartyNotices.md

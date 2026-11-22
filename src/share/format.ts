@@ -203,7 +203,8 @@ export function applyImport(data: StoreData, incoming: LineBookmark[], mode: Imp
       return b;
     }
     used.add(k);
-    return { ...next, id: b.id, positions: b.positions, scope: b.scope, homeBranch: b.homeBranch };
+    // 本機自己加的號碼與顏色也保留
+    return { ...next, id: b.id, positions: b.positions, scope: b.scope, homeBranch: b.homeBranch, number: b.number, color: b.color };
   });
   return { ...data, bookmarks: [...merged, ...incoming.filter((b) => !used.has(key(b)))] };
 }
