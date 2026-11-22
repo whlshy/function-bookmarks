@@ -2,7 +2,7 @@
   "name": "function-bookmarks",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "whlshy",
   "icon": "media/icon.png",
   "galleryBanner": {
@@ -55,7 +55,7 @@
         {
           "id": "functionBookmarks",
           "title": "%container.title%",
-          "icon": "media/activity-bar.svg"
+          "icon": "$(function-bookmarks-logo)"
         }
       ]
     },
@@ -909,7 +909,8 @@
                     "line",
                     "call",
                     "heading",
-                    "embedded"
+                    "embedded",
+                    "end"
                   ],
                   "description": "%config.rule.body%"
                 },
@@ -998,7 +999,7 @@
         "properties": {
           "functionBookmarks.project.include": {
             "type": "string",
-            "default": "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,html,htm,md,markdown}",
+            "default": "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,html,htm,md,markdown,c,h,cpp,cc,cxx,hpp,hh,hxx,cu,cuh,m,mm,rs,go,java,kt,kts,swift,cs,php,rb,rake}",
             "markdownDescription": "%config.project.include%",
             "order": 0
           },
@@ -1021,7 +1022,12 @@
               "**/staticfiles/**",
               "**/.next/**",
               "**/coverage/**",
-              "**/*.min.js"
+              "**/*.min.js",
+              "**/target/**",
+              "**/vendor/**",
+              "**/obj/**",
+              "**/.gradle/**",
+              "**/Pods/**"
             ],
             "markdownDescription": "%config.project.exclude%",
             "order": 1
@@ -1228,7 +1234,16 @@
     "markdown.previewScripts": [
       "./dist/mermaid.min.js",
       "./media/mermaid-preview.js"
-    ]
+    ],
+    "icons": {
+      "function-bookmarks-logo": {
+        "description": "Function Bookmarks",
+        "default": {
+          "fontPath": "media/function-bookmarks-icons.woff",
+          "fontCharacter": "\\E001"
+        }
+      }
+    }
   },
   "scripts": {
     "compile": "node esbuild.mjs",

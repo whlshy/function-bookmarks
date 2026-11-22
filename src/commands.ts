@@ -112,7 +112,7 @@ export class Commands {
   }
 
   /**
-   * 重新命名、備註只給已加入書籤的函式（老闆 2026-11-20 決定）；已經有名稱或備註的舊資料仍可編輯。
+   * 重新命名、備註只給已加入書籤的函式（2026-11-20 決定）；已經有名稱或備註的舊資料仍可編輯。
    * 沒加入書籤時：互動操作會提示並提供「加入書籤」按鈕；帶 value 的非互動呼叫直接略過。
    */
   private async requireBookmark(t: Target, loc: { folder: vscode.WorkspaceFolder; key: MarkKey }, existing: boolean, value?: string): Promise<boolean> {

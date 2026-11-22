@@ -23,7 +23,7 @@ describe('M7：書籤外觀（顏色、號碼、圖示）', () => {
     ]);
     assert.strictEqual(effectiveColor({ color: 'green', tags: ['todo'] }, tags), 'green');
     assert.strictEqual(effectiveColor({ tags: ['x', 'auth', 'todo'] }, tags), 'blue');
-    assert.strictEqual(effectiveColor({ tags: ['x'], source: { author: 'henry' } }, tags), 'purple');
+    assert.strictEqual(effectiveColor({ tags: ['x'], source: { author: 'alex' } }, tags), 'purple');
     assert.strictEqual(effectiveColor({ tags: ['x'] }, tags), undefined);
     // 不認得的顏色 id 當成沒設定
     assert.strictEqual(effectiveColor({ color: 'nope', tags: ['todo'] }, { todo: 'red' }), 'red');

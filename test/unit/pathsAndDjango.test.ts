@@ -10,7 +10,11 @@ describe('路徑工具', () => {
     assert.strictEqual(languageForPath('x.TSX'), 'typescriptreact');
     assert.strictEqual(languageForPath('templates/a.html'), 'html');
     assert.strictEqual(languageForPath('Makefile'), undefined);
-    assert.strictEqual(languageForPath('a.go'), undefined);
+    assert.strictEqual(languageForPath('a.go'), 'go');
+    assert.strictEqual(languageForPath('src/lib.rs'), 'rust');
+    assert.strictEqual(languageForPath('include/x.HPP'), 'cpp');
+    assert.strictEqual(languageForPath('x.h'), 'c');
+    assert.strictEqual(languageForPath('a.lua'), undefined);
   });
 
   it('Windows 磁碟代號大小寫不同也能算出相對路徑', () => {

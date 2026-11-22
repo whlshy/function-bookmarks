@@ -125,7 +125,7 @@
   "Import anyway": "仍要匯入",
   "These bookmarks were exported from another repository ({0}).": "這些書籤是從其他專案（{0}）匯出的。",
   "Who are these bookmarks from?": "這些書籤是誰的？",
-  "A source note, e.g. henry.hsu. Bookmarks with the same note are treated as one source and can be filtered.": "來源註記，例如 henry.hsu。相同註記的書籤視為同一個來源，可以用來篩選。",
+  "A source note, e.g. alex.chen. Bookmarks with the same note are treated as one source and can be filtered.": "來源註記，例如 alex.chen。相同註記的書籤視為同一個來源，可以用來篩選。",
   "Enter a source note.": "請輸入來源註記。",
   "Replace": "取代",
   "Merge": "合併",

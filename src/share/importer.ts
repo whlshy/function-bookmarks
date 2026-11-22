@@ -153,7 +153,7 @@ export async function importBookmarks(
     author = (
       await vscode.window.showInputBox({
         title: vscode.l10n.t('Who are these bookmarks from?'),
-        prompt: vscode.l10n.t('A source note, e.g. henry.hsu. Bookmarks with the same note are treated as one source and can be filtered.'),
+        prompt: vscode.l10n.t('A source note, e.g. alex.chen. Bookmarks with the same note are treated as one source and can be filtered.'),
         value: parsed.exportedBy,
         validateInput: (v) => (v.trim() ? undefined : vscode.l10n.t('Enter a source note.')),
       })

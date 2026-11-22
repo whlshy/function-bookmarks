@@ -15,7 +15,7 @@ export interface Settings {
   followCursor: boolean;
 }
 
-export const DEFAULT_PROJECT_INCLUDE = '**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,html,htm,md,markdown}';
+export const DEFAULT_PROJECT_INCLUDE = '**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,html,htm,md,markdown,c,h,cpp,cc,cxx,hpp,hh,hxx,cu,cuh,m,mm,rs,go,java,kt,kts,swift,cs,php,rb,rake}';
 export const DEFAULT_PROJECT_EXCLUDE = [
   '**/node_modules/**',
   '**/.git/**',
@@ -31,6 +31,11 @@ export const DEFAULT_PROJECT_EXCLUDE = [
   '**/.next/**',
   '**/coverage/**',
   '**/*.min.js',
+  '**/target/**',
+  '**/vendor/**',
+  '**/obj/**',
+  '**/.gradle/**',
+  '**/Pods/**',
 ];
 
 export function readSettings(scope?: vscode.ConfigurationScope): Settings {

@@ -1,6 +1,6 @@
 # Function Bookmarks（函式書籤）
 
-**`git pull`、切換分支、AI 改檔之後仍然停在正確那一行的書籤，加上可以加書籤、改名、寫備註的函式列表。** VS Code 與 Cursor 都能使用。
+**替函式和程式碼行加上自己命名的書籤，`git pull` 之後也不會跑掉。** VS Code 與 Cursor 都能使用。
 
 [English](README.md)
 
@@ -36,9 +36,9 @@ Function Bookmarks 會記住每個書籤附近的內容，比對檔案修改前�
 
 - 側邊欄列出目前檔案的函式，還有「整個專案」與「搜尋函式」
 - **自訂顯示名稱**（F2），不改程式碼；滑鼠移上去看原本的名稱
-- 內建偵測：TypeScript／JavaScript、Python、Django template（`{% block %}`、`{% partialdef %}`、`extends`／`include` 連結、覆寫父 template 的 block）、事件與請求（`.on('click')`、`addEventListener`、`$.ajax`、`fetch`、`axios`）、Markdown 標題
+- Django template：`{% block %}`、`extends`／`include` 連結與覆寫的 block；事件與請求（`.on('click')`、`$.ajax`、`fetch`）也會列出
 - 可用正規表示式**自訂偵測規則**；「在這個檔案測試偵測規則」會標出每條規則抓到什麼
-- 沒有規則的語言改用語言伺服器
+- 大多數常用語言不必另外安裝語言擴充就能使用；其他語言改用語言伺服器
 
 ### 分享
 

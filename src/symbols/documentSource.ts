@@ -13,7 +13,9 @@ export interface SourceDoc {
 }
 
 export function fromDocument(doc: vscode.TextDocument): SourceDoc {
-  return { uri: doc.uri, languageId: doc.languageId, text: doc.getText(), version: `v${doc.version}`, document: doc };
+  // 編輯器沒有這個語言的擴充（例如沒裝 Kotlin）時會是純文字：改用副檔名判斷，規則才套得上
+  const languageId = doc.languageId === 'plaintext' ? (languageForPath(doc.uri.path) ?? doc.languageId) : doc.languageId;
+  return { uri: doc.uri, languageId, text: doc.getText(), version: `v${doc.version}`, document: doc };
 }
 
 export function openDocumentFor(uri: vscode.Uri): vscode.TextDocument | undefined {

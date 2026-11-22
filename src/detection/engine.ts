@@ -106,8 +106,12 @@ function matchBrace(masked: string, open: number): number {
   return masked.length;
 }
 
-/** 大括號語言：從比對結束處往後找函式本體。 */
-function findBraceEnd(masked: string, from: number): number {
+/**
+ * 大括號語言：從比對結束處往後找函式本體。
+ * `optionalBody`（Kotlin、Swift）：本體可以省略（data class X(…)、protocol 裡的 func a()），
+ * 也可以是 `= 運算式`；標頭那一行結束、下一行又不是 { 或 : 開頭時就結束。
+ */
+function findBraceEnd(masked: string, from: number, optionalBody = false): number {
   let depth = 0;
   // 規則本身已經比對到 `=>` 時，後面接的是函式本體或運算式
   let afterArrow = masked.slice(Math.max(0, from - 2), from) === '=>';
@@ -135,14 +139,29 @@ function findBraceEnd(masked: string, from: number): number {
     if (c === ';') {
       return i + 1;
     }
+    if (c === '}') {
+      // 外層的範圍先結束了：這個符號沒有本體
+      return i;
+    }
     if (c === '=' && masked[i + 1] === '>') {
       afterArrow = true;
       i++;
       continue;
     }
+    if (optionalBody && c === '=' && masked[i + 1] !== '=' && !'=!<>'.includes(masked[i - 1] ?? '')) {
+      // Kotlin 的 fun x() = 運算式
+      afterArrow = true;
+      continue;
+    }
     if (c === '\n') {
       if (exprStarted) {
         return i;
+      }
+      if (optionalBody && !afterArrow) {
+        const rest = masked.slice(i + 1, i + 200).trimStart();
+        if (!rest.startsWith('{') && !rest.startsWith(':') && !/^where\b/.test(rest)) {
+          return i;
+        }
       }
       continue;
     }
@@ -235,6 +254,34 @@ function findIndentEnd(masked: string, matchStart: number, from: number): number
     pos = le + 1;
   }
   return end;
+}
+
+/**
+ * 以 `end` 結尾的語言（Ruby）：找到縮排與開頭那一行相同（或更外層）的 `end`。
+ * 同一行就結束的寫法（`def x; 1; end`、`def x = 1`）只算那一行。
+ */
+function findEndKeywordEnd(masked: string, matchStart: number, from: number): number {
+  const headerEnd = lineEndOffset(masked, from);
+  const rest = masked.slice(from, headerEnd);
+  if (/(?:^|[;\s])end\b/.test(rest) || /^(?:\([^)]*\))?[ \t]*=[^=~>]/.test(rest)) {
+    return headerEnd;
+  }
+  const lineStart = masked.lastIndexOf('\n', matchStart) + 1;
+  const base = indentWidth(masked.slice(lineStart, lineEndOffset(masked, lineStart)));
+  let pos = headerEnd + 1;
+  let last = headerEnd;
+  while (pos <= masked.length - 1) {
+    const le = lineEndOffset(masked, pos);
+    const line = masked.slice(pos, le);
+    if (line.trim() !== '') {
+      if (indentWidth(line) <= base) {
+        return /^\s*end\b/.test(line) ? le : last;
+      }
+      last = le;
+    }
+    pos = le + 1;
+  }
+  return last;
 }
 
 /** 成對標籤：計算巢狀層數，找到對應的結束標籤。 */
@@ -335,13 +382,16 @@ function collect(
       let endOffset: number;
       switch (c.rule.body) {
         case 'brace':
-          endOffset = findBraceEnd(masked, matchEnd);
+          endOffset = findBraceEnd(masked, matchEnd, c.rule.optionalBody === true);
           break;
         case 'indent':
           endOffset = findIndentEnd(masked, matchStart, matchEnd);
           break;
         case 'pair':
           endOffset = findPairEnd(masked, c, matchEnd);
+          break;
+        case 'end':
+          endOffset = findEndKeywordEnd(masked, matchStart, matchEnd);
           break;
         case 'call':
           endOffset = findCallEnd(masked, matchEnd);

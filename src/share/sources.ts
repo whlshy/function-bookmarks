@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { updateBookmark } from '../storage/marks';
 import { BookmarkEntry, MarkStore } from '../storage/store';
 
-/** 篩選來源：勾選要顯示的來源（我的、henry.hsu…）。`hidden`：測試用，直接指定要隱藏的來源（自己的為空字串）。 */
+/** 篩選來源：勾選要顯示的來源（我的、alex.chen…）。`hidden`：測試用，直接指定要隱藏的來源（自己的為空字串）。 */
 export async function filterSources(store: MarkStore, hidden?: string[]): Promise<void> {
   if (hidden) {
     store.setHiddenSources(hidden);

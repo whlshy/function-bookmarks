@@ -49,7 +49,7 @@ export type BookmarkStatus = 'ok' | 'lost' | 'notOnBranch';
 
 /** 從別人匯入的書籤的來源註記。 */
 export interface BookmarkSource {
-  /** 匯入時輸入的來源註記（例如 henry.hsu）；同一個註記視為同一個來源。 */
+  /** 匯入時輸入的來源註記（例如 alex.chen）；同一個註記視為同一個來源。 */
   author: string;
   /** 這次匯入的批次。 */
   importId: string;

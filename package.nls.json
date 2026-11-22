@@ -1,6 +1,6 @@
 {
   "displayName": "Function Bookmarks",
-  "description": "Bookmarks that survive git pull and branch switches — on functions or on any line — plus a customizable function list. Supports TypeScript, JavaScript, Python, Django templates and Markdown.",
+  "description": "Bookmark functions and lines with your own names. They stay in place after git pull.",
   "container.title": "Function Bookmarks",
   "view.tree.name": "Functions & Bookmarks",
   "command.refresh": "Refresh",
@@ -19,7 +19,7 @@
   "config.rule.pattern": "Regular expression with a (?<name>...) group.",
   "config.rule.flags": "Extra regular expression flags, e.g. i.",
   "config.rule.kind": "Kind of symbol; decides the icon.",
-  "config.rule.body": "How to find where the symbol ends: brace, indent, pair, line or embedded.",
+  "config.rule.body": "How to find where the symbol ends: brace, indent, pair, line, embedded, or end (the next end at the same indentation, as in Ruby).",
   "config.rule.end": "Regular expression for the closing tag (pair) or the end of the region (embedded).",
   "config.rule.embeddedLanguage": "Language whose rules apply inside the region (embedded).",
   "config.rule.within": "Only count the symbol when it is inside one of these kinds, e.g. [\"class\"].",

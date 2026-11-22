@@ -1,6 +1,19 @@
 # Changelog
 
-## 0.6.0 (unreleased) — everyday comfort (M7) and Marketplace preparation (M8)
+## 0.7.0 (2026-11-22) — more languages
+
+- Functions, classes and methods are detected in **C / C++, Rust, Go, Java, C#, Kotlin, Swift, PHP and Ruby** without any language extension: C++ `Class::method`, namespaces and templates; Rust `impl` blocks (`Display for Point`), traits, `mod` and `macro_rules!`; Go methods shown as `Server.Start`; Java / C# annotations, attributes, constructors and `=>` bodies; Kotlin data classes and `= expression` functions; PHP only inside `<?php ?>`; Ruby `def` … `end` by indentation
+- Declarations without a body (prototypes, abstract and interface methods) are not listed; comments and strings of each language (raw strings, Rust lifetimes, C# verbatim strings, heredocs, text blocks) are ignored
+- Whole Project and Search Functions include these files; `target`, `vendor`, `obj`, `.gradle` and `Pods` folders are excluded by default
+- Files the editor opens as plain text (for example Kotlin without a Kotlin extension) are detected by their file extension
+- New rule body type `end` for your own rules (languages that end blocks with `end`)
+- Checked against a real project (React front end, Python back end, Markdown docs) and compared with the TypeScript and Python parsers. Fixes: Python functions no longer end early when a multi-line string starts or ends at column 0 (embedded JS, Jira text); a class or def whose body is only a docstring covers the whole docstring; `const el = (<Tag …/>)` and `const v = (() => …)()` are no longer listed as functions; arrow functions with calls in default parameters and `useCallback(` with the function on the next line are found; a BOM at the start of a file no longer hides the first heading or `def`
+- **React / JSX**: components wrapped in `memo`, `forwardRef` or `observer` and functions in `useCallback` are listed; text and attribute values inside JSX (`<p>Don't</p>`, `</a>`) no longer confuse brace matching in `.js`, `.jsx` and `.tsx` files
+- Shorter extension description: bookmarks on functions and lines with your own names
+- README: shorter introduction; examples use a fictional name
+- The side bar icon is now an icon font, so it is as bright as the built-in icons (image icons were drawn dimmer in Cursor's toolbar)
+
+## 0.6.0 (2026-11-22) — everyday comfort (M7) and Marketplace preparation (M8)
 
 - **Numbered bookmarks**: `Ctrl+Alt+Shift+1`–`9` sets (or removes) a number on the current line — adding a bookmark there if needed — and `Ctrl+Alt+1`–`9` jumps to it, across files and workspace folders. Also *Set Bookmark Number…* in the context menus and *Go to Numbered Bookmark…*. Asks before moving a number that is already used. New setting `functionBookmarks.bookmarks.autoNumber` gives new bookmarks the next free number
 - **Colors**: *Set Bookmark Color…* and *Set Tag Color…* (also on a tag when grouping by tag). A bookmark uses its own color, otherwise its first colored tag. The gutter icon, overview ruler and side bar follow
@@ -22,9 +35,9 @@
 
 - **Export Bookmarks…**: all, by tag, the current file, chosen bookmarks, or a file / folder from the Explorer context menu. Line and function bookmarks. Save as `*.fbookmarks.json` or copy to the clipboard (both can be imported), or export a **Markdown table** / **CSV file**
 - A warning before exporting that the export contains code, with a *Without code* option
-- **Import Bookmarks…** from a file or the clipboard: enter a source note (defaults to the exporter, e.g. `henry.hsu`), preview, and **replace** or **merge** when the same source was imported before. Warns when the export comes from another repository
+- **Import Bookmarks…** from a file or the clipboard: enter a source note (defaults to the exporter, e.g. `alex.chen`), preview, and **replace** or **merge** when the same source was imported before. Warns when the export comes from another repository
 - Imported bookmarks land on the right lines even if your copy of the file is different: the export carries a hash of every line of the bookmarked files, compared with your files (no git needed — works when the other person has not pushed yet). Function bookmarks are found by name
-- **Filter by Source…**: check which sources to show (mine, henry.hsu, …); hidden sources disappear from the side bar, gutter, next / previous and search. **Group Bookmarks by Source**
+- **Filter by Source…**: check which sources to show (mine, alex.chen, …); hidden sources disappear from the side bar, gutter, next / previous and search. **Group Bookmarks by Source**
 - Others' bookmarks have a purple icon and show their source on hover
 - Rename a source, delete all bookmarks from a source, **Make It Mine**
 - New setting `functionBookmarks.authorName` (defaults to git `user.name`)

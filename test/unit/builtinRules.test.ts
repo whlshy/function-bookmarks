@@ -57,6 +57,7 @@ describe('內建規則', () => {
         'function c',
         'function d',
         'function e',
+        'function f', // useCallback 包起來的也算（ts-wrapped）；const g = 1 不算
       ]);
     });
 
@@ -151,7 +152,7 @@ describe('內建規則', () => {
     });
   });
 
-  describe('事件監聽與 ajax（老闆回饋的實際程式碼）', () => {
+  describe('事件監聽與 ajax（實際專案的程式碼）', () => {
     const snippet = lines(
       "$('#toggleBtn').on('click', function(e) {", // 0
       '    e.preventDefault();  // 防止按鈕預設行為', // 1

@@ -322,7 +322,7 @@ describe('Function Bookmarks（整合測試）', () => {
     it('依資料夾列出檔案，展開檔案才讀取函式', async () => {
       const top = await api.provider.getChildren(api.provider.sections.project);
       const labels = top.map((n) => api.provider.getTreeItem(n).label);
-      assert.deepStrictEqual(labels, ['app', 'docs', 'static', 'templates']);
+      assert.deepStrictEqual(labels, ['app', 'docs', 'langs', 'static', 'templates']);
       const app = top[0] as DirNode;
       const appChildren = await api.provider.getChildren(app);
       const views = appChildren.find((n): n is FileNode => n.type === 'file' && n.rel === 'app/views.py')!;
@@ -340,7 +340,7 @@ describe('Function Bookmarks（整合測試）', () => {
     });
   });
 
-  describe('M2.1：老闆回饋', () => {
+  describe('M2.1：使用回饋', () => {
     it('切換檔案再回來，函式的收合狀態維持不變', async () => {
       await open(workspaceFile('app', 'views.py'), api);
       const cls = findNode(api.provider.currentSymbolNodes, 'ArticleView')!;
@@ -1410,7 +1410,7 @@ describe('Function Bookmarks（整合測試）', () => {
         includeCode,
         target: 'clipboard',
       }))!;
-    const importText = (t: string, author = 'henry.hsu', mode: 'replace' | 'merge' = 'replace') =>
+    const importText = (t: string, author = 'alex.chen', mode: 'replace' | 'merge' = 'replace') =>
       vscode.commands.executeCommand<{ imported: number; lost: number }>('functionBookmarks.importBookmarks', { text: t, folder: folder(), author, mode, confirmed: true });
     const foreign = () => api.store.bookmarksFor(fileA()).filter((b) => b.source);
 
@@ -1448,9 +1448,9 @@ describe('Function Bookmarks（整合測試）', () => {
       assert.deepStrictEqual({ imported: r.imported, lost: r.lost }, { imported: 3, lost: 0 });
       const got = foreign().map((b) => [b.line, mine[b.line].trim(), b.source?.author, b.symbol?.path]);
       assert.deepStrictEqual(got, [
-        [5, 'def helper(payload):', 'henry.hsu', 'helper'],
-        [6, 'data = json.loads(payload)', 'henry.hsu', undefined],
-        [13, 'article.title = request.POST["title"]', 'henry.hsu', undefined],
+        [5, 'def helper(payload):', 'alex.chen', 'helper'],
+        [6, 'data = json.loads(payload)', 'alex.chen', undefined],
+        [13, 'article.title = request.POST["title"]', 'alex.chen', undefined],
       ]);
       const labeled = foreign().find((b) => b.label === '改標題')!;
       assert.deepStrictEqual([labeled.tags, labeled.note], [['article'], '要檢查權限']);
@@ -1463,9 +1463,9 @@ describe('Function Bookmarks（整合測試）', () => {
       const g = groups.find((x) => (x as BmGroupNode).rel === relA)!;
       const node = (await api.provider.getChildren(g)).find((n) => (n as BookmarkNode).entry?.bookmark.label === '改標題') as BookmarkNode;
       const item = api.provider.getTreeItem(node);
-      assert.ok(String(item.description).includes('@henry.hsu'));
+      assert.ok(String(item.description).includes('@alex.chen'));
       assert.ok(String(item.contextValue).includes(':foreign'));
-      assert.ok((item.tooltip as vscode.MarkdownString).value.replace(/\\/g, '').includes('From henry.hsu'));
+      assert.ok((item.tooltip as vscode.MarkdownString).value.replace(/\\/g, '').includes('From alex.chen'));
       await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     });
 
@@ -1478,7 +1478,7 @@ describe('Function Bookmarks（整合測試）', () => {
       const data = JSON.parse(exported) as Exported;
       data.bookmarks.find((b) => b.label === '改標題')!.label = '改標題（新）';
       data.bookmarks.push({ ...data.bookmarks[0], kind: 'line', line: 12, label: '新的', anchor: undefined, path: undefined, id: 'new-one' } as never);
-      await importText(JSON.stringify(data), 'henry.hsu', 'merge');
+      await importText(JSON.stringify(data), 'alex.chen', 'merge');
       assert.deepStrictEqual(foreign().map((b) => b.label ?? '').sort(), ['', '', '改標題（新）', '新的'].sort());
       assert.strictEqual(api.store.bookmarksFor(fileA()).filter((b) => !b.source).length, 2, '自己的兩個行號書籤還在');
     });
@@ -1505,9 +1505,9 @@ describe('Function Bookmarks（整合測試）', () => {
       let groups = (await api.provider.getChildren(api.provider.sections.bookmarks)) as BmGroupNode[];
       assert.deepStrictEqual(groups.map((g) => [g.key, g.items.length]), [
         ['', 3],
-        ['henry.hsu', 3],
+        ['alex.chen', 3],
       ]);
-      await vscode.commands.executeCommand('functionBookmarks.filterBookmarkSources', ['henry.hsu']);
+      await vscode.commands.executeCommand('functionBookmarks.filterBookmarkSources', ['alex.chen']);
       groups = (await api.provider.getChildren(api.provider.sections.bookmarks)) as BmGroupNode[];
       assert.deepStrictEqual(groups.map((g) => g.key), ['']);
       assert.ok(String(api.treeView.description).includes('filtered'));
@@ -1519,12 +1519,12 @@ describe('Function Bookmarks（整合測試）', () => {
       assert.deepStrictEqual([...visited].sort((a, b) => a - b), [3, 4, 10], '只在自己的書籤間跳');
       await vscode.commands.executeCommand('functionBookmarks.filterBookmarkSources', []);
 
-      assert.ok(await vscode.commands.executeCommand('functionBookmarks.renameBookmarkSource', 'henry.hsu', 'henry'));
-      assert.ok(foreign().every((b) => b.source?.author === 'henry'));
+      assert.ok(await vscode.commands.executeCommand('functionBookmarks.renameBookmarkSource', 'alex.chen', 'alex'));
+      assert.ok(foreign().every((b) => b.source?.author === 'alex'));
       const one = api.store.allBookmarks().find((e) => e.bookmark.source && e.bookmark.label === '改標題')!;
       await vscode.commands.executeCommand('functionBookmarks.makeBookmarkMine', { type: 'bookmark', entry: one });
       assert.strictEqual(foreign().length, 2);
-      assert.strictEqual(await vscode.commands.executeCommand('functionBookmarks.deleteBookmarkSource', 'henry', true), 2);
+      assert.strictEqual(await vscode.commands.executeCommand('functionBookmarks.deleteBookmarkSource', 'alex', true), 2);
       assert.strictEqual(foreign().length, 0);
       assert.deepStrictEqual(api.store.sources(), []);
       await vscode.commands.executeCommand('functionBookmarks.groupBookmarksByFile');
@@ -1752,6 +1752,70 @@ describe('Function Bookmarks（整合測試）', () => {
     });
   });
 
+  describe('更多語言：C／C++、Rust、Go、Java、C#、Kotlin、Swift、PHP、Ruby', () => {
+    after(async () => {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    });
+
+    const tops = () => names(api.provider.currentSymbolNodes);
+
+    it('開檔後側邊欄列出函式與類別', async () => {
+      const expect: [string, unknown[]][] = [
+        ['sample.c', ['point', 'add', 'make_point', 'color', 'main']],
+        ['App.jsx', [{ App: ['handleClick', 'renderItem'] }, 'Header', 'Footer', 'Card', 'Input', { Legacy: ['handleInc', 'componentDidMount', 'render'] }, { useCounter: ['inc'] }]],
+        ['Panel.tsx', [{ App: ['handleClick', 'renderItem'] }, 'Header', 'Footer', 'Card', 'Input', { Legacy: ['handleInc', 'componentDidMount', 'render'] }, { useCounter: ['inc'] }]],
+        ['point.rs', ['Point', 'Meters', { Point: ['new', 'first'] }, { 'fmt::Display for Point': ['fmt'] }, { Shape: ['name'] }, 'Command', { tests: ['it_works'] }, 'run', 'square']],
+        ['server.go', ['Server', 'Handler', 'NewServer', 'Server.Start', 'Server.Addr', 'Map']],
+        ['controller.php', [{ Controller: ['__construct', 'index'] }, 'helper']],
+        ['invoice.rb', [{ Billing: [{ Invoice: ['self.create_for', 'total', 'paid?', 'notes'] }] }, 'helper']],
+        ['UserService.java', [{ UserService: ['run', 'UserService', 'findAll', 'group', 'text', 'Status', 'Pair'] }]],
+        ['OrderService.cs', [{ 'App.Services': [{ OrderService: ['OrderService', 'Index', 'Sum', 'Find'] }, 'Money', 'Point'] }]],
+        // 沒有 Kotlin 擴充時編輯器把它當成純文字，改用副檔名判斷
+        ['Repo.kt', ['User', { Repo: ['load', 'second', 'create'] }, 'main']],
+      ];
+      for (const [file, want] of expect) {
+        await open(workspaceFile('langs', file), api);
+        assert.deepStrictEqual(tops(), want, file);
+      }
+      await open(workspaceFile('langs', 'widget.cpp'), api);
+      const app = tops()[0] as Record<string, unknown[]>;
+      assert.ok(JSON.stringify(app.app).includes('Widget::paint'), JSON.stringify(app));
+    });
+
+    it('整個專案與搜尋函式包含新語言的檔案（不必開檔）', async () => {
+      const keys = (await api.collectProjectSymbols()).map((e) => `${e.rel}:${e.symbol.path}`);
+      for (const k of ['langs/point.rs:Point.new', 'langs/server.go:Server.Start', 'langs/invoice.rb:Billing.Invoice.total', 'langs/Repo.kt:Repo.load', 'langs/ViewController.swift:ViewController.viewDidLoad']) {
+        assert.ok(keys.includes(k), `${k} 不在清單中`);
+      }
+    });
+
+    it('函式書籤：Rust 方法改名後仍找得到', async () => {
+      const fsp = require('fs/promises') as typeof import('fs/promises');
+      const file = workspaceFile('langs', 'tmp_rename.rs');
+      await fsp.writeFile(file.fsPath, 'struct A;\nimpl A {\n    fn old_name(&self) -> i32 {\n        1\n    }\n}\n');
+      try {
+        const editor = await open(file, api);
+        editor.selection = new vscode.Selection(2, 4, 2, 4);
+        await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+        await api.favorites.refresh();
+        assert.deepStrictEqual(api.favorites.all.map((f) => f.mark.path), ['A.old_name']);
+        await editor.edit((e) => e.replace(new vscode.Range(2, 7, 2, 15), 'new_name'));
+        await api.refreshNow();
+        const found = await waitFor(
+          async () => {
+            await api.favorites.refresh();
+            return api.favorites.all.map((f) => `${f.mark.path}:${f.status}`);
+          },
+          (v) => v.includes('A.new_name:ok'),
+        );
+        assert.deepStrictEqual(found, ['A.new_name:ok']);
+      } finally {
+        await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+        await fsp.rm(file.fsPath, { force: true });
+      }
+    });
+  });
+
   describe('M8：測試偵測規則、設定整理', () => {
     after(async () => {
       api.ruleTester.stop();
@@ -1780,6 +1844,18 @@ describe('Function Bookmarks（整合測試）', () => {
       assert.strictEqual(api.ruleTester.testing, undefined, '再執行一次關閉');
       assert.deepStrictEqual(api.ruleTester.results, []);
       await vscode.commands.executeCommand('workbench.action.files.revert');
+    });
+
+    it('側邊欄圖示用字型圖示（在工具列的亮度才會和內建圖示一致），字型檔有打包', async () => {
+      const ext = findExtension()!;
+      const pkg = ext.packageJSON as {
+        contributes: { viewsContainers: { activitybar: { icon: string }[] }; icons: Record<string, { default: { fontPath: string; fontCharacter: string } }> };
+      };
+      assert.strictEqual(pkg.contributes.viewsContainers.activitybar[0].icon, '$(function-bookmarks-logo)');
+      const font = pkg.contributes.icons['function-bookmarks-logo'].default;
+      assert.strictEqual(font.fontCharacter.length, 5, 'fontCharacter 應為反斜線加 4 碼');
+      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(ext.extensionUri, font.fontPath));
+      assert.strictEqual(new TextDecoder('latin1').decode(bytes.slice(0, 4)), 'wOFF');
     });
 
     it('設定分成幾個分類並有順序；每個指令在命令選擇區都有分類', () => {

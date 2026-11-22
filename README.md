@@ -1,6 +1,6 @@
 # Function Bookmarks
 
-**Bookmarks that stay on the right line after `git pull`, branch switches and AI edits — plus a function list you can bookmark, rename and annotate.** Works in VS Code and Cursor.
+**Bookmark functions and lines with your own names. They stay in place after `git pull`.** Works in VS Code and Cursor.
 
 [繁體中文說明](README.zh-TW.md)
 
@@ -36,9 +36,9 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 
 - The functions of the current file in their own side bar, a **whole project** browser, and **Search Functions**
 - **Display names** (F2) without changing the code; hover to see the original name
-- Built-in detection for TypeScript / JavaScript, Python, Django templates (`{% block %}`, `{% partialdef %}`, `extends` / `include` links, overridden blocks), event listeners and requests (`.on('click')`, `addEventListener`, `$.ajax`, `fetch`, `axios`), and Markdown headings
+- Django templates: `{% block %}`, `extends` / `include` links and overridden blocks; event listeners and requests (`.on('click')`, `$.ajax`, `fetch`) are listed too
 - **Your own detection rules** with regular expressions; **Test Detection Rules on This File** shows what each rule finds
-- Other languages fall back to the language server
+- Works out of the box for most common languages, no language extension needed; others fall back to the language server
 
 ### Share
 

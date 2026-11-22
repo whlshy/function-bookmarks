@@ -10,7 +10,7 @@ export type SymbolKindName =
   | 'heading'
   | 'reference';
 
-export type BodyKind = 'brace' | 'indent' | 'pair' | 'line' | 'call' | 'heading' | 'embedded';
+export type BodyKind = 'brace' | 'indent' | 'pair' | 'line' | 'call' | 'heading' | 'embedded' | 'end';
 
 /**
  * 一條函式偵測規則。
@@ -51,6 +51,11 @@ export interface DetectionRule {
   /** 只套用到符合這些 glob 的檔案（由呼叫端判斷）。 */
   include?: string[];
   enabled?: boolean;
+  /**
+   * `brace` 的本體可以省略或寫成 `= 運算式`（Kotlin、Swift）：
+   * 標頭那一行結束、下一行不是 { 或 : 開頭時就結束，不會往後吃到下一個 {。
+   */
+  optionalBody?: boolean;
 }
 
 export interface DetectedSymbol {
@@ -83,4 +88,4 @@ export interface DetectionResult {
   errors: RuleError[];
 }
 
-export type Syntax = 'c' | 'python' | 'template' | 'markdown' | 'none';
+export type Syntax = 'c' | 'jsx' | 'python' | 'template' | 'markdown' | 'cpp' | 'rust' | 'go' | 'java' | 'kotlin' | 'csharp' | 'php' | 'ruby' | 'none';
