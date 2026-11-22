@@ -893,7 +893,7 @@ Cursor 不從微軟的 VS Code Marketplace 安裝套件，而是從 **Open VSX**
 - 名稱確認（2026-11-22）：Open VSX 與 Marketplace 搜尋「function bookmarks」沒有同名套件
 - `.github/workflows/release.yml`：推送 `v*` 標籤 → 檢查版本一致 → 測試 → 打包 → 附到 GitHub Releases（0.x 標成預先發行）→ 有設定 `VSCE_PAT`／`OVSX_PAT` 才發布到對應平台
 - **待老闆處理**：
-  - 註冊 Azure DevOps publisher 與 Open VSX namespace，把 `package.json` 的 `publisher`（目前暫定 `function-bookmarks`）改成實際的 publisher id
+  - 註冊 Azure DevOps publisher 與 Open VSX namespace（2026-11-22 已註冊，publisher id 為 `whlshy`，已改進 `package.json`；套件 ID 變成 `whlshy.function-bookmarks`）
   - 在 GitHub 專案設定 `VSCE_PAT`、`OVSX_PAT` 兩個 secrets
   - 操作 GIF 尚未錄製（需要實際操作畫面）
 
