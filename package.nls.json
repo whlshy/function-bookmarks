@@ -48,7 +48,6 @@
   "command.toggleBookmark": "Add / Remove Bookmark",
   "command.addLabeledBookmark": "Add Bookmark with Name",
   "command.renameBookmark": "Rename Bookmark",
-  "command.importAlefragnani": "Import Bookmarks from Bookmarks (alefragnani)",
   "command.moveBookmarkToCursor": "Move Bookmark to Cursor",
   "command.editBookmarkTags": "Edit Tags",
   "command.removeBookmark": "Remove Bookmark",

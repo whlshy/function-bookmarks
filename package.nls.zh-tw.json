@@ -48,7 +48,6 @@
   "command.toggleBookmark": "加入／移除書籤",
   "command.addLabeledBookmark": "新增有名稱的書籤",
   "command.renameBookmark": "重新命名書籤",
-  "command.importAlefragnani": "從 Bookmarks（alefragnani）匯入書籤",
   "command.moveBookmarkToCursor": "把書籤移到游標所在的行",
   "command.editBookmarkTags": "編輯標籤",
   "command.removeBookmark": "移除書籤",

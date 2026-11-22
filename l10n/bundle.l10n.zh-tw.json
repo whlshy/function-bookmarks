@@ -67,12 +67,8 @@
   "Put the cursor on the correct line, then run \"Move Bookmark to Cursor\" again.": "請把游標放到正確的行，再執行一次「把書籤移到游標所在的行」。",
   "Line {0} already has a bookmark.": "第 {0} 行已經有書籤了。",
   "The bookmarked line could not be found (deleted, changed a lot, or inside a merge conflict). Put the cursor on the correct line and use Move Bookmark to Cursor.": "找不到書籤原本的那一行（被刪除、改動太多，或在合併衝突範圍內）。請把游標放到正確的行，再用「把書籤移到游標所在的行」放回去。",
-  "{0} could not be read (not valid JSON).": "無法讀取 {0}（不是有效的 JSON）。",
-  "No {0} found. In the Bookmarks extension (alefragnani), turn on the setting \"bookmarks.saveBookmarksInProject\" so it saves its bookmarks to that file, then run this command again.": "找不到 {0}。請在 Bookmarks 套件（alefragnani）開啟設定「bookmarks.saveBookmarksInProject」，讓它把書籤存到這個檔案，再執行一次這個指令。",
-  "{0} has no bookmarks to import.": "{0} 裡沒有可匯入的書籤。",
   "Import": "匯入",
   "Import {0} bookmarks from the Bookmarks extension (alefragnani)?": "要從 Bookmarks 套件（alefragnani）匯入 {0} 個書籤嗎？",
-  "Lines that already have a bookmark are skipped. {0} is not changed.": "已經有書籤的行會略過，{0} 不會被修改。",
   "Imported {0} bookmarks ({1} skipped: already bookmarked or file / line not found).": "已匯入 {0} 個書籤（略過 {1} 個：已經有書籤，或找不到檔案／行）。",
   "Imported {0} bookmarks.": "已匯入 {0} 個書籤。",
   "detached {0}": "detached {0}",
@@ -124,7 +120,6 @@
   "From the clipboard": "從剪貼簿",
   "Import bookmarks": "匯入書籤",
   "This is not valid JSON.": "內容不是有效的 JSON。",
-  "This is not a Function Bookmarks export.": "這不是 Function Bookmarks 匯出的書籤。",
   "There are no bookmarks to import.": "沒有可匯入的書籤。",
   "Import into which folder?": "要匯入到哪個資料夾？",
   "Import anyway": "仍要匯入",
@@ -149,5 +144,7 @@
   "Rename which source?": "要修改哪個來源的註記？",
   "Source note": "來源註記",
   "From {0}": "來源：{0}",
-  "imported {0}": "匯入於 {0}"
+  "imported {0}": "匯入於 {0}",
+  "This is not a Function Bookmarks export or a .vscode/bookmarks.json of the Bookmarks extension (alefragnani).": "這不是 Function Bookmarks 匯出的書籤，也不是 Bookmarks 套件（alefragnani）的 .vscode/bookmarks.json。",
+  "They are added as your own bookmarks. Lines that already have a bookmark are skipped.": "會加入成你自己的書籤；已經有書籤的行會略過。"
 }

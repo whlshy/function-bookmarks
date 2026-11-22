@@ -6,6 +6,8 @@ import { relocateBookmarks, splitLines } from '../bookmarks/relocate';
 import { readRemoteUrl } from '../git/branch';
 import { loadSource } from '../symbols/documentSource';
 import { SymbolService } from '../symbols/symbolService';
+import { parseAlefragnani } from '../bookmarks/alefragnani';
+import { AlefragnaniImportResult, importAlefragnaniItems } from '../bookmarks/importAlefragnani';
 import { ShareDeps } from './exporter';
 import { applyImport, decodeHashes, existingCounts, ExportedBookmark, ImportMode, normalizeRemote, parseExport } from './format';
 
@@ -32,9 +34,10 @@ export interface ImportResult {
   mode: ImportMode;
 }
 
-async function readText(options: ImportOptions): Promise<string | undefined> {
+/** 讀取要匯入的內容；從檔案時一併回傳檔案位置（用來決定匯入到哪個資料夾）。 */
+async function readText(options: ImportOptions): Promise<{ text: string; uri?: vscode.Uri } | undefined> {
   if (options.text !== undefined) {
-    return options.text;
+    return { text: options.text };
   }
   let from = options.from;
   let uri = options.uri;
@@ -47,11 +50,20 @@ async function readText(options: ImportOptions): Promise<string | undefined> {
     from = pick === file ? 'file' : 'clipboard';
   }
   if (!uri && from === 'clipboard') {
-    return vscode.env.clipboard.readText();
+    return { text: await vscode.env.clipboard.readText() };
   }
   if (!uri) {
+    // 專案裡有 alefragnani Bookmarks 的書籤檔時，直接開在 .vscode 資料夾
+    let defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+    for (const f of vscode.workspace.workspaceFolders ?? []) {
+      if (await exists(vscode.Uri.joinPath(f.uri, '.vscode', 'bookmarks.json'))) {
+        defaultUri = vscode.Uri.joinPath(f.uri, '.vscode', 'bookmarks.json');
+        break;
+      }
+    }
     const picked = await vscode.window.showOpenDialog({
       canSelectMany: false,
+      defaultUri,
       filters: { 'Function Bookmarks': ['json'] },
       title: vscode.l10n.t('Import bookmarks'),
     });
@@ -60,7 +72,7 @@ async function readText(options: ImportOptions): Promise<string | undefined> {
   if (!uri) {
     return undefined;
   }
-  return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+  return { text: new TextDecoder().decode(await vscode.workspace.fs.readFile(uri)), uri };
 }
 
 async function exists(uri: vscode.Uri): Promise<boolean> {
@@ -76,15 +88,35 @@ async function exists(uri: vscode.Uri): Promise<boolean> {
  * 匯入別人匯出的書籤：輸入來源註記、預覽、同來源取代或合併，並依本機的檔案內容重新定位：
  * 有行雜湊就比對差異換算；沒有就用 anchor 後備定位；函式書籤用名稱重新找；都找不到標成需確認。
  */
-export async function importBookmarks(deps: ShareDeps, service: SymbolService, options: ImportOptions = {}): Promise<ImportResult | undefined> {
-  const text = await readText(options);
-  if (text === undefined) {
+export async function importBookmarks(
+  deps: ShareDeps,
+  service: SymbolService,
+  options: ImportOptions = {},
+): Promise<ImportResult | AlefragnaniImportResult | undefined> {
+  const input = await readText(options);
+  if (input === undefined) {
     return undefined;
   }
+  const { text } = input;
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  const pickFolder = async () =>
+    options.folder ??
+    (input.uri ? vscode.workspace.getWorkspaceFolder(input.uri) : undefined) ??
+    (folders.length > 1 ? await vscode.window.showWorkspaceFolderPick({ placeHolder: vscode.l10n.t('Import into which folder?') }) : folders[0]);
   const parsed = parseExport(text);
   if ('error' in parsed) {
+    // 也支援 alefragnani Bookmarks 的 .vscode/bookmarks.json（自己在舊套件加的書籤，匯入成自己的）
+    if (parsed.error === 'format') {
+      const old = parseAlefragnani(JSON.parse(text));
+      if (old.length) {
+        const folder = await pickFolder();
+        return folder ? importAlefragnaniItems(deps.store, service, folder, old, options.confirmed) : undefined;
+      }
+    }
     void vscode.window.showErrorMessage(
-      parsed.error === 'json' ? vscode.l10n.t('This is not valid JSON.') : vscode.l10n.t('This is not a Function Bookmarks export.'),
+      parsed.error === 'json'
+        ? vscode.l10n.t('This is not valid JSON.')
+        : vscode.l10n.t('This is not a Function Bookmarks export or a .vscode/bookmarks.json of the Bookmarks extension (alefragnani).'),
     );
     return undefined;
   }
@@ -92,10 +124,7 @@ export async function importBookmarks(deps: ShareDeps, service: SymbolService, o
     void vscode.window.showInformationMessage(vscode.l10n.t('There are no bookmarks to import.'));
     return undefined;
   }
-  const folders = vscode.workspace.workspaceFolders ?? [];
-  const folder =
-    options.folder ??
-    (folders.length > 1 ? await vscode.window.showWorkspaceFolderPick({ placeHolder: vscode.l10n.t('Import into which folder?') }) : folders[0]);
+  const folder = await pickFolder();
   if (!folder) {
     return undefined;
   }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1 (unreleased)
+
+- **Import Bookmarks…** also recognizes the `.vscode/bookmarks.json` of the Bookmarks extension (alefragnani) and adds them as your own bookmarks; the file dialog opens there when the file exists. The separate *Import from Bookmarks (alefragnani)* command is removed
+
 ## 0.5.0 (unreleased) — share bookmarks (M6)
 
 - **Export Bookmarks…**: all, by tag, the current file, chosen bookmarks, or a file / folder from the Explorer context menu. Line and function bookmarks. Save as `*.fbookmarks.json` or copy to the clipboard (both can be imported), or export a **Markdown table** / **CSV file**

@@ -8,7 +8,6 @@ import { cleanBranchRecords, setBranchScope } from './git/branchCommands';
 import { exportBookmarks, ExportOptions } from './share/exporter';
 import { importBookmarks, ImportOptions } from './share/importer';
 import { deleteSource, filterSources, makeMine, renameSource } from './share/sources';
-import { importAlefragnani } from './bookmarks/importAlefragnani';
 import { ReconcileWatcher } from './storage/reconcileWatcher';
 import { Commands, reveal } from './commands';
 import { readSettings, SECTION } from './config';
@@ -313,9 +312,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     ),
     reg('functionBookmarks.clearBookmarksInFile', (arg?: vscode.Uri | { uri?: vscode.Uri }) =>
       bookmarks.clearFile(arg instanceof vscode.Uri ? arg : arg?.uri),
-    ),
-    reg('functionBookmarks.importAlefragnani', (confirmed?: boolean) =>
-      importAlefragnani(store, service, { confirmed: confirmed === true }),
     ),
     branches.onDidChange(() => updateBranchLabel()),
     reg('functionBookmarks.setBookmarkBranchOnly', (node?: TreeNode) =>

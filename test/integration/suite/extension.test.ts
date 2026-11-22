@@ -961,7 +961,7 @@ describe('Function Bookmarks（整合測試）', () => {
       assert.deepStrictEqual(await settle(uri, ['10']), ['10']);
     });
 
-    it('匯入 alefragnani Bookmarks 的 .vscode/bookmarks.json；重複匯入不會重複', async () => {
+    it('「匯入書籤」也認得 alefragnani Bookmarks 的 .vscode/bookmarks.json：匯入成自己的書籤；重複匯入不會重複', async () => {
       const uri = file('imp');
       made.push(uri);
       const ls = content(10);
@@ -983,19 +983,23 @@ describe('Function Bookmarks（整合測試）', () => {
         workspaceFile('.vscode', 'bookmarks.json'),
         new TextEncoder().encode(JSON.stringify(json, null, '\t')),
       );
-      type R = { imported: number; skipped: number };
-      const r = await vscode.commands.executeCommand<R>('functionBookmarks.importAlefragnani', true);
-      assert.deepStrictEqual({ imported: r.imported, skipped: r.skipped }, { imported: 2, skipped: 2 });
+      type R = { format: string; imported: number; skipped: number };
+      const importOld = () =>
+        vscode.commands.executeCommand<R>('functionBookmarks.importBookmarks', { uri: workspaceFile('.vscode', 'bookmarks.json'), confirmed: true });
+      const r = await importOld();
+      assert.deepStrictEqual({ format: r.format, imported: r.imported, skipped: r.skipped }, { format: 'alefragnani', imported: 2, skipped: 2 });
       assert.deepStrictEqual(
-        api.store.bookmarksFor(uri).map((b) => [b.line, b.label, b.anchor?.text]),
+        api.store.bookmarksFor(uri).map((b) => [b.line, b.label, b.anchor?.text, b.source]),
         [
-          [2, '登入', ls[2]],
-          [4, undefined, ls[4]],
+          [2, '登入', ls[2], undefined],
+          [4, undefined, ls[4], undefined],
         ],
       );
-      const again = await vscode.commands.executeCommand<R>('functionBookmarks.importAlefragnani', true);
+      const again = await importOld();
       assert.deepStrictEqual({ imported: again.imported, skipped: again.skipped }, { imported: 0, skipped: 4 });
       assert.strictEqual(api.store.bookmarksFor(uri).length, 2);
+      const cmds = await vscode.commands.getCommands(true);
+      assert.ok(!cmds.includes('functionBookmarks.importAlefragnani'), '獨立的指令已拿掉');
     });
   });
 

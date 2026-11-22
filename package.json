@@ -2,7 +2,7 @@
   "name": "function-bookmarks",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "function-bookmarks",
   "license": "MIT",
   "preview": true,
@@ -231,11 +231,6 @@
         "category": "Function Bookmarks"
       },
       {
-        "command": "functionBookmarks.importAlefragnani",
-        "title": "%command.importAlefragnani%",
-        "category": "Function Bookmarks"
-      },
-      {
         "command": "functionBookmarks.moveBookmarkToCursor",
         "title": "%command.moveBookmarkToCursor%",
         "category": "Function Bookmarks",
@@ -366,11 +361,6 @@
           "command": "functionBookmarks.importBookmarks",
           "when": "view == functionBookmarks.tree",
           "group": "4_share@2"
-        },
-        {
-          "command": "functionBookmarks.importAlefragnani",
-          "when": "view == functionBookmarks.tree",
-          "group": "4_share@3"
         },
         {
           "command": "functionBookmarks.hideNotOnBranch",

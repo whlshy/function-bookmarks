@@ -10,7 +10,7 @@ Bookmarks that survive `git pull` and branch switches, plus a customizable funct
 - **Follows changes made outside the editor** — `git pull`, branch switches, merges, formatters, scripts and AI edits, even for files that are not open; bookmarks that cannot be found (or sit inside a merge conflict) are marked *needs checking* and can be put back with **Move Bookmark to Cursor**
 - **Branch aware** — each branch remembers its own positions; bookmarks on code that is not on the current branch are shown as *not on this branch* and come back when you switch back; bookmarks can belong to one branch only
 - **Share bookmarks** — export to a file, the clipboard, Markdown or CSV; import a colleague's bookmarks with a source note, filter and group by source; imported bookmarks are placed correctly even if your files differ
-- **Import from Bookmarks (alefragnani)** — reads its `.vscode/bookmarks.json` (turn on `bookmarks.saveBookmarksInProject` there)
+- **Coming from Bookmarks (alefragnani)?** — *Import Bookmarks…* also reads its `.vscode/bookmarks.json` (turn on `bookmarks.saveBookmarksInProject` there first)
 - **Function list** for the current file in its own side bar
 - **Function bookmarks** — hover a function name and click **☆ Add bookmark** (or ☆ in the side bar); listed without opening the file and found again by name after edits and `git pull` — even when you rename the function
 - **Display names** — rename how a function is shown (F2); hover to see the original name and path

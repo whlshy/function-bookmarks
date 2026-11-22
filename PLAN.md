@@ -726,6 +726,8 @@ Cursor 不從微軟的 VS Code Marketplace 安裝套件，而是從 **Open VSX**
 
 ### 匯入 alefragnani Bookmarks（M8 的一部分）
 
+> 0.5.1 老闆回饋：拿掉獨立的指令，併入「匯入書籤」——選檔案或剪貼簿時自動辨識這個格式，匯入成自己的書籤（不問來源註記）；專案裡有 `.vscode/bookmarks.json` 時，選檔視窗直接開在那裡。
+
 - 讀取每個工作區資料夾的 `.vscode/bookmarks.json`（需在 alefragnani 開啟 `bookmarks.saveBookmarksInProject`；它關閉時存在自己的 workspace state，其他套件讀不到）
 - 已依其原始碼確認格式：目前版本 `{ "files": [{ "path", "bookmarks": [{ "line", "column", "label" }] }] }`，行號從 0 起算、路徑相對於資料夾；也支援舊版（最上層陣列、`$ROOTPATH# Function Bookmarks — VS Code 套件規劃
 
