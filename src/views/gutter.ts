@@ -107,7 +107,8 @@ export class FavoriteGutter implements vscode.Disposable {
       walk(file.symbols);
       // 行號書籤：有備註時範圍是整行內容，滑鼠移到那一行就顯示備註
       const bookmark: vscode.DecorationOptions[] = this.store.bookmarksFor(uri)
-        .filter((b) => b.line < editor.document.lineCount)
+        // 不在此分支的書籤：那一行不是它原本的位置，不顯示
+        .filter((b) => b.line < editor.document.lineCount && b.status !== 'notOnBranch')
         .map((b) => {
           const text = editor.document.lineAt(b.line);
           if (!b.note) {

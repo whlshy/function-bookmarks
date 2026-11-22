@@ -48,6 +48,8 @@
   "command.toggleBookmark": "Add / Remove Bookmark",
   "command.addLabeledBookmark": "Add Bookmark with Name",
   "command.renameBookmark": "Rename Bookmark",
+  "command.importAlefragnani": "Import Bookmarks from Bookmarks (alefragnani)",
+  "command.moveBookmarkToCursor": "Move Bookmark to Cursor",
   "command.editBookmarkTags": "Edit Tags",
   "command.removeBookmark": "Remove Bookmark",
   "command.clearBookmarksInFile": "Clear Bookmarks in File",
@@ -62,5 +64,10 @@
   "config.onLineDelete.moveToNext": "Move it to the next line.",
   "config.onLineDelete.markLost": "Move it to the next line and mark it as needing a check.",
   "config.onLineDelete.remove": "Remove the bookmark.",
-  "config.hover.enabled": "When hovering a function name, show a popup to add / remove the bookmark, rename, and edit the note."
+  "config.hover.enabled": "When hovering a function name, show a popup to add / remove the bookmark, rename, and edit the note.",
+  "command.setBookmarkBranchOnly": "Show Only on This Branch",
+  "command.setBookmarkAllBranches": "Show on All Branches",
+  "command.hideNotOnBranch": "Hide Bookmarks Not on This Branch",
+  "command.showNotOnBranch": "Show Bookmarks Not on This Branch",
+  "command.cleanBranchRecords": "Clean Up Records of Deleted Branches"
 }

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.0 (unreleased) — branch switching (M5)
+
+- **Each branch remembers its own bookmark positions.** When you leave a branch, the extension notes where every bookmark was and what the file looked like; when you come back, positions are worked out from that — switching back and forth never accumulates drift, even if the branch got new commits in between
+- Bookmarks on code that does not exist on the current branch (or in a file that does not exist there) are shown as **not on this branch** (grey branch icon) instead of *needs checking*, and come back automatically when you switch to a branch that has the code
+- **Fixed**: switching branches with the file open moved bookmarks on branch-only code to the next line, and they did not come back. Reloads of open files are now matched by content too
+- **Files renamed between branches** (or by other tools): bookmarks follow the renamed file (matched by content) and follow it back
+- **Show Only on This Branch** / **Show on All Branches** (bookmark context menu): branch-only bookmarks are hidden on other branches
+- The current branch is shown next to the side bar title; **Hide / Show Bookmarks Not on This Branch** in the title menu
+- **Clean Up Records of Deleted Branches** removes position records of branches that no longer exist
+- Handles rebase (counts as the branch being rebased), detached HEAD, git still writing files (`index.lock`), worktrees and submodules
+
+## 0.3.0 (unreleased) — bookmarks follow changes made outside the editor (M4 / M5)
+
+- **Line bookmarks now follow `git pull`, branch switches, merges, rebases, formatters, scripts and AI edits — even when the file is not open.** The extension remembers the content each bookmark's line number refers to and compares it with the new content (line diff). Local uncommitted changes are handled the same way
+- Checked when a file changes on disk (changes to many files at once are processed together), when a file is opened or closed without saving, when the whole document is replaced, when Git HEAD changes, when the window regains focus and on startup
+- **Fallback relocation** when the bookmarked line itself was changed or moved: identical line with matching surroundings, same offset inside the same function, or a similar line nearby. Very short or common lines (`}`, `pass`, `return`) need matching surroundings
+- Bookmarks that cannot be found, or that fall inside a **merge conflict**, are marked *needs checking* (greyed out with a warning icon). Conflict bookmarks come back automatically once the conflict is resolved
+- **Edits that replace several lines with several lines** — Cursor applying an AI change to a whole function, pasting over a selection, moving lines with Alt+↑/↓ — are now matched by content instead of shifting by line number, so a bookmark inside the replaced block stays on its line (previously it was treated as deleted and moved to the next line)
+- Tested against simulated Cursor AI edits on a real Django view: direct disk writes, streaming partial writes, write-to-temp-then-rename, reload of an open file, block-by-block edits in the editor, moving and deleting functions, several files at once
+- **Move Bookmark to Cursor**: put a bookmark back on the right line (side bar context menu, inline button on bookmarks that need checking, or the Command Palette)
+- **Import from Bookmarks (alefragnani)**: reads `.vscode/bookmarks.json` (turn on `bookmarks.saveBookmarksInProject` in that extension first); labels are kept, lines that already have a bookmark are skipped
+
 ## 0.2.3 (unreleased)
 
 - **Renaming a function in code no longer breaks its bookmark**: when a function's name changes (in the editor or from outside, e.g. `git pull`), its bookmark, display name, note and tags move to the new name. Matched by the last known line (same line first, then within 3 lines) and kind; only when there is exactly one candidate. Renaming a class carries over its methods too

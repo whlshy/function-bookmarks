@@ -1,6 +1,11 @@
 import * as vscode from 'vscode';
 import { BookmarkCommands, isBookmarkLinkArg, revealLine } from './bookmarks/commands';
 import { BookmarkTracker } from './bookmarks/tracker';
+import { ExternalChangeWatcher } from './bookmarks/externalWatcher';
+import { watchGitHead } from './bookmarks/gitHead';
+import { BranchService } from './git/branchService';
+import { cleanBranchRecords, setBranchScope } from './git/branchCommands';
+import { importAlefragnani } from './bookmarks/importAlefragnani';
 import { ReconcileWatcher } from './storage/reconcileWatcher';
 import { Commands, reveal } from './commands';
 import { readSettings, SECTION } from './config';
@@ -22,6 +27,7 @@ import { sameUri } from './util/uris';
 const VIEW_ID = 'functionBookmarks.tree';
 const STATE_FILTER = 'filterMode';
 const STATE_BM_GROUP = 'bookmarkGrouping';
+const STATE_HIDE_AWAY = 'hideNotOnBranch';
 
 /** 行號右鍵選單傳入的參數：{ lineNumber（1 起算）, uri }。 */
 function lineArg(arg: unknown): { uri: vscode.Uri; line: number } | undefined {
@@ -41,6 +47,8 @@ export interface ExtensionApi {
   commands: Commands;
   bookmarks: BookmarkCommands;
   tracker: BookmarkTracker;
+  external: ExternalChangeWatcher;
+  branches: BranchService;
   reconciler: ReconcileWatcher;
   gutter: FavoriteGutter;
   notes: NoteEditor;
@@ -57,6 +65,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
   const service = new SymbolService();
   const store = new MarkStore(context);
   await store.init();
+  const branches = new BranchService();
+  store.branchOf = (folder) => branches.name(folder);
+  await branches.refresh();
   const favorites = new FavoritesModel(store, service);
   const project = new ProjectFiles();
   const resolver = new TemplateResolver(service);
@@ -65,6 +76,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
   const commands = new Commands(service, store, resolver, notes);
   const bookmarks = new BookmarkCommands(store, service, notes, favorites);
   const tracker = new BookmarkTracker(store, service);
+  const external = new ExternalChangeWatcher(store, service, context.workspaceState, branches);
+  tracker.handledByDiff = (e, changes) => external.handlesByDiff(e, changes);
   const reconciler = new ReconcileWatcher(store, service);
   const gutter = new FavoriteGutter(context.extensionUri, service, store);
   const hover = new BookmarkHoverProvider(service, store);
@@ -73,6 +86,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     showCollapseAll: true,
   });
   const reportedErrors = new Set<string>();
+
+  // 側邊欄標題旁顯示目前分支（多個資料夾在不同分支時不顯示）
+  const updateBranchLabel = () => {
+    const ids = new Set<string>();
+    let label: string | undefined;
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      const b = branches.current(folder);
+      if (b) {
+        ids.add(b.id);
+        label = b.name ?? vscode.l10n.t('detached {0}', b.id.slice(1, 8));
+      }
+    }
+    treeView.description = ids.size === 1 ? label : undefined;
+  };
+  updateBranchLabel();
+
+  const setHideAway = async (hide: boolean) => {
+    provider.hideNotOnBranch = hide;
+    await context.workspaceState.update(STATE_HIDE_AWAY, hide);
+    await vscode.commands.executeCommand('setContext', 'functionBookmarks.hideNotOnBranch', hide);
+    provider.fire();
+  };
+  await setHideAway(context.workspaceState.get<boolean>(STATE_HIDE_AWAY, false));
 
   const applyViewState = async (filter: FilterMode, bmGroup: BookmarkGrouping = provider.bookmarkGrouping) => {
     provider.filterMode = filter;
@@ -187,6 +223,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     vscode.languages.registerHoverProvider({ scheme: 'file' }, hover),
     notes,
     tracker,
+    external,
+    branches,
+    watchGitHead(() => void branches.refresh().then(() => external.checkAll())),
     reconciler,
     treeView,
     reg('functionBookmarks.refresh', () => {
@@ -250,8 +289,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     reg('functionBookmarks.removeBookmark', (node?: TreeNode) =>
       node?.type === 'favorite' ? commands.setFavorite(node, false) : bookmarks.remove(isBookmarkNode(node) ? node : undefined),
     ),
+    reg('functionBookmarks.moveBookmarkToCursor', (node?: TreeNode) =>
+      bookmarks.moveToCursor(isBookmarkNode(node) ? node : undefined),
+    ),
     reg('functionBookmarks.clearBookmarksInFile', (arg?: vscode.Uri | { uri?: vscode.Uri }) =>
       bookmarks.clearFile(arg instanceof vscode.Uri ? arg : arg?.uri),
+    ),
+    reg('functionBookmarks.importAlefragnani', (confirmed?: boolean) =>
+      importAlefragnani(store, service, { confirmed: confirmed === true }),
+    ),
+    branches.onDidChange(() => updateBranchLabel()),
+    reg('functionBookmarks.setBookmarkBranchOnly', (node?: TreeNode) =>
+      setBranchScope(store, bookmarks.entryOf(isBookmarkNode(node) ? node : undefined), true),
+    ),
+    reg('functionBookmarks.setBookmarkAllBranches', (node?: TreeNode) =>
+      setBranchScope(store, bookmarks.entryOf(isBookmarkNode(node) ? node : undefined), false),
+    ),
+    reg('functionBookmarks.hideNotOnBranch', () => setHideAway(true)),
+    reg('functionBookmarks.showNotOnBranch', () => setHideAway(false)),
+    reg('functionBookmarks.cleanBranchRecords', (picked?: string[]) =>
+      cleanBranchRecords(store, branches, external, Array.isArray(picked) ? picked : undefined),
     ),
     reg('functionBookmarks.clearAllBookmarks', () => bookmarks.clearAll()),
     reg('functionBookmarks.nextBookmark', () => bookmarks.go(1)),
@@ -318,6 +375,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
 
   await favorites.refresh();
   await refreshNow();
+  // 啟動時檢查書籤所在的檔案在上次關閉後有沒有被改過（不阻擋啟動）
+  void external.init();
   return {
     provider,
     store,
@@ -325,6 +384,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     commands,
     bookmarks,
     tracker,
+    external,
+    branches,
     reconciler,
     gutter,
     notes,

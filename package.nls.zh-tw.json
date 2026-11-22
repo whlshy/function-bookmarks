@@ -48,6 +48,8 @@
   "command.toggleBookmark": "加入／移除書籤",
   "command.addLabeledBookmark": "新增有名稱的書籤",
   "command.renameBookmark": "重新命名書籤",
+  "command.importAlefragnani": "從 Bookmarks（alefragnani）匯入書籤",
+  "command.moveBookmarkToCursor": "把書籤移到游標所在的行",
   "command.editBookmarkTags": "編輯標籤",
   "command.removeBookmark": "移除書籤",
   "command.clearBookmarksInFile": "清除此檔案的書籤",
@@ -62,5 +64,10 @@
   "config.onLineDelete.moveToNext": "移到下一行。",
   "config.onLineDelete.markLost": "移到下一行，並標記為需確認。",
   "config.onLineDelete.remove": "刪除書籤。",
-  "config.hover.enabled": "滑鼠移到函式名稱上時，顯示可加入／移除書籤、重新命名、編輯備註的提示視窗。"
+  "config.hover.enabled": "滑鼠移到函式名稱上時，顯示可加入／移除書籤、重新命名、編輯備註的提示視窗。",
+  "command.setBookmarkBranchOnly": "只在這個分支顯示",
+  "command.setBookmarkAllBranches": "所有分支都顯示",
+  "command.hideNotOnBranch": "隱藏不在此分支的書籤",
+  "command.showNotOnBranch": "顯示不在此分支的書籤",
+  "command.cleanBranchRecords": "清理已刪除分支的紀錄"
 }

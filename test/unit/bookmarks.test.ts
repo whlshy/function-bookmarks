@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { applyChanges, isWholeDocumentReplace, LineChange, makeAnchor, neighbor, parseTags, shiftLine, suggestName } from '../../src/bookmarks/model';
+import { applyChanges, isBlockReplace, isWholeDocumentReplace, LineChange, makeAnchor, neighbor, parseTags, shiftLine, suggestName } from '../../src/bookmarks/model';
 import { addBookmark, emptyStore, parseStore, removeBookmarks, renamePath, serializeStore, setAlias, setFavorite, updateBookmark } from '../../src/storage/marks';
 
 const ins = (line: number, ch: number, text: string): LineChange => ({ startLine: line, startChar: ch, endLine: line, endChar: ch, text });
@@ -97,6 +97,15 @@ describe('行號書籤：存檔與讀回', () => {
     assert.ok(isWholeDocumentReplace([del(0, 0, 99, 0, 'x\n'.repeat(120))], 121));
     assert.ok(!isWholeDocumentReplace([del(0, 0, 3, 0)], 97));
     assert.ok(!isWholeDocumentReplace([ins(0, 0, 'x\n'), ins(5, 0, 'y\n')], 102));
+  });
+
+  it('多行換成多行（套用 AI 修改、貼上覆蓋、移動行）改用差異換算；打字、單純插入或刪除不算', () => {
+    assert.ok(isBlockReplace([del(10, 0, 15, 0, 'a\nb\n')]));
+    assert.ok(isBlockReplace([ins(0, 0, 'x\n'), del(3, 0, 5, 0, 'y\n')]));
+    assert.ok(!isBlockReplace([del(3, 0, 5, 0)]), '單純刪除');
+    assert.ok(!isBlockReplace([ins(3, 0, 'a\nb\n')]), '單純插入');
+    assert.ok(!isBlockReplace([del(3, 2, 3, 5, 'abc')]), '同一行內修改');
+    assert.ok(!isBlockReplace([del(3, 2, 4, 0, 'abc')]), '合併兩行');
   });
 });
 

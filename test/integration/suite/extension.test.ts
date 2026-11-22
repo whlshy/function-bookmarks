@@ -2,7 +2,8 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { ExtensionApi } from '../../../src/extension';
-import { emptyStore } from '../../../src/storage/marks';
+import { addBookmark, emptyStore } from '../../../src/storage/marks';
+import { makeAnchor, newBookmarkId } from '../../../src/bookmarks/model';
 import type { BmGroupNode, BookmarkNode, DirNode, FavoriteNode, FileNode, SymbolNode, TreeNode } from '../../../src/views/tree';
 
 function findExtension(): vscode.Extension<ExtensionApi> | undefined {
@@ -848,6 +849,518 @@ describe('Function Bookmarks（整合測試）', () => {
       await new Promise((r) => setTimeout(r, 300));
       assert.strictEqual(api.treeView.selection[0]?.type, 'bookmark');
       await api.bookmarks.clearFile(fileC(), true);
+    });
+  });
+
+  describe('M4／M5：外部改檔（git pull、切換分支、合併、AI 改檔）', () => {
+    const file = (n: string) => workspaceFile('app', `tmp_ext_${n}.py`);
+    const made: vscode.Uri[] = [];
+    const content = (n: number, p = 'v') => Array.from({ length: n }, (_, i) => `${p}_${i} = compute_${p}(${i})`);
+    const write = (uri: vscode.Uri, ls: string[]) =>
+      vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(ls.join('\n') + '\n'));
+    const state = (uri: vscode.Uri) => api.store.bookmarksFor(uri).map((b) => `${b.line}${b.status === 'lost' ? '?' : ''}`);
+    const settle = (uri: vscode.Uri, want: string[]) =>
+      waitFor(
+        async () => {
+          await api.external.idle();
+          return state(uri);
+        },
+        (v) => JSON.stringify(v) === JSON.stringify(want),
+        8000,
+      );
+
+    /** 建立檔案並直接在指定行加書籤（不開啟檔案）。 */
+    async function plant(uri: vscode.Uri, ls: string[], at: number[]): Promise<void> {
+      made.push(uri);
+      await write(uri, ls);
+      const rel = `app/${path.basename(uri.fsPath)}`;
+      await api.store.update(folder(), (d) =>
+        at.reduce((acc, line) => addBookmark(acc, { id: newBookmarkId(), file: rel, line, anchor: makeAnchor(ls, line) }), d),
+      );
+      await api.external.idle();
+    }
+
+    after(async () => {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      for (const u of made) {
+        await vscode.workspace.fs.delete(u).then(undefined, () => undefined);
+      }
+      await vscode.workspace.fs.delete(workspaceFile('.vscode', 'bookmarks.json')).then(undefined, () => undefined);
+    });
+
+    it('沒開著的檔案被改（git pull）：上方插入、下方刪除，書籤依差異移動', async () => {
+      const uri = file('pull');
+      const old = content(30);
+      await plant(uri, old, [3, 20]);
+      await write(uri, ['import os', 'import sys', ...old.slice(0, 15), ...old.slice(18)]);
+      assert.deepStrictEqual(await settle(uri, ['5', '19']), ['5', '19']);
+      assert.strictEqual(api.store.bookmarksFor(uri)[0].anchor?.text, old[3]);
+    });
+
+    it('多個檔案同時被改（AI 改檔、切換分支）：一起換算', async () => {
+      const uris = ['m1', 'm2', 'm3'].map(file);
+      const olds = uris.map((_, i) => content(20, `f${i}`));
+      for (let i = 0; i < uris.length; i++) {
+        await plant(uris[i], olds[i], [10]);
+      }
+      await Promise.all(uris.map((u, i) => write(u, [...Array.from({ length: i + 1 }, (_, j) => `# added ${j}`), ...olds[i]])));
+      for (let i = 0; i < uris.length; i++) {
+        assert.deepStrictEqual(await settle(uris[i], [String(11 + i)]), [String(11 + i)]);
+      }
+    });
+
+    it('書籤那一行被搬到很遠的地方：後備定位找回來', async () => {
+      const uri = file('move');
+      const old = content(40);
+      await plant(uri, old, [30]);
+      await write(uri, [old[30], ...old.slice(0, 30), ...old.slice(31)]);
+      assert.deepStrictEqual(await settle(uri, ['0']), ['0']);
+    });
+
+    it('書籤那一行被刪除：標成需確認並反灰；「移到游標所在的行」放回去', async () => {
+      const uri = file('lost');
+      const old = content(20);
+      await plant(uri, old, [8]);
+      await write(uri, [...old.slice(0, 8), ...old.slice(9)]);
+      assert.deepStrictEqual(await settle(uri, ['8?']), ['8?']);
+      const groups = await api.provider.getChildren(api.provider.sections.bookmarks);
+      const group = groups.find((g) => (g as BmGroupNode).rel === 'app/tmp_ext_lost.py')!;
+      const node = (await api.provider.getChildren(group))[0] as BookmarkNode;
+      const item = api.provider.getTreeItem(node);
+      assert.ok(String(item.contextValue).includes(':lost'));
+      assert.strictEqual((item.iconPath as vscode.ThemeIcon).id, 'warning');
+
+      const editor = await vscode.window.showTextDocument(uri);
+      editor.selection = new vscode.Selection(6, 0, 6, 0);
+      await vscode.commands.executeCommand('functionBookmarks.moveBookmarkToCursor', node);
+      assert.deepStrictEqual(state(uri), ['6']);
+      assert.strictEqual(api.store.bookmarksFor(uri)[0].anchor?.text, old[6]);
+      await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    });
+
+    it('合併衝突：衝突範圍內的書籤標成需確認，衝突解決後恢復', async () => {
+      const uri = file('conflict');
+      const old = content(20);
+      await plant(uri, old, [5, 15]);
+      await write(uri, [...old.slice(0, 4), '<<<<<<< HEAD', ...old.slice(4, 7), '=======', 'theirs = 1', '>>>>>>> feature', ...old.slice(7)]);
+      assert.deepStrictEqual(await settle(uri, ['6?', '19']), ['6?', '19']);
+      await write(uri, old);
+      assert.deepStrictEqual(await settle(uri, ['5', '15']), ['5', '15']);
+    });
+
+    it('開著的檔案整份被取代（格式化工具等）：依差異換算；沒存檔就關閉：換算回磁碟內容', async () => {
+      const uri = file('replace');
+      const old = content(20);
+      await plant(uri, old, [10]);
+      const editor = await vscode.window.showTextDocument(uri);
+      await api.external.idle();
+      const next = ['import os', 'import re', 'import sys', ...old.slice(0, 5), ...old.slice(6)].join('\n') + '\n';
+      await editor.edit((b) => b.replace(new vscode.Range(0, 0, editor.document.lineCount, 0), next));
+      assert.deepStrictEqual(await settle(uri, ['12']), ['12']);
+      await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+      assert.deepStrictEqual(await settle(uri, ['10']), ['10']);
+    });
+
+    it('匯入 alefragnani Bookmarks 的 .vscode/bookmarks.json；重複匯入不會重複', async () => {
+      const uri = file('imp');
+      made.push(uri);
+      const ls = content(10);
+      await write(uri, ls);
+      const json = {
+        files: [
+          {
+            path: 'app/tmp_ext_imp.py',
+            bookmarks: [
+              { line: 2, column: 0, label: '登入' },
+              { line: 4, column: 3, label: '' },
+              { line: 999, column: 0, label: '' },
+            ],
+          },
+          { path: 'app/not_exists.py', bookmarks: [{ line: 1, column: 0, label: '' }] },
+        ],
+      };
+      await vscode.workspace.fs.writeFile(
+        workspaceFile('.vscode', 'bookmarks.json'),
+        new TextEncoder().encode(JSON.stringify(json, null, '\t')),
+      );
+      type R = { imported: number; skipped: number };
+      const r = await vscode.commands.executeCommand<R>('functionBookmarks.importAlefragnani', true);
+      assert.deepStrictEqual({ imported: r.imported, skipped: r.skipped }, { imported: 2, skipped: 2 });
+      assert.deepStrictEqual(
+        api.store.bookmarksFor(uri).map((b) => [b.line, b.label, b.anchor?.text]),
+        [
+          [2, '登入', ls[2]],
+          [4, undefined, ls[4]],
+        ],
+      );
+      const again = await vscode.commands.executeCommand<R>('functionBookmarks.importAlefragnani', true);
+      assert.deepStrictEqual({ imported: again.imported, skipped: again.skipped }, { imported: 0, skipped: 4 });
+      assert.strictEqual(api.store.bookmarksFor(uri).length, 2);
+    });
+  });
+
+  describe('實際模擬 Cursor AI 改檔（真實的 Django views）', () => {
+    const fsp = require('fs/promises') as typeof import('fs/promises');
+    const VIEWS = [
+      'import json',
+      'from django.http import JsonResponse',
+      'from django.shortcuts import get_object_or_404, render',
+      'from django.views import View',
+      '',
+      'from .forms import ArticleForm',
+      'from .models import Article',
+      '',
+      '',
+      'def article_list(request):',
+      '    qs = Article.objects.filter(published=True).order_by("-created_at")',
+      '    keyword = request.GET.get("q")',
+      '    if keyword:',
+      '        qs = qs.filter(title__icontains=keyword)',
+      '    return render(request, "app/article_list.html", {"articles": qs})',
+      '',
+      '',
+      'class ArticleCreateView(View):',
+      '    template_name = "app/article_form.html"',
+      '',
+      '    def get(self, request):',
+      '        return render(request, self.template_name, {"form": ArticleForm()})',
+      '',
+      '    def post(self, request):',
+      '        form = ArticleForm(request.POST)',
+      '        if not form.is_valid():',
+      '            return render(request, self.template_name, {"form": form}, status=400)',
+      '        article = form.save(commit=False)',
+      '        article.author = request.user',
+      '        article.save()',
+      '        return JsonResponse({"id": article.pk})',
+      '',
+      '',
+      'def article_api(request, pk):',
+      '    article = get_object_or_404(Article, pk=pk)',
+      '    payload = json.loads(request.body or "{}")',
+      '    article.title = payload.get("title", article.title)',
+      '    article.save(update_fields=["title"])',
+      '    return JsonResponse({"id": article.pk, "title": article.title})',
+    ];
+    /** 書籤放在這幾行（用內容找行號，之後也用內容驗證位置）。 */
+    const MARKS = [
+      '    qs = Article.objects.filter(published=True).order_by("-created_at")',
+      '        if not form.is_valid():',
+      '    payload = json.loads(request.body or "{}")',
+    ];
+    const made: vscode.Uri[] = [];
+    let seq = 0;
+
+    const text = (ls: string[]) => ls.join('\n') + '\n';
+    /** 檢查每個書籤是否還在原本那段程式碼上（比對去掉縮排後的內容）。 */
+    async function where(uri: vscode.Uri): Promise<string[]> {
+      await api.external.idle();
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString());
+      const lines = doc ? doc.getText().split(/\r?\n/) : (await fsp.readFile(uri.fsPath, 'utf8')).split(/\r?\n/);
+      return api.store
+        .bookmarksFor(uri)
+        .map((b) => (b.status === 'lost' ? `?${b.anchor?.text}` : (lines[b.line] ?? '').trim()));
+    }
+    const expectMarks = (want = MARKS.map((m) => m.trim())) => want;
+    async function settle(uri: vscode.Uri, want: string[]): Promise<string[]> {
+      return waitFor(() => where(uri), (v) => JSON.stringify(v) === JSON.stringify(want), 8000);
+    }
+
+    async function plant(): Promise<vscode.Uri> {
+      const uri = workspaceFile('app', `tmp_ai_views_${++seq}.py`);
+      made.push(uri);
+      await fsp.writeFile(uri.fsPath, text(VIEWS));
+      const rel = `app/${path.basename(uri.fsPath)}`;
+      await api.store.update(folder(), (d) =>
+        MARKS.reduce((acc, m) => {
+          const line = VIEWS.indexOf(m);
+          return addBookmark(acc, { id: newBookmarkId(), file: rel, line, anchor: makeAnchor(VIEWS, line) });
+        }, d),
+      );
+      await api.external.idle();
+      return uri;
+    }
+
+    /** AI 的典型修改：最上面加 import 和一個新函式、把 post 包進 try/except（縮排改變）、改寫 article_api 的一部分。 */
+    function aiRefactor(ls: string[]): string[] {
+      const out = [...ls];
+      out.splice(out.indexOf('import json'), 1, 'import json', 'import logging');
+      out.splice(out.indexOf('from .models import Article') + 1, 0, '', 'logger = logging.getLogger(__name__)', '', '', 'def health(request):', '    return JsonResponse({"ok": True})');
+      const s = out.indexOf('        form = ArticleForm(request.POST)');
+      const e = out.indexOf('        return JsonResponse({"id": article.pk})');
+      const body = out.slice(s, e + 1).map((l) => `    ${l}`);
+      out.splice(s, e - s + 1, '        try:', ...body, '        except Exception:', '            logger.exception("create article failed")', '            raise');
+      const t = out.indexOf('    article.title = payload.get("title", article.title)');
+      out.splice(t, 1, '    title = payload.get("title")', '    if title:', '        article.title = title.strip()');
+      return out;
+    }
+
+    after(async () => {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      for (const u of made) {
+        await fsp.rm(u.fsPath, { force: true });
+      }
+    });
+
+    it('檔案沒開著：AI 直接寫磁碟（加函式、包 try/except 改縮排、改寫一段）', async () => {
+      const uri = await plant();
+      await fsp.writeFile(uri.fsPath, text(aiRefactor(VIEWS)));
+      assert.deepStrictEqual(await settle(uri, expectMarks()), expectMarks());
+    });
+
+    it('檔案沒開著：分好幾次串流寫入（中間是寫到一半的內容）', async () => {
+      const uri = await plant();
+      const final = aiRefactor(VIEWS);
+      for (const n of [5, 18, 30]) {
+        await fsp.writeFile(uri.fsPath, text(final.slice(0, n)));
+        await new Promise((r) => setTimeout(r, 400));
+      }
+      await fsp.writeFile(uri.fsPath, text(final));
+      assert.deepStrictEqual(await settle(uri, expectMarks()), expectMarks());
+    });
+
+    it('檔案沒開著：先寫暫存檔再改名覆蓋原檔（原子寫入）', async () => {
+      const uri = await plant();
+      const tmp = `${uri.fsPath}.tmp-${Date.now()}`;
+      await fsp.writeFile(tmp, text(aiRefactor(VIEWS)));
+      await fsp.rename(tmp, uri.fsPath);
+      assert.deepStrictEqual(await settle(uri, expectMarks()), expectMarks());
+    });
+
+    it('檔案開著（沒修改）：AI 寫磁碟，編輯器重新載入', async () => {
+      const uri = await plant();
+      await vscode.window.showTextDocument(uri);
+      await api.external.idle();
+      await fsp.writeFile(uri.fsPath, text(aiRefactor(VIEWS)));
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString())!;
+      await waitFor(() => doc.getText(), (t) => t.includes('def health'), 8000);
+      assert.deepStrictEqual(await settle(uri, expectMarks()), expectMarks());
+      await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    });
+
+    it('檔案開著：在編輯器裡一段一段套用 AI 修改（多行換成多行），存檔', async () => {
+      const uri = await plant();
+      const editor = await vscode.window.showTextDocument(uri);
+      await api.external.idle();
+      const doc = editor.document;
+      const find = (s: string) => doc.getText().split(/\r?\n/).indexOf(s);
+      // 1. 把整個 post 方法換成包了 try/except 的版本（Cursor 套用修改常這樣整段取代）
+      const s = find('    def post(self, request):');
+      const e = find('        return JsonResponse({"id": article.pk})');
+      const post = doc.getText().split(/\r?\n/).slice(s, e + 1);
+      const wrapped = [post[0], '        try:', ...post.slice(1).map((l) => `    ${l}`), '        except Exception:', '            raise'];
+      await editor.edit((b) => b.replace(new vscode.Range(s, 0, e + 1, 0), wrapped.join('\n') + '\n'));
+      // 2. 整個 article_list 函式換成新版（書籤那一行內容不變）
+      const ls = find('def article_list(request):');
+      const le = find('    return render(request, "app/article_list.html", {"articles": qs})');
+      await editor.edit((b) =>
+        b.replace(
+          new vscode.Range(ls, 0, le + 1, 0),
+          [
+            'def article_list(request):',
+            '    """文章列表，可用 q 搜尋標題。"""',
+            '    qs = Article.objects.filter(published=True).order_by("-created_at")',
+            '    keyword = (request.GET.get("q") or "").strip()',
+            '    if keyword:',
+            '        qs = qs.filter(title__icontains=keyword)',
+            '    return render(request, "app/article_list.html", {"articles": qs, "q": keyword})',
+          ].join('\n') + '\n',
+        ),
+      );
+      // 3. 最上面插入新的 import
+      await editor.edit((b) => b.insert(new vscode.Position(0, 0), 'import logging\n'));
+      assert.deepStrictEqual(await settle(uri, expectMarks()), expectMarks());
+      await doc.save();
+      assert.deepStrictEqual(await settle(uri, expectMarks()), expectMarks());
+      await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    });
+
+    it('AI 把函式整個搬到檔案最後、刪掉另一個函式：搬走的找回來，刪掉的標成需確認', async () => {
+      const uri = await plant();
+      const out = [...VIEWS];
+      const s = out.indexOf('def article_list(request):');
+      const listFn = out.splice(s, 6); // 整個 article_list 函式
+      const a = out.indexOf('def article_api(request, pk):');
+      out.splice(a, out.length - a); // 刪掉 article_api
+      out.push(...listFn);
+      await fsp.writeFile(uri.fsPath, text(out));
+      const want = [MARKS[0].trim(), MARKS[1].trim(), `?${MARKS[2].trim()}`];
+      const sorted = (v: string[]) => JSON.stringify([...v].sort());
+      const got = await waitFor(() => where(uri), (v) => sorted(v) === sorted(want), 8000);
+      assert.deepStrictEqual([...got].sort(), [...want].sort());
+    });
+
+    it('AI 同時改好幾個檔案', async () => {
+      const uris = [await plant(), await plant(), await plant()];
+      await Promise.all(uris.map((u) => fsp.writeFile(u.fsPath, text(aiRefactor(VIEWS)))));
+      for (const u of uris) {
+        assert.deepStrictEqual(await settle(u, expectMarks()), expectMarks());
+      }
+    });
+  });
+
+  describe('M5：切換分支（真的在臨時 git 專案裡切換）', () => {
+    const fsp = require('fs/promises') as typeof import('fs/promises');
+    const cp = require('child_process') as typeof import('child_process');
+    const root = () => folder().uri.fsPath;
+    const git = (...args: string[]) =>
+      cp.execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.invalid', '-c', 'core.autocrlf=false', ...args], {
+        cwd: root(),
+        stdio: 'pipe',
+      });
+    const fileA = () => workspaceFile('app', 'tmp_branch_a.py');
+    const fileB = () => workspaceFile('app', 'tmp_branch_b.py');
+    const fileC = () => workspaceFile('app', 'tmp_branch_c.py');
+    const fileC2 = () => workspaceFile('app', 'tmp_branch_c2.py');
+    const main = Array.from({ length: 20 }, (_, i) => `common_${i} = shared_value(${i})`);
+    const feature = [...main.slice(0, 5), 'def feature_only():', '    return build_feature_payload()', '', ...main.slice(5)];
+    const cLines = Array.from({ length: 12 }, (_, i) => `renamed_${i} = compute_rename(${i})`);
+    const text = (ls: string[]) => ls.join('\n') + '\n';
+    const rel = (u: vscode.Uri) => `app/${path.basename(u.fsPath)}`;
+    const state = (uri: vscode.Uri) => api.store.bookmarksFor(uri).map((b) => (b.status === 'notOnBranch' ? '~' : b.status === 'lost' ? `${b.line}?` : String(b.line)));
+    async function settle(uri: vscode.Uri, want: string[]): Promise<string[]> {
+      return waitFor(
+        async () => {
+          await api.branches.refresh();
+          await api.external.idle();
+          return state(uri);
+        },
+        (v) => JSON.stringify(v) === JSON.stringify(want),
+        10000,
+      );
+    }
+    async function plant(uri: vscode.Uri, ls: string[], lines: number[]): Promise<void> {
+      await api.store.update(folder(), (d) =>
+        lines.reduce((acc, line) => addBookmark(acc, { id: newBookmarkId(), file: rel(uri), line, anchor: makeAnchor(ls, line) }), d),
+      );
+      await api.external.idle();
+    }
+    async function checkout(...args: string[]): Promise<void> {
+      git('checkout', ...args);
+      await api.branches.refresh();
+    }
+
+    before(async function () {
+      this.timeout(60000);
+      await fsp.rm(path.join(root(), '.git'), { recursive: true, force: true });
+      git('init');
+      git('checkout', '-b', 'main');
+      await fsp.writeFile(fileA().fsPath, text(main));
+      await fsp.writeFile(fileC().fsPath, text(cLines));
+      git('add', rel(fileA()), rel(fileC()));
+      git('commit', '-m', 'main');
+      git('checkout', '-b', 'feature');
+      await fsp.writeFile(fileA().fsPath, text(feature));
+      await fsp.writeFile(fileB().fsPath, text(['def only_here():', '    pass', '    return feature_file_value()']));
+      git('add', rel(fileA()), rel(fileB()));
+      git('commit', '-m', 'feature');
+      await api.branches.rescan();
+    });
+
+    beforeEach(async () => {
+      // 每項都從 feature 分支、書籤在固定位置開始
+      await checkout('feature');
+      await api.store.update(folder(), () => emptyStore());
+      await api.external.idle();
+      await plant(fileA(), feature, [6, 15]);
+      await plant(fileB(), ['def only_here():', '    pass', '    return feature_file_value()'], [2]);
+    });
+
+    after(async function () {
+      this.timeout(60000);
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await fsp.rm(path.join(root(), '.git'), { recursive: true, force: true });
+      for (const u of [fileA(), fileB(), fileC(), fileC2()]) {
+        await fsp.rm(u.fsPath, { force: true });
+      }
+      await api.branches.rescan();
+    });
+
+    it('檔案沒開著：切到 main，feature 才有的程式碼與檔案標成不在此分支，共同的程式碼換算位置；切回 feature 全部恢復', async () => {
+      assert.strictEqual(api.treeView.description, 'feature', '標題旁顯示目前分支');
+      await checkout('main');
+      assert.deepStrictEqual(await settle(fileA(), ['~', '12']), ['~', '12']);
+      assert.deepStrictEqual(await settle(fileB(), ['~']), ['~']);
+      assert.strictEqual(api.treeView.description, 'main');
+      const groups = await api.provider.getChildren(api.provider.sections.bookmarks);
+      const group = groups.find((g) => (g as BmGroupNode).rel === rel(fileA()))!;
+      const node = (await api.provider.getChildren(group))[0] as BookmarkNode;
+      const item = api.provider.getTreeItem(node);
+      assert.strictEqual((item.iconPath as vscode.ThemeIcon).id, 'git-branch');
+      assert.ok(String(item.contextValue).includes(':away'));
+
+      await checkout('feature');
+      assert.deepStrictEqual(await settle(fileA(), ['6', '15']), ['6', '15']);
+      assert.deepStrictEqual(await settle(fileB(), ['2']), ['2']);
+      const [f, c] = api.store.bookmarksFor(fileA());
+      assert.strictEqual(f.anchor?.text, 'return build_feature_payload()');
+      assert.strictEqual(f.positions?.main?.status, 'notOnBranch');
+      assert.deepStrictEqual(c.positions?.main, { line: 12 });
+    });
+
+    it('檔案開著：切分支時編輯器重新載入，一樣換算；來回切換不累積誤差', async () => {
+      await vscode.window.showTextDocument(fileA());
+      await api.external.idle();
+      for (let i = 0; i < 2; i++) {
+        await checkout('main');
+        assert.deepStrictEqual(await settle(fileA(), ['~', '12']), ['~', '12']);
+        await checkout('feature');
+        assert.deepStrictEqual(await settle(fileA(), ['6', '15']), ['6', '15']);
+      }
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === fileA().toString())!;
+      assert.strictEqual(doc.isDirty, false);
+      await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    });
+
+    it('隱藏不在此分支的書籤；只在這個分支顯示的書籤，在其他分支看不到、也不會被移動', async () => {
+      await checkout('main');
+      await settle(fileA(), ['~', '12']);
+      await vscode.commands.executeCommand('functionBookmarks.hideNotOnBranch');
+      const groups = await api.provider.getChildren(api.provider.sections.bookmarks);
+      assert.ok(!groups.some((g) => (g as BmGroupNode).rel === rel(fileB())), '整個檔案都不在此分支：不列出');
+      await vscode.commands.executeCommand('functionBookmarks.showNotOnBranch');
+      await checkout('feature');
+      await settle(fileA(), ['6', '15']);
+
+      const entry = api.store.allBookmarks().find((e) => e.bookmark.file === rel(fileA()) && e.bookmark.line === 15)!;
+      await vscode.commands.executeCommand('functionBookmarks.setBookmarkBranchOnly', { type: 'bookmark', entry });
+      assert.strictEqual(api.store.bookmarksFor(fileA()).find((b) => b.id === entry.bookmark.id)?.homeBranch, 'feature');
+      await checkout('main');
+      assert.deepStrictEqual(await settle(fileA(), ['~']), ['~'], '只屬於 feature 的書籤在 main 看不到');
+      const hidden = api.store.bookmarksFor(fileA(), { includeHidden: true }).find((b) => b.id === entry.bookmark.id)!;
+      assert.strictEqual(hidden.line, 15, '隱藏期間不換算');
+      await checkout('feature');
+      assert.deepStrictEqual(await settle(fileA(), ['6', '15']), ['6', '15']);
+      const back = api.store.allBookmarks().find((e) => e.bookmark.id === entry.bookmark.id)!;
+      await vscode.commands.executeCommand('functionBookmarks.setBookmarkAllBranches', { type: 'bookmark', entry: back });
+      assert.strictEqual(api.store.bookmarksFor(fileA()).find((b) => b.id === entry.bookmark.id)?.scope, undefined);
+    });
+
+    it('檔案在分支間改名：書籤跟著改名後的檔案；切回去再跟回來', async () => {
+      await plant(fileC(), cLines, [3]);
+      git('checkout', '-b', 'renamed');
+      git('mv', rel(fileC()), rel(fileC2()));
+      git('commit', '-m', 'rename');
+      assert.deepStrictEqual(await settle(fileC2(), ['3']), ['3']);
+      assert.deepStrictEqual(state(fileC()), []);
+      await checkout('feature');
+      assert.deepStrictEqual(await settle(fileC(), ['3']), ['3']);
+      git('branch', '-D', 'renamed');
+    });
+
+    it('清理已刪除分支的紀錄', async () => {
+      git('checkout', '-b', 'temp');
+      await fsp.writeFile(fileA().fsPath, text(['# temp', ...feature]));
+      git('commit', '-am', 'temp');
+      await settle(fileA(), ['7', '16']);
+      await checkout('feature');
+      await settle(fileA(), ['6', '15']);
+      assert.ok(api.store.bookmarksFor(fileA())[0].positions?.temp, '記下了 temp 分支的位置');
+      git('branch', '-D', 'temp');
+      const removed = await vscode.commands.executeCommand<string[]>('functionBookmarks.cleanBranchRecords', ['temp']);
+      assert.deepStrictEqual(removed, ['temp']);
+      assert.strictEqual(api.store.bookmarksFor(fileA())[0].positions?.temp, undefined);
+      assert.ok(!api.external.snapshotBranches(fileA()).includes('temp'));
     });
   });
 

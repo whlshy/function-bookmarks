@@ -24,9 +24,29 @@ export interface LineBookmark {
   /** 多行備註（Markdown）。 */
   note?: string;
   anchor?: BookmarkAnchor;
-  /** lost：所在的行被刪除（onLineDelete = markLost）。 */
-  status?: 'ok' | 'lost';
+  /**
+   * lost：找不到原本那一行（被刪除、改動太多、在合併衝突範圍內），需要確認。
+   * notOnBranch：切換分支後，這段程式碼（或整個檔案）不在目前的分支；切回去會自動恢復。
+   */
+  status?: BookmarkStatus;
+  /** 各分支最後確認的位置（離開該分支時記下，切回來時以那時的內容換算）。鍵為分支名稱。 */
+  positions?: Record<string, BranchPosition>;
+  /** `branch`：只屬於 `homeBranch`，在其他分支隱藏。沒有設定即所有分支都顯示。 */
+  scope?: 'branch';
+  homeBranch?: string;
   createdAt?: string;
+}
+
+export type BookmarkStatus = 'ok' | 'lost' | 'notOnBranch';
+
+export interface BranchPosition {
+  line: number;
+  status?: 'lost' | 'notOnBranch';
+}
+
+/** 書籤在目前分支是否顯示（只屬於別的分支的書籤隱藏）。`branch` 為 undefined：不是 git 專案或 detached HEAD。 */
+export function visibleOnBranch(b: Pick<LineBookmark, 'scope' | 'homeBranch'>, branch: string | undefined): boolean {
+  return b.scope !== 'branch' || !b.homeBranch || b.homeBranch === branch;
 }
 
 export type OnLineDelete = 'moveToNext' | 'markLost' | 'remove';
@@ -92,7 +112,7 @@ export function applyChanges(
   bookmark: Pick<LineBookmark, 'line' | 'status'>,
   changes: LineChange[],
   onDelete: OnLineDelete,
-): { line: number; status?: 'ok' | 'lost' } | undefined {
+): { line: number; status?: BookmarkStatus } | undefined {
   let line = bookmark.line;
   let deleted = false;
   const ordered = [...changes].sort((a, b) => b.startLine - a.startLine || b.startChar - a.startChar);
@@ -196,4 +216,12 @@ export function isWholeDocumentReplace(changes: LineChange[], newLineCount: numb
   const inserted = c.text.split('\n').length - 1;
   const oldLineCount = newLineCount - inserted + removed;
   return c.startLine === 0 && c.startChar === 0 && removed >= 5 && removed >= Math.floor(oldLineCount * 0.9) - 1;
+}
+
+/**
+ * 多行換成多行（Cursor 套用 AI 修改、貼上覆蓋多行、Alt+↑↓ 移動行）：照行號平移會把範圍內的書籤當成被刪除，
+ * 改用前後內容比對換算。
+ */
+export function isBlockReplace(changes: LineChange[]): boolean {
+  return changes.some((c) => c.endLine > c.startLine && countNewlines(c.text) > 0);
 }

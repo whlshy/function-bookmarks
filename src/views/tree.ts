@@ -133,6 +133,8 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   private fileLabel?: string;
   filterMode: FilterMode = 'all';
   bookmarkGrouping: BookmarkGrouping = 'file';
+  /** 隱藏「不在此分支」的書籤。 */
+  hideNotOnBranch = false;
   private disposables: vscode.Disposable[] = [];
   /** 使用者展開／收合過的節點（以節點 id 記錄），切換檔案、重開編輯器後沿用。 */
   private expansion: Record<string, boolean>;
@@ -370,7 +372,9 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
 
   /** 書籤（函式書籤＋行號書籤）依檔案（預設）或依標籤分組；同一組內依檔名、行號混排。 */
   private bookmarkChildren(section: SectionNode): TreeNode[] {
-    const all = allBookmarkItems(this.store, this.favorites).sort(compareItems);
+    const all = allBookmarkItems(this.store, this.favorites)
+      .filter((i) => !(this.hideNotOnBranch && i.kind === 'line' && i.entry.bookmark.status === 'notOnBranch'))
+      .sort(compareItems);
     const groups = new Map<string, BmGroupNode>();
     const add = (key: string, e: BookmarkItem, extra: Partial<BmGroupNode>) => {
       let g = groups.get(key);
@@ -481,12 +485,21 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     const item = new vscode.TreeItem(bookmarkTitle(b), vscode.TreeItemCollapsibleState.None);
     item.id = `bm:${element.parent.type === 'bmGroup' ? element.parent.key : ''}:${b.id}`;
     const lost = b.status === 'lost';
+    const away = b.status === 'notOnBranch';
     item.iconPath = lost
       ? new vscode.ThemeIcon('warning', new vscode.ThemeColor('disabledForeground'))
-      : new vscode.ThemeIcon('bookmark', b.note ? new vscode.ThemeColor(NOTE_COLOR) : undefined);
+      : away
+        ? new vscode.ThemeIcon('git-branch', new vscode.ThemeColor('disabledForeground'))
+        : new vscode.ThemeIcon('bookmark', b.note ? new vscode.ThemeColor(NOTE_COLOR) : undefined);
     const parts: string[] = [];
     if (lost) {
       parts.push(vscode.l10n.t('needs checking'));
+    }
+    if (away) {
+      parts.push(vscode.l10n.t('not on this branch'));
+    }
+    if (b.scope === 'branch' && b.homeBranch) {
+      parts.push(vscode.l10n.t('only on {0}', b.homeBranch));
     }
     // 依標籤分組時看不出是哪個檔案，補上檔名
     parts.push(element.parent.type === 'bmGroup' && element.parent.by === 'tag' ? `${basenamePosix(b.file)}:${b.line + 1}` : String(b.line + 1));
@@ -504,8 +517,14 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     if (b.tags?.length) {
       md.appendMarkdown(`\n\n${b.tags.map((t) => `#${escapeMd(t)}`).join(' ')}`);
     }
+    if (away) {
+      md.appendMarkdown(`\n\n${vscode.l10n.t('This code is not on the current branch. The bookmark comes back when you switch to a branch that has it.')}`);
+    }
+    if (b.scope === 'branch' && b.homeBranch) {
+      md.appendMarkdown(`\n\n${vscode.l10n.t('Shown only on branch {0}.', escapeMd(b.homeBranch))}`);
+    }
     if (lost) {
-      md.appendMarkdown(`\n\n${vscode.l10n.t('The bookmarked line was deleted. Check the position and move the bookmark if needed.')}`);
+      md.appendMarkdown(`\n\n${vscode.l10n.t('The bookmarked line could not be found (deleted, changed a lot, or inside a merge conflict). Put the cursor on the correct line and use Move Bookmark to Cursor.')}`);
     }
     if (b.note) {
       md.appendMarkdown('\n\n---\n\n');
@@ -514,7 +533,7 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
       trustPreviewLink(md);
     }
     item.tooltip = md;
-    item.contextValue = `fbBookmark${b.note ? ':note' : ''}${lost ? ':lost' : ''}`;
+    item.contextValue = `fbBookmark${b.note ? ':note' : ''}${lost ? ':lost' : ''}${away ? ':away' : ''}${b.scope === 'branch' ? ':branchOnly' : ''}`;
     item.command = {
       command: COMMANDS.revealLine,
       title: vscode.l10n.t('Go to bookmark'),

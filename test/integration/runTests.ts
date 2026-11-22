@@ -10,6 +10,8 @@ import { runTests } from '@vscode/test-electron';
 async function main(): Promise<void> {
   const root = path.resolve(__dirname, '../../..');
   const workspace = path.join(root, 'test', 'fixtures', 'workspace');
+  // 切換分支的測試會在工作區裡建立臨時 git 專案；上次中斷留下的先刪掉
+  fs.rmSync(path.join(workspace, '.git'), { recursive: true, force: true });
   const exe = process.env.VSCODE_EXECUTABLE;
   try {
     await runTests({

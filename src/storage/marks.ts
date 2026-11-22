@@ -270,6 +270,24 @@ function strings(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
 }
 
+function parsePositions(v: unknown): LineBookmark['positions'] {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) {
+    return undefined;
+  }
+  const out: NonNullable<LineBookmark['positions']> = {};
+  for (const [branch, p] of Object.entries(v as Record<string, unknown>)) {
+    const pos = p as Record<string, unknown> | undefined;
+    if (!branch || !pos || typeof pos.line !== 'number' || pos.line < 0) {
+      continue;
+    }
+    out[branch] = { line: Math.floor(pos.line) };
+    if (pos.status === 'lost' || pos.status === 'notOnBranch') {
+      out[branch].status = pos.status;
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 function parseBookmarks(list: unknown): LineBookmark[] {
   const out: LineBookmark[] = [];
   if (!Array.isArray(list)) {
@@ -304,8 +322,16 @@ function parseBookmarks(list: unknown): LineBookmark[] {
         symbolOffset: typeof a.symbolOffset === 'number' ? a.symbolOffset : undefined,
       };
     }
-    if (b.status === 'lost') {
-      bm.status = 'lost';
+    if (b.status === 'lost' || b.status === 'notOnBranch') {
+      bm.status = b.status;
+    }
+    const positions = parsePositions(b.positions);
+    if (positions) {
+      bm.positions = positions;
+    }
+    if (b.scope === 'branch' && typeof b.homeBranch === 'string' && b.homeBranch) {
+      bm.scope = 'branch';
+      bm.homeBranch = b.homeBranch;
     }
     if (typeof b.createdAt === 'string') {
       bm.createdAt = b.createdAt;
@@ -329,8 +355,15 @@ function serializeBookmarks(list: LineBookmark[]): LineBookmark[] {
       if (b.note) {
         o.note = b.note;
       }
-      if (b.status === 'lost') {
-        o.status = 'lost';
+      if (b.status === 'lost' || b.status === 'notOnBranch') {
+        o.status = b.status;
+      }
+      if (b.scope === 'branch' && b.homeBranch) {
+        o.scope = 'branch';
+        o.homeBranch = b.homeBranch;
+      }
+      if (b.positions && Object.keys(b.positions).length) {
+        o.positions = Object.fromEntries(Object.entries(b.positions).sort(([x], [y]) => x.localeCompare(y)));
       }
       if (b.anchor) {
         const a: LineBookmark['anchor'] = { text: b.anchor.text, before: b.anchor.before, after: b.anchor.after };
@@ -405,7 +438,14 @@ export function updateBookmarksInFile(
       changed = true;
       continue;
     }
-    if (next.line !== b.line || next.status !== b.status || JSON.stringify(next.anchor) !== JSON.stringify(b.anchor)) {
+    if (
+      next.line !== b.line ||
+      next.status !== b.status ||
+      next.scope !== b.scope ||
+      next.homeBranch !== b.homeBranch ||
+      JSON.stringify(next.anchor) !== JSON.stringify(b.anchor) ||
+      JSON.stringify(next.positions) !== JSON.stringify(b.positions)
+    ) {
       changed = true;
     }
     bookmarks.push(next);

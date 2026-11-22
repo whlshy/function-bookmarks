@@ -16,6 +16,8 @@ export function onLineDeleteSetting(scope?: vscode.ConfigurationScope): OnLineDe
  */
 export class BookmarkTracker implements vscode.Disposable {
   private disposables: vscode.Disposable[] = [];
+  /** 由 ExternalChangeWatcher 設定：回答 true 的編輯改用差異換算，這裡不平移。 */
+  handledByDiff?: (e: vscode.TextDocumentChangeEvent, changes: LineChange[]) => boolean;
 
   constructor(
     private readonly store: MarkStore,
@@ -46,7 +48,7 @@ export class BookmarkTracker implements vscode.Disposable {
       endChar: c.range.end.character,
       text: c.text.replace(/\r\n/g, '\n'),
     }));
-    if (isWholeDocumentReplace(changes, e.document.lineCount)) {
+    if (isWholeDocumentReplace(changes, e.document.lineCount) || this.handledByDiff?.(e, changes)) {
       return;
     }
     const mode = onLineDeleteSetting(e.document.uri);
@@ -55,6 +57,10 @@ export class BookmarkTracker implements vscode.Disposable {
       loc.folder,
       (d) =>
         updateBookmarksInFile(d, loc.rel, (b) => {
+          // 只屬於別的分支（目前隱藏）的書籤不跟著這個分支的編輯移動
+          if (!this.store.isVisible(loc.folder, b)) {
+            return b;
+          }
           const r = applyChanges(b, changes, mode);
           if (!r) {
             return undefined;
@@ -83,6 +89,10 @@ export class BookmarkTracker implements vscode.Disposable {
       loc.folder,
       (d) =>
         updateBookmarksInFile(d, loc.rel, (b) => {
+          // 需確認的書籤保留原本的 anchor，之後內容回來（例如衝突解決、復原）還能找回
+          if (b.status === 'lost' || b.status === 'notOnBranch' || !this.store.isVisible(loc.folder, b)) {
+            return b;
+          }
           const sym = findInnermost(symbols, b.line);
           return { ...b, anchor: makeAnchor(lines, b.line, sym?.path, sym?.startLine) };
         }),

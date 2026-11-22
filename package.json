@@ -2,7 +2,7 @@
   "name": "function-bookmarks",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.3",
+  "version": "0.4.0",
   "publisher": "function-bookmarks",
   "license": "MIT",
   "preview": true,
@@ -162,6 +162,42 @@
         "icon": "$(edit)"
       },
       {
+        "command": "functionBookmarks.setBookmarkBranchOnly",
+        "title": "%command.setBookmarkBranchOnly%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.setBookmarkAllBranches",
+        "title": "%command.setBookmarkAllBranches%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.hideNotOnBranch",
+        "title": "%command.hideNotOnBranch%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.showNotOnBranch",
+        "title": "%command.showNotOnBranch%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.cleanBranchRecords",
+        "title": "%command.cleanBranchRecords%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.importAlefragnani",
+        "title": "%command.importAlefragnani%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.moveBookmarkToCursor",
+        "title": "%command.moveBookmarkToCursor%",
+        "category": "Function Bookmarks",
+        "icon": "$(target)"
+      },
+      {
         "command": "functionBookmarks.editBookmarkTags",
         "title": "%command.editBookmarkTags%",
         "category": "Function Bookmarks",
@@ -263,6 +299,26 @@
           "group": "2_bookmarks@2"
         },
         {
+          "command": "functionBookmarks.importAlefragnani",
+          "when": "view == functionBookmarks.tree",
+          "group": "2_bookmarks@9"
+        },
+        {
+          "command": "functionBookmarks.hideNotOnBranch",
+          "when": "view == functionBookmarks.tree && !functionBookmarks.hideNotOnBranch",
+          "group": "2_bookmarks@3"
+        },
+        {
+          "command": "functionBookmarks.showNotOnBranch",
+          "when": "view == functionBookmarks.tree && functionBookmarks.hideNotOnBranch",
+          "group": "2_bookmarks@3"
+        },
+        {
+          "command": "functionBookmarks.cleanBranchRecords",
+          "when": "view == functionBookmarks.tree",
+          "group": "3_clear@0"
+        },
+        {
           "command": "functionBookmarks.clearAllBookmarks",
           "when": "view == functionBookmarks.tree",
           "group": "3_clear@1"
@@ -333,6 +389,26 @@
           "command": "functionBookmarks.removeBookmark",
           "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/",
           "group": "inline@1"
+        },
+        {
+          "command": "functionBookmarks.moveBookmarkToCursor",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark.*:lost/",
+          "group": "inline@0"
+        },
+        {
+          "command": "functionBookmarks.moveBookmarkToCursor",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/",
+          "group": "1_bookmark@0"
+        },
+        {
+          "command": "functionBookmarks.setBookmarkBranchOnly",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/ && viewItem !~ /:branchOnly/",
+          "group": "1_bookmark@5"
+        },
+        {
+          "command": "functionBookmarks.setBookmarkAllBranches",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark.*:branchOnly/",
+          "group": "1_bookmark@5"
         },
         {
           "command": "functionBookmarks.renameBookmark",

@@ -256,6 +256,71 @@ export class BookmarkCommands {
     );
   }
 
+  /**
+   * 把書籤移到游標所在的行（找不到位置、需確認的書籤用來手動放回正確位置）。
+   * 書籤的檔案不在目前的編輯器時，先開到書籤附近，請使用者把游標放到正確的行再執行一次。
+   */
+  async moveToCursor(node?: unknown, targetLine?: number): Promise<void> {
+    let e = node === undefined ? undefined : this.entryOf(node);
+    const editor = vscode.window.activeTextEditor;
+    if (!e && node === undefined && editor) {
+      // 從命令選擇區執行：在目前檔案的書籤中挑一個（需確認的排前面）
+      const list = this.store.bookmarksFor(editor.document.uri);
+      const loc = this.store.locate(editor.document.uri);
+      if (!loc || !list.length) {
+        return this.noBookmark();
+      }
+      const sorted = [...list].sort((a, b) => Number(b.status === 'lost') - Number(a.status === 'lost') || a.line - b.line);
+      const pick =
+        sorted.length === 1 && sorted[0].status === 'lost'
+          ? { b: sorted[0] }
+          : await vscode.window.showQuickPick(
+              sorted.map((b) => ({
+                label: `${b.status === 'lost' ? '$(warning) ' : '$(bookmark) '}${bookmarkTitle(b)}`,
+                description: String(b.line + 1),
+                b,
+              })),
+              { title: vscode.l10n.t('Move which bookmark to line {0}?', editor.selection.active.line + 1) },
+            );
+      if (!pick) {
+        return;
+      }
+      e = { folder: loc.folder, uri: editor.document.uri, bookmark: pick.b };
+    }
+    if (!e) {
+      return this.noBookmark();
+    }
+    const entry = e;
+    if (!editor || editor.document.uri.toString() !== entry.uri.toString()) {
+      await revealLine(entry.uri, entry.bookmark.line);
+      void vscode.window.showInformationMessage(
+        vscode.l10n.t('Put the cursor on the correct line, then run "Move Bookmark to Cursor" again.'),
+      );
+      return;
+    }
+    const doc = editor.document;
+    const line = targetLine ?? editor.selection.active.line;
+    if (line === entry.bookmark.line && entry.bookmark.status !== 'lost') {
+      return;
+    }
+    const other = this.store.bookmarksFor(doc.uri).find((b) => b.line === line && b.id !== entry.bookmark.id);
+    if (other) {
+      void vscode.window.showWarningMessage(vscode.l10n.t('Line {0} already has a bookmark.', line + 1));
+      return;
+    }
+    const symbols = (await this.service.getSymbols(doc)).symbols;
+    const sym = findInnermost(symbols, line);
+    const anchor = makeAnchor(doc.getText().split(/\r?\n/), line, sym?.path, sym?.startLine);
+    await this.store.update(entry.folder, (d) =>
+      updateBookmark(d, entry.bookmark.id, (b) => {
+        b.line = line;
+        b.anchor = anchor;
+        delete b.status;
+        return b;
+      }),
+    );
+  }
+
   async remove(node?: unknown): Promise<void> {
     const e = this.entryOf(node);
     if (!e) {
@@ -291,7 +356,10 @@ export class BookmarkCommands {
     if (!(await this.confirm(vscode.l10n.t('Clear {0} bookmark(s) in {1}?', count, loc.rel), confirmed))) {
       return;
     }
-    await this.store.update(loc.folder, (d) => unfavoriteFiles(updateBookmarksInFile(d, loc.rel, () => undefined), loc.rel));
+    // 只屬於別的分支（目前看不到）的書籤保留
+    await this.store.update(loc.folder, (d) =>
+      unfavoriteFiles(updateBookmarksInFile(d, loc.rel, (b) => (this.store.isVisible(loc.folder, b) ? undefined : b)), loc.rel),
+    );
   }
 
   /** 清除所有書籤（函式書籤＋行號書籤，會先確認）；函式的自訂名稱與備註保留。 */
@@ -317,7 +385,7 @@ export class BookmarkCommands {
     const keyOf = (folder: vscode.WorkspaceFolder, file: string) => `${String(folders.indexOf(folder)).padStart(3, '0')}/${file}`;
     // 函式書籤用目前偵測到的行號；找不到的函式不參與跳轉
     const items = allBookmarkItems(this.store, this.favorites)
-      .filter((i) => i.line !== undefined)
+      .filter((i) => i.line !== undefined && !(i.kind === 'line' && i.entry.bookmark.status === 'notOnBranch'))
       .map((i) => ({ file: keyOf(i.folder, i.file), line: i.line!, entry: { uri: i.uri, line: i.line! } }));
     const editor = vscode.window.activeTextEditor;
     const loc = editor ? this.store.locate(editor.document.uri) : undefined;

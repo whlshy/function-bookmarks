@@ -5,7 +5,7 @@ import { SECTION, storageMode } from '../config';
 import { DetectedSymbol } from '../detection/types';
 import { BOOKMARKS_FILE } from './gitExclude';
 import { ensureBookmarksFileExcluded } from './gitExcludeFs';
-import { LineBookmark } from '../bookmarks/model';
+import { LineBookmark, visibleOnBranch } from '../bookmarks/model';
 import { emptyStore, favorites, findMark, MarkKey, parseStore, renamePath, serializeStore, StoreData, SymbolMark } from './marks';
 
 export interface Located {
@@ -100,10 +100,26 @@ export class MarkStore implements vscode.Disposable {
     return out;
   }
 
-  allBookmarks(): BookmarkEntry[] {
+  /** 目前分支名稱（由 BranchService 提供），決定「只屬於某分支」的書籤要不要顯示。 */
+  branchOf: (folder: vscode.WorkspaceFolder) => string | undefined = () => undefined;
+
+  isVisible(folder: vscode.WorkspaceFolder, b: LineBookmark): boolean {
+    return visibleOnBranch(b, this.branchOf(folder));
+  }
+
+  /** 通知畫面重新整理（例如切換分支後，顯示的書籤不同了）。 */
+  notifyChanged(): void {
+    this.changed.fire();
+  }
+
+  /** 所有書籤；預設不含只屬於別的分支（目前隱藏）的書籤。 */
+  allBookmarks(options: { includeHidden?: boolean } = {}): BookmarkEntry[] {
     const out: BookmarkEntry[] = [];
     for (const folder of vscode.workspace.workspaceFolders ?? []) {
       for (const bookmark of this.data.get(uriKey(folder.uri))?.bookmarks ?? []) {
+        if (!options.includeHidden && !this.isVisible(folder, bookmark)) {
+          continue;
+        }
         out.push({ folder, bookmark, uri: this.uriOf(folder, bookmark.file) });
       }
     }
@@ -117,12 +133,14 @@ export class MarkStore implements vscode.Disposable {
   }
 
   /** 某個檔案的書籤（依行號排序）。 */
-  bookmarksFor(uri: vscode.Uri): LineBookmark[] {
+  bookmarksFor(uri: vscode.Uri, options: { includeHidden?: boolean } = {}): LineBookmark[] {
     const loc = this.locate(uri);
     if (!loc) {
       return [];
     }
-    return (this.data.get(uriKey(loc.folder.uri))?.bookmarks ?? []).filter((b) => b.file === loc.rel).sort((a, b) => a.line - b.line);
+    return (this.data.get(uriKey(loc.folder.uri))?.bookmarks ?? [])
+      .filter((b) => b.file === loc.rel && (options.includeHidden || this.isVisible(loc.folder, b)))
+      .sort((a, b) => a.line - b.line);
   }
 
   isBroken(folder: vscode.WorkspaceFolder): boolean {
