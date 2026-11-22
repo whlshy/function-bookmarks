@@ -2,7 +2,7 @@
   "name": "function-bookmarks",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "function-bookmarks",
   "license": "MIT",
   "preview": true,
@@ -187,6 +187,50 @@
         "category": "Function Bookmarks"
       },
       {
+        "command": "functionBookmarks.exportBookmarks",
+        "title": "%command.exportBookmarks%",
+        "category": "Function Bookmarks",
+        "icon": "$(export)"
+      },
+      {
+        "command": "functionBookmarks.importBookmarks",
+        "title": "%command.importBookmarks%",
+        "category": "Function Bookmarks",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "functionBookmarks.filterBookmarkSources",
+        "title": "%command.filterBookmarkSources%",
+        "category": "Function Bookmarks",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "functionBookmarks.filterBookmarkSourcesActive",
+        "title": "%command.filterBookmarkSourcesActive%",
+        "category": "Function Bookmarks",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "functionBookmarks.groupBookmarksBySource",
+        "title": "%command.groupBookmarksBySource%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.deleteBookmarkSource",
+        "title": "%command.deleteBookmarkSource%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.renameBookmarkSource",
+        "title": "%command.renameBookmarkSource%",
+        "category": "Function Bookmarks"
+      },
+      {
+        "command": "functionBookmarks.makeBookmarkMine",
+        "title": "%command.makeBookmarkMine%",
+        "category": "Function Bookmarks"
+      },
+      {
         "command": "functionBookmarks.importAlefragnani",
         "title": "%command.importAlefragnani%",
         "category": "Function Bookmarks"
@@ -295,13 +339,38 @@
         },
         {
           "command": "functionBookmarks.groupBookmarksByFile",
-          "when": "view == functionBookmarks.tree && functionBookmarks.bookmarkGrouping == tag",
+          "when": "view == functionBookmarks.tree && functionBookmarks.bookmarkGrouping != file",
           "group": "2_bookmarks@2"
+        },
+        {
+          "command": "functionBookmarks.filterBookmarkSources",
+          "when": "view == functionBookmarks.tree && functionBookmarks.hasSources && !functionBookmarks.sourceFiltered",
+          "group": "navigation@4"
+        },
+        {
+          "command": "functionBookmarks.filterBookmarkSourcesActive",
+          "when": "view == functionBookmarks.tree && functionBookmarks.sourceFiltered",
+          "group": "navigation@4"
+        },
+        {
+          "command": "functionBookmarks.groupBookmarksBySource",
+          "when": "view == functionBookmarks.tree && functionBookmarks.hasSources && functionBookmarks.bookmarkGrouping != source",
+          "group": "2_bookmarks@2"
+        },
+        {
+          "command": "functionBookmarks.exportBookmarks",
+          "when": "view == functionBookmarks.tree",
+          "group": "4_share@1"
+        },
+        {
+          "command": "functionBookmarks.importBookmarks",
+          "when": "view == functionBookmarks.tree",
+          "group": "4_share@2"
         },
         {
           "command": "functionBookmarks.importAlefragnani",
           "when": "view == functionBookmarks.tree",
-          "group": "2_bookmarks@9"
+          "group": "4_share@3"
         },
         {
           "command": "functionBookmarks.hideNotOnBranch",
@@ -401,6 +470,26 @@
           "group": "1_bookmark@0"
         },
         {
+          "command": "functionBookmarks.makeBookmarkMine",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark.*:foreign/",
+          "group": "1_bookmark@6"
+        },
+        {
+          "command": "functionBookmarks.renameBookmarkSource",
+          "when": "view == functionBookmarks.tree && viewItem == fbBmSource:foreign",
+          "group": "1_source@1"
+        },
+        {
+          "command": "functionBookmarks.deleteBookmarkSource",
+          "when": "view == functionBookmarks.tree && viewItem == fbBmSource:foreign",
+          "group": "2_remove@1"
+        },
+        {
+          "command": "functionBookmarks.exportBookmarks",
+          "when": "view == functionBookmarks.tree && viewItem == fbBmFile",
+          "group": "3_share@1"
+        },
+        {
           "command": "functionBookmarks.setBookmarkBranchOnly",
           "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/ && viewItem !~ /:branchOnly/",
           "group": "1_bookmark@5"
@@ -475,6 +564,14 @@
       ],
       "commandPalette": [
         {
+          "command": "functionBookmarks.filterBookmarkSourcesActive",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.makeBookmarkMine",
+          "when": "false"
+        },
+        {
           "command": "functionBookmarks.revealSymbol",
           "when": "false"
         },
@@ -521,6 +618,12 @@
         {
           "command": "functionBookmarks.hoverAction",
           "when": "false"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "functionBookmarks.exportBookmarks",
+          "group": "7_modification@9"
         }
       ],
       "editor/lineNumber/context": [
@@ -690,6 +793,11 @@
           },
           "default": [],
           "markdownDescription": "%config.django.templateDirs%"
+        },
+        "functionBookmarks.authorName": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "%config.authorName%"
         },
         "functionBookmarks.followCursor": {
           "type": "boolean",

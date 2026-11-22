@@ -5,6 +5,9 @@ import { ExternalChangeWatcher } from './bookmarks/externalWatcher';
 import { watchGitHead } from './bookmarks/gitHead';
 import { BranchService } from './git/branchService';
 import { cleanBranchRecords, setBranchScope } from './git/branchCommands';
+import { exportBookmarks, ExportOptions } from './share/exporter';
+import { importBookmarks, ImportOptions } from './share/importer';
+import { deleteSource, filterSources, makeMine, renameSource } from './share/sources';
 import { importAlefragnani } from './bookmarks/importAlefragnani';
 import { ReconcileWatcher } from './storage/reconcileWatcher';
 import { Commands, reveal } from './commands';
@@ -28,6 +31,7 @@ const VIEW_ID = 'functionBookmarks.tree';
 const STATE_FILTER = 'filterMode';
 const STATE_BM_GROUP = 'bookmarkGrouping';
 const STATE_HIDE_AWAY = 'hideNotOnBranch';
+const STATE_HIDDEN_SOURCES = 'hiddenSources';
 
 /** 行號右鍵選單傳入的參數：{ lineNumber（1 起算）, uri }。 */
 function lineArg(arg: unknown): { uri: vscode.Uri; line: number } | undefined {
@@ -98,9 +102,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
         label = b.name ?? vscode.l10n.t('detached {0}', b.id.slice(1, 8));
       }
     }
-    treeView.description = ids.size === 1 ? label : undefined;
+    const parts = [ids.size === 1 ? label : undefined, store.hiddenSourceList.length ? vscode.l10n.t('filtered') : undefined];
+    treeView.description = parts.filter(Boolean).join(' · ') || undefined;
   };
   updateBranchLabel();
+
+  // 來源篩選：記住被隱藏的來源；有匯入的書籤時才顯示篩選按鈕
+  store.setHiddenSources(context.workspaceState.get<string[]>(STATE_HIDDEN_SOURCES, []));
+  store.onSourceFilterChanged = (hidden) => void context.workspaceState.update(STATE_HIDDEN_SOURCES, hidden);
+  const updateSourceContext = () => {
+    void vscode.commands.executeCommand('setContext', 'functionBookmarks.hasSources', store.sources().length > 0);
+    void vscode.commands.executeCommand('setContext', 'functionBookmarks.sourceFiltered', store.hiddenSourceList.length > 0);
+    updateBranchLabel();
+  };
+  updateSourceContext();
+  const shareDeps = { store, favorites, branches };
+  const entryArg = (node?: TreeNode) => bookmarks.entryOf(isBookmarkNode(node) ? node : undefined);
+  const sourceArg = (arg?: unknown) =>
+    typeof arg === 'string' ? arg : (arg as { type?: string; by?: string; key?: string } | undefined)?.by === 'source' ? (arg as { key: string }).key : undefined;
 
   const setHideAway = async (hide: boolean) => {
     provider.hideNotOnBranch = hide;
@@ -310,6 +329,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     reg('functionBookmarks.cleanBranchRecords', (picked?: string[]) =>
       cleanBranchRecords(store, branches, external, Array.isArray(picked) ? picked : undefined),
     ),
+    store.onDidChange(() => updateSourceContext()),
+    reg('functionBookmarks.exportBookmarks', (arg?: unknown) =>
+      arg instanceof vscode.Uri ? exportBookmarks(shareDeps, {}, arg) : exportBookmarks(shareDeps, (arg as ExportOptions | undefined) ?? {}),
+    ),
+    reg('functionBookmarks.importBookmarks', (arg?: unknown) =>
+      importBookmarks(shareDeps, service, arg instanceof vscode.Uri ? { uri: arg } : ((arg as ImportOptions | undefined) ?? {})),
+    ),
+    reg('functionBookmarks.filterBookmarkSources', (hidden?: unknown) => filterSources(store, Array.isArray(hidden) ? hidden : undefined)),
+    reg('functionBookmarks.filterBookmarkSourcesActive', () => filterSources(store)),
+    reg('functionBookmarks.groupBookmarksBySource', () => applyViewState(provider.filterMode, 'source')),
+    reg('functionBookmarks.deleteBookmarkSource', (arg?: unknown, confirmed?: boolean) => deleteSource(store, sourceArg(arg), confirmed === true)),
+    reg('functionBookmarks.renameBookmarkSource', (arg?: unknown, newName?: string) => renameSource(store, sourceArg(arg), newName)),
+    reg('functionBookmarks.makeBookmarkMine', (node?: TreeNode) => makeMine(store, entryArg(node))),
     reg('functionBookmarks.clearAllBookmarks', () => bookmarks.clearAll()),
     reg('functionBookmarks.nextBookmark', () => bookmarks.go(1)),
     reg('functionBookmarks.previousBookmark', () => bookmarks.go(-1)),

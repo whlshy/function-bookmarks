@@ -333,6 +333,19 @@ function parseBookmarks(list: unknown): LineBookmark[] {
       bm.scope = 'branch';
       bm.homeBranch = b.homeBranch;
     }
+    const src = b.source as Record<string, unknown> | undefined;
+    if (src && typeof src === 'object' && typeof src.author === 'string' && src.author.trim()) {
+      bm.source = {
+        author: src.author.trim(),
+        importId: typeof src.importId === 'string' ? src.importId : '',
+        originalId: typeof src.originalId === 'string' ? src.originalId : '',
+        importedAt: typeof src.importedAt === 'string' ? src.importedAt : '',
+      };
+    }
+    const sym = b.symbol as Record<string, unknown> | undefined;
+    if (sym && typeof sym === 'object' && typeof sym.path === 'string' && typeof sym.kind === 'string') {
+      bm.symbol = { path: sym.path, kind: sym.kind };
+    }
     if (typeof b.createdAt === 'string') {
       bm.createdAt = b.createdAt;
     }
@@ -361,6 +374,12 @@ function serializeBookmarks(list: LineBookmark[]): LineBookmark[] {
       if (b.scope === 'branch' && b.homeBranch) {
         o.scope = 'branch';
         o.homeBranch = b.homeBranch;
+      }
+      if (b.source) {
+        o.source = { ...b.source };
+      }
+      if (b.symbol) {
+        o.symbol = { ...b.symbol };
       }
       if (b.positions && Object.keys(b.positions).length) {
         o.positions = Object.fromEntries(Object.entries(b.positions).sort(([x], [y]) => x.localeCompare(y)));

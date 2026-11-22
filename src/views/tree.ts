@@ -2,7 +2,7 @@ import * as path from 'path';
 import { openDocumentFor } from '../symbols/documentSource';
 import { bookmarkPreviewLink, previewNoteLink, trustPreviewLink } from './noteEditor';
 import { bookmarkTitle } from '../bookmarks/commands';
-import { allBookmarkItems, BookmarkItem, compareItems, itemTags } from '../bookmarks/unified';
+import { allBookmarkItems, BookmarkItem, compareItems, itemSource, itemTags } from '../bookmarks/unified';
 import { BookmarkEntry } from '../storage/store';
 import { uriKey } from '../util/uris';
 import * as vscode from 'vscode';
@@ -18,7 +18,7 @@ import { basenamePosix } from '../util/paths';
 
 export type SectionId = 'bookmarks' | 'currentFile' | 'project';
 export type FilterMode = 'all' | 'bookmarks';
-export type BookmarkGrouping = 'file' | 'tag';
+export type BookmarkGrouping = 'file' | 'tag' | 'source';
 
 export interface SectionNode {
   type: 'section';
@@ -60,7 +60,7 @@ export interface FileNode {
 }
 export interface BmGroupNode {
   type: 'bmGroup';
-  /** 依檔案分組時為檔案 uri；依標籤分組時為標籤（沒有標籤為空字串）。 */
+  /** 依檔案分組時為檔案 uri；依標籤分組時為標籤（沒有標籤為空字串）；依來源分組時為來源（自己的為空字串）。 */
   key: string;
   by: BookmarkGrouping;
   uri?: vscode.Uri;
@@ -103,6 +103,8 @@ const REFERENCE_KEYWORD: Record<string, string> = {
 
 /** 有備註的函式，名稱前的圖示改用這個顏色（不另外加圖示，避免擠）。 */
 export const NOTE_COLOR = 'charts.blue';
+/** 別人的書籤（匯入的）的顏色。 */
+export const FOREIGN_COLOR = 'charts.purple';
 
 const EXPANSION_KEY = 'treeExpansion';
 const MAX_EXPANSION = 3000;
@@ -374,6 +376,7 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   private bookmarkChildren(section: SectionNode): TreeNode[] {
     const all = allBookmarkItems(this.store, this.favorites)
       .filter((i) => !(this.hideNotOnBranch && i.kind === 'line' && i.entry.bookmark.status === 'notOnBranch'))
+      .filter((i) => i.kind !== 'line' || this.store.shownBySource(i.entry.bookmark))
       .sort(compareItems);
     const groups = new Map<string, BmGroupNode>();
     const add = (key: string, e: BookmarkItem, extra: Partial<BmGroupNode>) => {
@@ -385,7 +388,9 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
       g.items.push(e);
     };
     for (const e of all) {
-      if (this.bookmarkGrouping === 'tag') {
+      if (this.bookmarkGrouping === 'source') {
+        add(itemSource(e), e, {});
+      } else if (this.bookmarkGrouping === 'tag') {
         const tags = itemTags(e);
         for (const tag of tags.length ? tags : ['']) {
           add(tag, e, {});
@@ -395,6 +400,10 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
       }
     }
     const list = [...groups.values()];
+    if (this.bookmarkGrouping === 'source') {
+      // 自己的排第一，其他依名稱
+      return list.sort((a, b) => (a.key === '' ? -1 : b.key === '' ? 1 : a.key.localeCompare(b.key)));
+    }
     return this.bookmarkGrouping === 'tag'
       ? list.sort((a, b) => (a.key === '' ? 1 : b.key === '' ? -1 : a.key.localeCompare(b.key)))
       : list.sort((a, b) => (a.rel ?? '').localeCompare(b.rel ?? ''));
@@ -459,6 +468,14 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   }
 
   private bmGroupItem(element: BmGroupNode): vscode.TreeItem {
+    if (element.by === 'source') {
+      const item = new vscode.TreeItem(element.key || vscode.l10n.t('Mine'), vscode.TreeItemCollapsibleState.Expanded);
+      item.id = `bmSource:${element.key}`;
+      item.iconPath = new vscode.ThemeIcon(element.key ? 'person' : 'account', element.key ? new vscode.ThemeColor(FOREIGN_COLOR) : undefined);
+      item.description = String(element.items.length);
+      item.contextValue = element.key ? 'fbBmSource:foreign' : 'fbBmSource';
+      return item;
+    }
     if (element.by === 'tag') {
       const item = new vscode.TreeItem(
         element.key ? `#${element.key}` : vscode.l10n.t('No tag'),
@@ -490,7 +507,9 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
       ? new vscode.ThemeIcon('warning', new vscode.ThemeColor('disabledForeground'))
       : away
         ? new vscode.ThemeIcon('git-branch', new vscode.ThemeColor('disabledForeground'))
-        : new vscode.ThemeIcon('bookmark', b.note ? new vscode.ThemeColor(NOTE_COLOR) : undefined);
+        : b.source
+          ? new vscode.ThemeIcon(b.symbol ? 'symbol-method' : 'bookmark', new vscode.ThemeColor(FOREIGN_COLOR))
+          : new vscode.ThemeIcon('bookmark', b.note ? new vscode.ThemeColor(NOTE_COLOR) : undefined);
     const parts: string[] = [];
     if (lost) {
       parts.push(vscode.l10n.t('needs checking'));
@@ -500,6 +519,9 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     }
     if (b.scope === 'branch' && b.homeBranch) {
       parts.push(vscode.l10n.t('only on {0}', b.homeBranch));
+    }
+    if (b.source && !(element.parent.type === 'bmGroup' && element.parent.by === 'source')) {
+      parts.push(`@${b.source.author}`);
     }
     // 依標籤分組時看不出是哪個檔案，補上檔名
     parts.push(element.parent.type === 'bmGroup' && element.parent.by === 'tag' ? `${basenamePosix(b.file)}:${b.line + 1}` : String(b.line + 1));
@@ -520,6 +542,10 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     if (away) {
       md.appendMarkdown(`\n\n${vscode.l10n.t('This code is not on the current branch. The bookmark comes back when you switch to a branch that has it.')}`);
     }
+    if (b.source) {
+      const when = b.source.importedAt ? ` · ${vscode.l10n.t('imported {0}', b.source.importedAt.slice(0, 10))}` : '';
+      md.appendMarkdown(`\n\n${vscode.l10n.t('From {0}', escapeMd(b.source.author))}${when}`);
+    }
     if (b.scope === 'branch' && b.homeBranch) {
       md.appendMarkdown(`\n\n${vscode.l10n.t('Shown only on branch {0}.', escapeMd(b.homeBranch))}`);
     }
@@ -533,7 +559,7 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
       trustPreviewLink(md);
     }
     item.tooltip = md;
-    item.contextValue = `fbBookmark${b.note ? ':note' : ''}${lost ? ':lost' : ''}${away ? ':away' : ''}${b.scope === 'branch' ? ':branchOnly' : ''}`;
+    item.contextValue = `fbBookmark${b.note ? ':note' : ''}${lost ? ':lost' : ''}${away ? ':away' : ''}${b.scope === 'branch' ? ':branchOnly' : ''}${b.source ? ':foreign' : ''}`;
     item.command = {
       command: COMMANDS.revealLine,
       title: vscode.l10n.t('Go to bookmark'),

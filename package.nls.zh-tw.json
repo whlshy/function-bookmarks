@@ -69,5 +69,14 @@
   "command.setBookmarkAllBranches": "所有分支都顯示",
   "command.hideNotOnBranch": "隱藏不在此分支的書籤",
   "command.showNotOnBranch": "顯示不在此分支的書籤",
-  "command.cleanBranchRecords": "清理已刪除分支的紀錄"
+  "command.cleanBranchRecords": "清理已刪除分支的紀錄",
+  "command.exportBookmarks": "匯出書籤…",
+  "command.importBookmarks": "匯入書籤…",
+  "command.filterBookmarkSources": "篩選來源…",
+  "command.filterBookmarkSourcesActive": "篩選來源…（篩選中）",
+  "command.groupBookmarksBySource": "依來源分組",
+  "command.deleteBookmarkSource": "刪除這個來源的全部書籤",
+  "command.renameBookmarkSource": "修改來源註記",
+  "command.makeBookmarkMine": "轉成我的書籤",
+  "config.authorName": "匯出書籤時的名稱，未設定時使用 git 的 `user.name`。"
 }

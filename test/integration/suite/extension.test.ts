@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { ExtensionApi } from '../../../src/extension';
-import { addBookmark, emptyStore } from '../../../src/storage/marks';
+import { addBookmark, emptyStore, setFavorite } from '../../../src/storage/marks';
 import { makeAnchor, newBookmarkId } from '../../../src/bookmarks/model';
 import type { BmGroupNode, BookmarkNode, DirNode, FavoriteNode, FileNode, SymbolNode, TreeNode } from '../../../src/views/tree';
 
@@ -1361,6 +1361,209 @@ describe('Function Bookmarks（整合測試）', () => {
       assert.deepStrictEqual(removed, ['temp']);
       assert.strictEqual(api.store.bookmarksFor(fileA())[0].positions?.temp, undefined);
       assert.ok(!api.external.snapshotBranches(fileA()).includes('temp'));
+    });
+  });
+
+  describe('M6：匯出與匯入書籤、來源篩選', () => {
+    const fsp = require('fs/promises') as typeof import('fs/promises');
+    const fileA = () => workspaceFile('app', 'tmp_share_a.py');
+    const relA = 'app/tmp_share_a.py';
+    const BASE = [
+      'import json',
+      '',
+      '',
+      'def helper(payload):',
+      '    data = json.loads(payload)',
+      '    return data["value"]',
+      '',
+      '',
+      'def save_article(request):',
+      '    article = Article.objects.get(pk=request.POST["id"])',
+      '    article.title = request.POST["title"]',
+      '    article.save()',
+      '    return JsonResponse({"ok": True})',
+    ];
+    const text = (ls: string[]) => ls.join('\n') + '\n';
+    type Exported = { bookmarks: { kind: string; line: number; label?: string; path?: string; anchor?: unknown }[]; files?: Record<string, unknown>; includesCode: boolean };
+
+    /** 自己的書籤：兩個行號書籤（一個有名稱、標籤、備註）＋一個函式書籤。 */
+    async function setupMine(): Promise<void> {
+      await fsp.writeFile(fileA().fsPath, text(BASE));
+      await api.store.update(folder(), (d) => {
+        let next = addBookmark(d, { id: newBookmarkId(), file: relA, line: 10, label: '改標題', tags: ['article'], note: '要檢查權限', anchor: makeAnchor(BASE, 10) });
+        next = addBookmark(next, { id: newBookmarkId(), file: relA, line: 4, anchor: makeAnchor(BASE, 4) });
+        return setFavorite(next, { file: relA, path: 'helper', kind: 'function' }, true, 3);
+      });
+      await api.favorites.refresh();
+      await api.external.idle();
+    }
+    const exportJson = async (includeCode = true) =>
+      (await vscode.commands.executeCommand<{ count: number; text: string }>('functionBookmarks.exportBookmarks', {
+        folder: folder(),
+        scope: { kind: 'all' },
+        includeImported: false,
+        format: 'json',
+        includeCode,
+        target: 'clipboard',
+      }))!;
+    const importText = (t: string, author = 'henry.hsu', mode: 'replace' | 'merge' = 'replace') =>
+      vscode.commands.executeCommand<{ imported: number; lost: number }>('functionBookmarks.importBookmarks', { text: t, folder: folder(), author, mode, confirmed: true });
+    const foreign = () => api.store.bookmarksFor(fileA()).filter((b) => b.source);
+
+    after(async () => {
+      await vscode.commands.executeCommand('functionBookmarks.filterBookmarkSources', []);
+      await fsp.rm(fileA().fsPath, { force: true });
+      await fsp.rm(workspaceFile('tmp_share_export.csv').fsPath, { force: true });
+    });
+
+    it('匯出 JSON：行號書籤＋函式書籤、每個檔案的行雜湊、匯出者；複製到剪貼簿', async () => {
+      await setupMine();
+      const r = await exportJson();
+      assert.strictEqual(r.count, 3);
+      const data = JSON.parse(r.text) as Exported & { format: string; exportedBy: string };
+      assert.strictEqual(data.format, 'function-bookmarks/v1');
+      assert.ok(data.exportedBy);
+      assert.deepStrictEqual(data.bookmarks.map((b) => [b.kind, b.line, b.label ?? b.path]).sort(), [
+        ['line', 10, '改標題'],
+        ['line', 4, undefined],
+        ['symbol', 3, 'helper'],
+      ].sort());
+      assert.ok(data.files?.[relA], '附上行雜湊');
+      assert.strictEqual(await vscode.env.clipboard.readText(), r.text);
+    });
+
+    it('匯入：對方匯出後我這邊的檔案改過，依行雜湊換算到正確位置；函式書籤用名稱找；別人的書籤用紫色、懸停顯示來源', async () => {
+      await setupMine();
+      const exported = (await exportJson()).text;
+      await api.store.update(folder(), () => emptyStore());
+      await api.favorites.refresh();
+      // 我這邊：上面多了兩行 import，save_article 裡多一行
+      const mine = ['import logging', 'import os', ...BASE.slice(0, 10), '    logger.info("saving")', ...BASE.slice(10)];
+      await fsp.writeFile(fileA().fsPath, text(mine));
+      const r = await importText(exported);
+      assert.deepStrictEqual({ imported: r.imported, lost: r.lost }, { imported: 3, lost: 0 });
+      const got = foreign().map((b) => [b.line, mine[b.line].trim(), b.source?.author, b.symbol?.path]);
+      assert.deepStrictEqual(got, [
+        [5, 'def helper(payload):', 'henry.hsu', 'helper'],
+        [6, 'data = json.loads(payload)', 'henry.hsu', undefined],
+        [13, 'article.title = request.POST["title"]', 'henry.hsu', undefined],
+      ]);
+      const labeled = foreign().find((b) => b.label === '改標題')!;
+      assert.deepStrictEqual([labeled.tags, labeled.note], [['article'], '要檢查權限']);
+
+      await vscode.window.showTextDocument(fileA());
+      api.gutter.schedule(0);
+      const lines = await waitFor(() => api.gutter.linesFor(fileA(), 'foreign'), (v) => v.length === 3);
+      assert.deepStrictEqual(lines, [5, 6, 13]);
+      const groups = await api.provider.getChildren(api.provider.sections.bookmarks);
+      const g = groups.find((x) => (x as BmGroupNode).rel === relA)!;
+      const node = (await api.provider.getChildren(g)).find((n) => (n as BookmarkNode).entry?.bookmark.label === '改標題') as BookmarkNode;
+      const item = api.provider.getTreeItem(node);
+      assert.ok(String(item.description).includes('@henry.hsu'));
+      assert.ok(String(item.contextValue).includes(':foreign'));
+      assert.ok((item.tooltip as vscode.MarkdownString).value.replace(/\\/g, '').includes('From henry.hsu'));
+      await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    });
+
+    it('同一來源再匯入：取代不會重複；合併時同一筆更新、新的加入；自己的書籤不受影響', async () => {
+      await setupMine();
+      const exported = (await exportJson()).text;
+      await importText(exported);
+      await importText(exported);
+      assert.strictEqual(foreign().length, 3, '取代');
+      const data = JSON.parse(exported) as Exported;
+      data.bookmarks.find((b) => b.label === '改標題')!.label = '改標題（新）';
+      data.bookmarks.push({ ...data.bookmarks[0], kind: 'line', line: 12, label: '新的', anchor: undefined, path: undefined, id: 'new-one' } as never);
+      await importText(JSON.stringify(data), 'henry.hsu', 'merge');
+      assert.deepStrictEqual(foreign().map((b) => b.label ?? '').sort(), ['', '', '改標題（新）', '新的'].sort());
+      assert.strictEqual(api.store.bookmarksFor(fileA()).filter((b) => !b.source).length, 2, '自己的兩個行號書籤還在');
+    });
+
+    it('不含程式碼內容：沒有行雜湊與 anchor，匯入時照行號放', async () => {
+      await setupMine();
+      const t = (await exportJson(false)).text;
+      const data = JSON.parse(t) as Exported;
+      assert.strictEqual(data.includesCode, false);
+      assert.strictEqual(data.files, undefined);
+      assert.ok(data.bookmarks.every((b) => b.anchor === undefined));
+      assert.ok(!t.includes('Article.objects'), '不含任何程式碼');
+      await importText(t, 'amy.lin');
+      assert.deepStrictEqual(
+        api.store.bookmarksFor(fileA()).filter((b) => b.source?.author === 'amy.lin').map((b) => b.line),
+        [3, 4, 10],
+      );
+    });
+
+    it('篩選來源、依來源分組、上下跳轉只在篩選結果內；修改來源註記、轉成我的、刪除來源', async () => {
+      await setupMine();
+      await importText((await exportJson()).text);
+      await vscode.commands.executeCommand('functionBookmarks.groupBookmarksBySource');
+      let groups = (await api.provider.getChildren(api.provider.sections.bookmarks)) as BmGroupNode[];
+      assert.deepStrictEqual(groups.map((g) => [g.key, g.items.length]), [
+        ['', 3],
+        ['henry.hsu', 3],
+      ]);
+      await vscode.commands.executeCommand('functionBookmarks.filterBookmarkSources', ['henry.hsu']);
+      groups = (await api.provider.getChildren(api.provider.sections.bookmarks)) as BmGroupNode[];
+      assert.deepStrictEqual(groups.map((g) => g.key), ['']);
+      assert.ok(String(api.treeView.description).includes('filtered'));
+      await vscode.window.showTextDocument(fileA());
+      const visited = new Set<number>();
+      for (let i = 0; i < 6; i++) {
+        visited.add((await api.bookmarks.go(1))!.line);
+      }
+      assert.deepStrictEqual([...visited].sort((a, b) => a - b), [3, 4, 10], '只在自己的書籤間跳');
+      await vscode.commands.executeCommand('functionBookmarks.filterBookmarkSources', []);
+
+      assert.ok(await vscode.commands.executeCommand('functionBookmarks.renameBookmarkSource', 'henry.hsu', 'henry'));
+      assert.ok(foreign().every((b) => b.source?.author === 'henry'));
+      const one = api.store.allBookmarks().find((e) => e.bookmark.source && e.bookmark.label === '改標題')!;
+      await vscode.commands.executeCommand('functionBookmarks.makeBookmarkMine', { type: 'bookmark', entry: one });
+      assert.strictEqual(foreign().length, 2);
+      assert.strictEqual(await vscode.commands.executeCommand('functionBookmarks.deleteBookmarkSource', 'henry', true), 2);
+      assert.strictEqual(foreign().length, 0);
+      assert.deepStrictEqual(api.store.sources(), []);
+      await vscode.commands.executeCommand('functionBookmarks.groupBookmarksByFile');
+      await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    });
+
+    it('從剪貼簿匯入；匯出 Markdown 表格與 CSV', async () => {
+      await setupMine();
+      await vscode.env.clipboard.writeText((await exportJson()).text);
+      const r = await vscode.commands.executeCommand<{ imported: number }>('functionBookmarks.importBookmarks', {
+        from: 'clipboard',
+        folder: folder(),
+        author: 'clip',
+        confirmed: true,
+      });
+      assert.strictEqual(r.imported, 3);
+
+      const md = await vscode.commands.executeCommand<{ text: string }>('functionBookmarks.exportBookmarks', {
+        folder: folder(),
+        scope: { kind: 'tag', tag: 'article' },
+        includeImported: true,
+        format: 'markdown',
+        includeCode: true,
+        target: 'clipboard',
+      });
+      const rows = md.text.trim().split('\n');
+      assert.strictEqual(rows.length, 4, '表頭、分隔線、我的與 clip 的各一筆');
+      assert.ok(rows[0].includes('Code') && rows[0].includes('Source'));
+      assert.ok(md.text.includes('| app/tmp_share_a.py | 11 | 改標題 | #article | 要檢查權限 | `article.title = request.POST["title"]` |'));
+
+      const out = workspaceFile('tmp_share_export.csv');
+      await vscode.commands.executeCommand('functionBookmarks.exportBookmarks', {
+        folder: folder(),
+        scope: { kind: 'path', rel: 'app' },
+        includeImported: false,
+        format: 'csv',
+        includeCode: false,
+        target: out,
+      });
+      const csv = await fsp.readFile(out.fsPath, 'utf8');
+      assert.ok(csv.startsWith('﻿File,Line,Name,Kind,Tags,Note,Source'));
+      assert.ok(csv.includes('app/tmp_share_a.py,4,helper,function,,,'));
+      assert.strictEqual(csv.trim().split('\r\n').length, 4);
     });
   });
 

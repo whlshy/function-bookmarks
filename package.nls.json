@@ -69,5 +69,14 @@
   "command.setBookmarkAllBranches": "Show on All Branches",
   "command.hideNotOnBranch": "Hide Bookmarks Not on This Branch",
   "command.showNotOnBranch": "Show Bookmarks Not on This Branch",
-  "command.cleanBranchRecords": "Clean Up Records of Deleted Branches"
+  "command.cleanBranchRecords": "Clean Up Records of Deleted Branches",
+  "command.exportBookmarks": "Export Bookmarks…",
+  "command.importBookmarks": "Import Bookmarks…",
+  "command.filterBookmarkSources": "Filter by Source…",
+  "command.filterBookmarkSourcesActive": "Filter by Source… (filtered)",
+  "command.groupBookmarksBySource": "Group Bookmarks by Source",
+  "command.deleteBookmarkSource": "Delete All Bookmarks from This Source",
+  "command.renameBookmarkSource": "Rename Source",
+  "command.makeBookmarkMine": "Make It Mine",
+  "config.authorName": "Your name in exported bookmarks. Defaults to git `user.name`."
 }

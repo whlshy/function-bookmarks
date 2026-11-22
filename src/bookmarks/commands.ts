@@ -27,7 +27,7 @@ export function isBookmarkLinkArg(arg: unknown): arg is BookmarkLinkArg {
 }
 
 export function bookmarkTitle(b: LineBookmark): string {
-  return b.label ?? (b.anchor?.text || `#${b.line + 1}`);
+  return b.label ?? (b.symbol ? (b.symbol.path.split('.').pop() ?? b.symbol.path) : undefined) ?? (b.anchor?.text || `#${b.line + 1}`);
 }
 
 export async function revealLine(uri: vscode.Uri, line: number): Promise<vscode.TextEditor> {
@@ -385,7 +385,11 @@ export class BookmarkCommands {
     const keyOf = (folder: vscode.WorkspaceFolder, file: string) => `${String(folders.indexOf(folder)).padStart(3, '0')}/${file}`;
     // 函式書籤用目前偵測到的行號；找不到的函式不參與跳轉
     const items = allBookmarkItems(this.store, this.favorites)
-      .filter((i) => i.line !== undefined && !(i.kind === 'line' && i.entry.bookmark.status === 'notOnBranch'))
+      .filter(
+        (i) =>
+          i.line !== undefined &&
+          !(i.kind === 'line' && (i.entry.bookmark.status === 'notOnBranch' || !this.store.shownBySource(i.entry.bookmark))),
+      )
       .map((i) => ({ file: keyOf(i.folder, i.file), line: i.line!, entry: { uri: i.uri, line: i.line! } }));
     const editor = vscode.window.activeTextEditor;
     const loc = editor ? this.store.locate(editor.document.uri) : undefined;

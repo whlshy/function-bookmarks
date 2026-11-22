@@ -116,7 +116,7 @@ interface MarkItem extends vscode.QuickPickItem {
  */
 export async function searchMarks(store: MarkStore, favorites: FavoritesModel): Promise<void> {
   const items: MarkItem[] = [];
-  for (const e of store.allBookmarks().sort((a, b) => a.bookmark.file.localeCompare(b.bookmark.file) || a.bookmark.line - b.bookmark.line)) {
+  for (const e of store.allBookmarks().filter((x) => store.shownBySource(x.bookmark)).sort((a, b) => a.bookmark.file.localeCompare(b.bookmark.file) || a.bookmark.line - b.bookmark.line)) {
     const b = e.bookmark;
     const desc = [b.tags?.map((t) => `#${t}`).join(' '), b.anchor?.symbolPath].filter(Boolean).join('  ');
     const text = b.label && b.anchor?.text ? `  ·  ${b.anchor.text.slice(0, 80)}` : '';

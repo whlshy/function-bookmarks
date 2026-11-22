@@ -111,6 +111,14 @@ export class BranchService implements vscode.Disposable {
     }
   }
 
+  /** 資料夾所在的 git 目錄；不是 git 專案時為 undefined。 */
+  async gitDirOf(folder: vscode.WorkspaceFolder): Promise<string | undefined> {
+    if (!this.gitDirs.has(uriKey(folder.uri))) {
+      await this.refreshFolder(folder);
+    }
+    return this.gitDirs.get(uriKey(folder.uri));
+  }
+
   /** 本機現有的分支名稱；不是 git 專案時為 undefined。 */
   async existingBranches(folder: vscode.WorkspaceFolder): Promise<string[] | undefined> {
     if (!this.gitDirs.has(uriKey(folder.uri))) {

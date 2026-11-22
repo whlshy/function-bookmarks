@@ -41,3 +41,8 @@ export function compareItems(a: BookmarkItem, b: BookmarkItem): number {
 export function lineBookmarkOf(i: BookmarkItem): LineBookmark | undefined {
   return i.kind === 'line' ? i.entry.bookmark : undefined;
 }
+
+/** 書籤的來源：自己的（含函式書籤）為空字串。 */
+export function itemSource(i: BookmarkItem): string {
+  return i.kind === 'line' ? (i.entry.bookmark.source?.author ?? '') : '';
+}

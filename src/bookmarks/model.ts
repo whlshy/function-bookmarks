@@ -34,10 +34,30 @@ export interface LineBookmark {
   /** `branch`：只屬於 `homeBranch`，在其他分支隱藏。沒有設定即所有分支都顯示。 */
   scope?: 'branch';
   homeBranch?: string;
+  /** 從別人匯入的書籤：來源註記。自己的書籤沒有。 */
+  source?: BookmarkSource;
+  /** 從別人的「函式書籤」匯入：函式的名稱路徑與種類（顯示用；位置照行號書籤跟隨）。 */
+  symbol?: { path: string; kind: string };
   createdAt?: string;
 }
 
 export type BookmarkStatus = 'ok' | 'lost' | 'notOnBranch';
+
+/** 從別人匯入的書籤的來源註記。 */
+export interface BookmarkSource {
+  /** 匯入時輸入的來源註記（例如 henry.hsu）；同一個註記視為同一個來源。 */
+  author: string;
+  /** 這次匯入的批次。 */
+  importId: string;
+  /** 對方的書籤 id（合併時用來比對）。 */
+  originalId: string;
+  importedAt: string;
+}
+
+/** 書籤屬於哪個來源：自己的為空字串。 */
+export function sourceOf(b: { source?: BookmarkSource }): string {
+  return b.source?.author ?? '';
+}
 
 export interface BranchPosition {
   line: number;

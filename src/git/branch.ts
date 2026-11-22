@@ -145,3 +145,88 @@ export async function listBranches(gitDir: string): Promise<string[]> {
   parsePackedRefs((await readText(path.join(base, 'packed-refs'))) ?? '').forEach((b) => out.add(b));
   return [...out].sort();
 }
+
+/** 解析 git 設定檔（.git/config、~/.gitconfig），鍵為 `section.key` 或 `section.sub.key`（小寫）。 */
+export function parseGitConfig(content: string): Map<string, string> {
+  const out = new Map<string, string>();
+  let section = '';
+  for (const raw of content.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#') || line.startsWith(';')) {
+      continue;
+    }
+    const sec = /^\[\s*([^\s\]"]+)(?:\s+"([^"]*)")?\s*\]$/.exec(line);
+    if (sec) {
+      section = sec[2] !== undefined ? `${sec[1].toLowerCase()}.${sec[2]}` : sec[1].toLowerCase();
+      continue;
+    }
+    const kv = /^([A-Za-z][\w-]*)\s*(?:=\s*(.*))?$/.exec(line);
+    if (kv && section) {
+      let v = (kv[2] ?? 'true').trim();
+      if (/^".*"$/.test(v)) {
+        v = v.slice(1, -1);
+      }
+      out.set(`${section}.${kv[1].toLowerCase()}`, v);
+    }
+  }
+  return out;
+}
+
+async function commonDir(gitDir: string): Promise<string> {
+  const common = (await readText(path.join(gitDir, 'commondir')))?.trim();
+  return common ? path.resolve(gitDir, common) : gitDir;
+}
+
+/** 目前的 commit（HEAD 指向的分支 → refs/heads 或 packed-refs）。 */
+export async function readHeadCommit(gitDir: string): Promise<string | undefined> {
+  const head = parseHead((await readText(path.join(gitDir, 'HEAD'))) ?? '');
+  if (head.commit) {
+    return head.commit;
+  }
+  if (!head.name) {
+    return undefined;
+  }
+  const base = await commonDir(gitDir);
+  const loose = (await readText(path.join(base, 'refs', 'heads', ...head.name.split('/'))))?.trim();
+  if (loose && /^[0-9a-f]{7,64}$/i.test(loose)) {
+    return loose.toLowerCase();
+  }
+  for (const line of ((await readText(path.join(base, 'packed-refs'))) ?? '').split(/\r?\n/)) {
+    const m = /^([0-9a-f]{7,64})\s+refs\/heads\/(.+)$/i.exec(line.trim());
+    if (m && m[2] === head.name) {
+      return m[1].toLowerCase();
+    }
+  }
+  return undefined;
+}
+
+/** origin（沒有就第一個）remote 的網址。 */
+export async function readRemoteUrl(gitDir: string): Promise<string | undefined> {
+  const cfg = parseGitConfig((await readText(path.join(await commonDir(gitDir), 'config'))) ?? '');
+  if (cfg.has('remote.origin.url')) {
+    return cfg.get('remote.origin.url');
+  }
+  for (const [k, v] of cfg) {
+    if (/^remote\..+\.url$/.test(k)) {
+      return v;
+    }
+  }
+  return undefined;
+}
+
+/** git 的 user.name：專案設定優先，其次 ~/.gitconfig。 */
+export async function readUserName(gitDir: string | undefined, home: string): Promise<string | undefined> {
+  if (gitDir) {
+    const local = parseGitConfig((await readText(path.join(await commonDir(gitDir), 'config'))) ?? '').get('user.name');
+    if (local) {
+      return local;
+    }
+  }
+  for (const f of [path.join(home, '.gitconfig'), path.join(home, '.config', 'git', 'config')]) {
+    const v = parseGitConfig((await readText(f)) ?? '').get('user.name');
+    if (v) {
+      return v;
+    }
+  }
+  return undefined;
+}

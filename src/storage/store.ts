@@ -107,6 +107,46 @@ export class MarkStore implements vscode.Disposable {
     return visibleOnBranch(b, this.branchOf(folder));
   }
 
+  /** 來源篩選：被隱藏的來源（自己的為空字串）。只影響顯示，書籤仍會跟著程式碼移動。 */
+  private hiddenSources = new Set<string>();
+  /** 篩選變了：由 extension 存進 workspace state。 */
+  onSourceFilterChanged: (hidden: string[]) => void = () => undefined;
+
+  get hiddenSourceList(): string[] {
+    return [...this.hiddenSources];
+  }
+
+  setHiddenSources(list: string[]): void {
+    this.hiddenSources = new Set(list);
+    this.onSourceFilterChanged(this.hiddenSourceList);
+    this.changed.fire();
+  }
+
+  /** 匯入後確保看得到這些來源。 */
+  showSources(sources: string[]): void {
+    if (sources.some((s) => this.hiddenSources.has(s))) {
+      this.setHiddenSources(this.hiddenSourceList.filter((s) => !sources.includes(s)));
+    }
+  }
+
+  /** 依來源篩選，這筆書籤要不要顯示（行號書籤、函式書籤都適用；函式書籤一律是自己的）。 */
+  shownBySource(b: { source?: { author: string } }): boolean {
+    return !this.hiddenSources.has(b.source?.author ?? '');
+  }
+
+  /** 所有出現過的匯入來源（不含自己），依名稱排序。 */
+  sources(): string[] {
+    const out = new Set<string>();
+    for (const d of this.data.values()) {
+      for (const b of d.bookmarks ?? []) {
+        if (b.source) {
+          out.add(b.source.author);
+        }
+      }
+    }
+    return [...out].sort((a, b) => a.localeCompare(b));
+  }
+
   /** 通知畫面重新整理（例如切換分支後，顯示的書籤不同了）。 */
   notifyChanged(): void {
     this.changed.fire();

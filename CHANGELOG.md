@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0 (unreleased) — share bookmarks (M6)
+
+- **Export Bookmarks…**: all, by tag, the current file, chosen bookmarks, or a file / folder from the Explorer context menu. Line and function bookmarks. Save as `*.fbookmarks.json` or copy to the clipboard (both can be imported), or export a **Markdown table** / **CSV file**
+- A warning before exporting that the export contains code, with a *Without code* option
+- **Import Bookmarks…** from a file or the clipboard: enter a source note (defaults to the exporter, e.g. `henry.hsu`), preview, and **replace** or **merge** when the same source was imported before. Warns when the export comes from another repository
+- Imported bookmarks land on the right lines even if your copy of the file is different: the export carries a hash of every line of the bookmarked files, compared with your files (no git needed — works when the other person has not pushed yet). Function bookmarks are found by name
+- **Filter by Source…**: check which sources to show (mine, henry.hsu, …); hidden sources disappear from the side bar, gutter, next / previous and search. **Group Bookmarks by Source**
+- Others' bookmarks have a purple icon and show their source on hover
+- Rename a source, delete all bookmarks from a source, **Make It Mine**
+- New setting `functionBookmarks.authorName` (defaults to git `user.name`)
+
 ## 0.4.0 (unreleased) — branch switching (M5)
 
 - **Each branch remembers its own bookmark positions.** When you leave a branch, the extension notes where every bookmark was and what the file looked like; when you come back, positions are worked out from that — switching back and forth never accumulates drift, even if the branch got new commits in between

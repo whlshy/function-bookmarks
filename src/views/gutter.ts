@@ -20,7 +20,9 @@ export class FavoriteGutter implements vscode.Disposable {
   private readonly favoriteType: vscode.TextEditorDecorationType;
   private readonly noteType: vscode.TextEditorDecorationType;
   private readonly bookmarkType: vscode.TextEditorDecorationType;
-  private readonly lines = new Map<string, { favorite: number[]; note: number[]; bookmark: number[] }>();
+  /** 別人的書籤（匯入的）：紫色。 */
+  private readonly foreignType: vscode.TextEditorDecorationType;
+  private readonly lines = new Map<string, { favorite: number[]; note: number[]; bookmark: number[]; foreign: number[] }>();
   private timer: NodeJS.Timeout | undefined;
   private disposables: vscode.Disposable[] = [];
 
@@ -47,10 +49,17 @@ export class FavoriteGutter implements vscode.Disposable {
       overviewRulerColor: '#2BB5A0',
       overviewRulerLane: vscode.OverviewRulerLane.Left,
     });
+    this.foreignType = vscode.window.createTextEditorDecorationType({
+      gutterIconPath: vscode.Uri.joinPath(extensionUri, 'media', 'gutter-bookmark-foreign.svg'),
+      gutterIconSize: 'contain',
+      overviewRulerColor: '#A371F7',
+      overviewRulerLane: vscode.OverviewRulerLane.Left,
+    });
     this.disposables.push(
       this.favoriteType,
       this.noteType,
       this.bookmarkType,
+      this.foreignType,
       vscode.window.onDidChangeVisibleTextEditors(() => this.schedule(0)),
       store.onDidChange(() => this.schedule(0)),
       vscode.workspace.onDidChangeTextDocument((e) => {
@@ -70,7 +79,7 @@ export class FavoriteGutter implements vscode.Disposable {
   }
 
   /** 給測試用：某個檔案目前標示的行號（0 起算）。 */
-  linesFor(uri: vscode.Uri, kind: 'favorite' | 'note' | 'bookmark' = 'favorite'): number[] {
+  linesFor(uri: vscode.Uri, kind: 'favorite' | 'note' | 'bookmark' | 'foreign' = 'favorite'): number[] {
     return this.lines.get(uriKey(uri))?.[kind] ?? [];
   }
 
@@ -88,6 +97,7 @@ export class FavoriteGutter implements vscode.Disposable {
         editor.setDecorations(this.favoriteType, []);
         editor.setDecorations(this.noteType, []);
         editor.setDecorations(this.bookmarkType, []);
+        editor.setDecorations(this.foreignType, []);
         continue;
       }
       const file = await this.service.getSymbols(editor.document);
@@ -106,36 +116,49 @@ export class FavoriteGutter implements vscode.Disposable {
       };
       walk(file.symbols);
       // 行號書籤：有備註時範圍是整行內容，滑鼠移到那一行就顯示備註
-      const bookmark: vscode.DecorationOptions[] = this.store.bookmarksFor(uri)
-        // 不在此分支的書籤：那一行不是它原本的位置，不顯示
-        .filter((b) => b.line < editor.document.lineCount && b.status !== 'notOnBranch')
-        .map((b) => {
-          const text = editor.document.lineAt(b.line);
-          if (!b.note) {
-            return { range: new vscode.Range(b.line, 0, b.line, 0) };
-          }
-          const md = new vscode.MarkdownString();
-          md.appendMarkdown(`**${escapeMd(bookmarkTitle(b))}**`);
-          if (b.tags?.length) {
-            md.appendMarkdown(`  ${b.tags.map((t) => `#${escapeMd(t)}`).join(' ')}`);
-          }
+      const bookmark: vscode.DecorationOptions[] = [];
+      const foreign: vscode.DecorationOptions[] = [];
+      for (const b of this.store.bookmarksFor(uri)) {
+        // 不在此分支的書籤：那一行不是它原本的位置，不顯示；被來源篩選隱藏的也不顯示
+        if (b.line >= editor.document.lineCount || b.status === 'notOnBranch' || !this.store.shownBySource(b)) {
+          continue;
+        }
+        const text = editor.document.lineAt(b.line);
+        const target = b.source ? foreign : bookmark;
+        if (!b.note && !b.source) {
+          target.push({ range: new vscode.Range(b.line, 0, b.line, 0) });
+          continue;
+        }
+        // 有備註或是別人的書籤：範圍是整行內容，滑鼠移到那一行就顯示備註與來源
+        const md = new vscode.MarkdownString();
+        md.appendMarkdown(`**${escapeMd(bookmarkTitle(b))}**`);
+        if (b.tags?.length) {
+          md.appendMarkdown(`  ${b.tags.map((t) => `#${escapeMd(t)}`).join(' ')}`);
+        }
+        if (b.source) {
+          md.appendMarkdown(`\n\n${vscode.l10n.t('From {0}', escapeMd(b.source.author))}`);
+        }
+        if (b.note) {
           md.appendMarkdown('\n\n---\n\n');
           md.appendMarkdown(b.note);
           md.appendMarkdown(`\n\n${bookmarkPreviewLink(uri, b.id)}`);
           trustPreviewLink(md);
-          return {
-            range: new vscode.Range(b.line, text.firstNonWhitespaceCharacterIndex, b.line, text.text.length),
-            hoverMessage: md,
-          };
+        }
+        target.push({
+          range: new vscode.Range(b.line, text.firstNonWhitespaceCharacterIndex, b.line, text.text.length),
+          hoverMessage: md,
         });
+      }
       this.lines.set(uriKey(uri), {
         favorite: favorite.map((o) => o.range.start.line),
         note: note.map((o) => o.range.start.line),
         bookmark: bookmark.map((o) => o.range.start.line),
+        foreign: foreign.map((o) => o.range.start.line),
       });
       editor.setDecorations(this.favoriteType, favorite);
       editor.setDecorations(this.noteType, note);
       editor.setDecorations(this.bookmarkType, bookmark);
+      editor.setDecorations(this.foreignType, foreign);
     }
   }
 }
