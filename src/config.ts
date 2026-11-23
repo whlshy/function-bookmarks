@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BUILTIN_RULES, TEMPLATE_FILES_PLACEHOLDER } from './detection/builtinRules';
+import { BUILTIN_RULES, PROJECT_EXTENSIONS, TEMPLATE_FILES_PLACEHOLDER } from './detection/languages';
 import { mergeRules } from './detection/engine';
 import { DetectionRule } from './detection/types';
 import { matchesAny } from './util/paths';
@@ -15,7 +15,8 @@ export interface Settings {
   followCursor: boolean;
 }
 
-export const DEFAULT_PROJECT_INCLUDE = '**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,html,htm,md,markdown,c,h,cpp,cc,cxx,hpp,hh,hxx,cu,cuh,m,mm,rs,go,java,kt,kts,swift,cs,php,rb,rake}';
+/** 「整個專案」預設列出的檔案：各語言（detection/languages）的副檔名。package.json 的預設值要一致（有單元測試檢查）。 */
+export const DEFAULT_PROJECT_INCLUDE = `**/*.{${PROJECT_EXTENSIONS.join(',')}}`;
 export const DEFAULT_PROJECT_EXCLUDE = [
   '**/node_modules/**',
   '**/.git/**',

@@ -2,8 +2,10 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { ExtensionApi } from '../../../src/extension';
-import { addBookmark, emptyStore, setFavorite } from '../../../src/storage/marks';
+import { addBookmark, emptyStore, setAlias, setFavorite, setNote, setTags } from '../../../src/storage/marks';
 import { makeAnchor, newBookmarkId } from '../../../src/bookmarks/model';
+import { BookmarkSearchBox } from '../../../src/views/searchBox';
+import { searchFields } from '../../../src/views/tree';
 import type { BmGroupNode, BookmarkNode, DirNode, FavoriteNode, FileNode, SymbolNode, TreeNode } from '../../../src/views/tree';
 
 function findExtension(): vscode.Extension<ExtensionApi> | undefined {
@@ -298,12 +300,12 @@ describe('Function Bookmarks（整合測試）', () => {
       await vscode.commands.executeCommand('functionBookmarks.showBookmarksOnly');
       try {
         const roots = await api.provider.getChildren();
-        assert.deepStrictEqual(roots.map((r) => (r.type === 'section' ? r.section : r.type)), ['bookmarks']);
+        assert.deepStrictEqual(roots.map((r) => (r.type === 'section' ? r.section : r.type)), ['search', 'bookmarks']);
       } finally {
         await vscode.commands.executeCommand('functionBookmarks.showAll');
       }
       const roots = await api.provider.getChildren();
-      assert.deepStrictEqual(roots.map((r) => (r.type === 'section' ? r.section : r.type)), ['bookmarks', 'currentFile', 'project']);
+      assert.deepStrictEqual(roots.map((r) => (r.type === 'section' ? r.section : r.type)), ['search', 'bookmarks', 'currentFile', 'project']);
     });
 
     it('書籤檔格式壞掉時不覆寫', async () => {
@@ -482,6 +484,8 @@ describe('Function Bookmarks（整合測試）', () => {
       const top = await api.provider.getChildren(api.provider.sections.project);
       const staticDir = top.find((n) => api.provider.getTreeItem(n).label === 'static') as DirNode;
       const files = (await api.provider.getChildren(staticDir)) as FileNode[];
+      // 檔案節點先回傳，函式數量在背景計算
+      await api.provider.whenCounted();
       const plain = api.provider.getTreeItem(files[0]);
       assert.strictEqual(plain.collapsibleState, vscode.TreeItemCollapsibleState.None);
       assert.strictEqual(plain.command?.command, 'vscode.open');
@@ -625,7 +629,7 @@ describe('Function Bookmarks（整合測試）', () => {
       await vscode.commands.executeCommand('functionBookmarks.showBookmarksOnly');
       try {
         const roots = await api.provider.getChildren();
-        assert.deepStrictEqual(roots.map((r) => (r.type === 'section' ? r.section : r.type)), ['bookmarks']);
+        assert.deepStrictEqual(roots.map((r) => (r.type === 'section' ? r.section : r.type)), ['search', 'bookmarks']);
       } finally {
         await vscode.commands.executeCommand('functionBookmarks.showAll');
       }
@@ -1782,6 +1786,24 @@ describe('Function Bookmarks（整合測試）', () => {
       assert.ok(JSON.stringify(app.app).includes('Widget::paint'), JSON.stringify(app));
     });
 
+    it('Protocol Buffers、Vue、Svelte、Shell、SQL：開檔後側邊欄列出（沒有對應擴充時依副檔名判斷）', async () => {
+      const expect: [string, unknown[]][] = [
+        ['greeter.proto', [{ Greeter: ['SayHello', 'Watch', 'WithOptions'] }, { HelloRequest: ['Inner', 'Mood', 'choice'] }, 'HelloReply', 'google.protobuf.MessageOptions']],
+        ['Counter.vue', ['save', 'reset']],
+        ['Widget.svelte', ['preload', 'increment']],
+        ['deploy.sh', ['log', 'deploy', 'cleanup']],
+        ['schema.sql', ['public.add_one', 'active_users', 'trg_audit']],
+      ];
+      for (const [file, want] of expect) {
+        await open(workspaceFile('langs', file), api);
+        assert.deepStrictEqual(tops(), want, file);
+      }
+      const keys = (await api.collectProjectSymbols()).map((e) => `${e.rel}:${e.symbol.path}`);
+      for (const k of ['langs/greeter.proto:Greeter.SayHello', 'langs/Counter.vue:save', 'langs/Widget.svelte:increment', 'langs/deploy.sh:deploy', 'langs/schema.sql:public.add_one']) {
+        assert.ok(keys.includes(k), `${k} 不在整個專案的清單中`);
+      }
+    });
+
     it('整個專案與搜尋函式包含新語言的檔案（不必開檔）', async () => {
       const keys = (await api.collectProjectSymbols()).map((e) => `${e.rel}:${e.symbol.path}`);
       for (const k of ['langs/point.rs:Point.new', 'langs/server.go:Server.Start', 'langs/invoice.rb:Billing.Invoice.total', 'langs/Repo.kt:Repo.load', 'langs/ViewController.swift:ViewController.viewDidLoad']) {
@@ -1900,6 +1922,924 @@ describe('Function Bookmarks（整合測試）', () => {
       assert.strictEqual(editor.document.getText(editor.selection), 'content');
     });
   });
+
+  describe('Review 修正：來源篩選、不在此分支、分組檔名、快速切換', () => {
+    const fsp = require('fs/promises') as typeof import('fs/promises');
+    const fileR = () => workspaceFile('app', 'tmp_review.py');
+    const relR = 'app/tmp_review.py';
+    const LINES = ['def alpha():', '    x = 1', '    return x', '', 'x_global = 1', 'y_global = 2', 'def beta():', '    return 2', ''];
+    const config = () => vscode.workspace.getConfiguration('functionBookmarks');
+    const alphaKey = { file: relR, path: 'alpha', kind: 'function' as const };
+    const betaKey = { file: relR, path: 'beta', kind: 'function' as const };
+    const source = (author: string) => ({ author, importId: 'i1', originalId: newBookmarkId(), importedAt: '2026-01-01T00:00:00.000Z' });
+    const lineBms = () => api.store.bookmarksFor(fileR());
+    const sectionDesc = () => String(api.provider.getTreeItem(api.provider.sections.bookmarks).description);
+    const groupsOf = async () => (await api.provider.getChildren(api.provider.sections.bookmarks)) as BmGroupNode[];
+
+    /** 自己的行號書籤（line 4）、自己的函式書籤（alpha）、別人 bob 的行號書籤（line 5）。 */
+    async function setupThree(): Promise<void> {
+      await api.store.update(folder(), (d) => {
+        let next = addBookmark(d, { id: newBookmarkId(), file: relR, line: 4, anchor: makeAnchor(LINES, 4) });
+        next = addBookmark(next, { id: newBookmarkId(), file: relR, line: 5, anchor: makeAnchor(LINES, 5), source: source('bob') });
+        return setFavorite(next, alphaKey, true, 0);
+      });
+      await api.favorites.refresh();
+    }
+    async function openR(line = 0): Promise<vscode.TextEditor> {
+      const editor = await open(fileR(), api);
+      editor.selection = new vscode.Selection(line, 0, line, 0);
+      return editor;
+    }
+
+    before(async () => {
+      await fsp.writeFile(fileR().fsPath, LINES.join('\n'));
+    });
+    afterEach(async () => {
+      api.store.setHiddenSources([]);
+      await config().update('bookmarks.onLineDelete', undefined, vscode.ConfigurationTarget.Workspace);
+      await vscode.commands.executeCommand('functionBookmarks.groupBookmarksByFile');
+      await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await fsp.writeFile(fileR().fsPath, LINES.join('\n'));
+    });
+    after(async () => {
+      api.store.setHiddenSources([]);
+      await fsp.rm(fileR().fsPath, { force: true });
+    });
+
+    it('隱藏「我的」：函式書籤與行號書籤從側邊欄、標題數字、行號圖示、上下跳轉、狀態列一起消失', async () => {
+      await setupThree();
+      await openR(0);
+      await api.gutter.update();
+      api.statusBar.update();
+      assert.strictEqual(sectionDesc(), '3');
+      assert.deepStrictEqual(api.gutter.linesFor(fileR(), 'favorite'), [0]);
+      assert.deepStrictEqual(api.gutter.linesFor(fileR(), 'bookmark'), [4]);
+      assert.deepStrictEqual(api.gutter.linesFor(fileR(), 'foreign'), [5]);
+      assert.strictEqual(api.statusBar.text, '$(bookmark) 3');
+
+      api.store.setHiddenSources(['']);
+      await api.gutter.update();
+      api.statusBar.update();
+      const groups = await groupsOf();
+      assert.deepStrictEqual(groups.map((g) => g.items.length), [1], '書籤區只剩 bob 的一筆');
+      const kids = await api.provider.getChildren(groups[0]);
+      assert.deepStrictEqual(kids.map((k) => k.type), ['bookmark']);
+      assert.strictEqual((kids[0] as BookmarkNode).entry.bookmark.source?.author, 'bob');
+      assert.strictEqual(sectionDesc(), '1', '標題數字只算看得到的');
+      assert.deepStrictEqual(api.gutter.linesFor(fileR(), 'favorite'), [], '函式書籤的圖示消失');
+      assert.deepStrictEqual(api.gutter.linesFor(fileR(), 'bookmark'), [], '自己的行號書籤圖示消失');
+      assert.deepStrictEqual(api.gutter.linesFor(fileR(), 'foreign'), [5]);
+      assert.ok(api.statusBar.text?.startsWith('$(bookmark) 1 '), api.statusBar.text);
+      for (let i = 0; i < 3; i++) {
+        assert.strictEqual((await api.bookmarks.go(1))?.line, 5, '上下跳轉只會跳到 bob 的書籤');
+      }
+      assert.strictEqual((await api.bookmarks.go(-1))?.line, 5);
+
+      api.store.setHiddenSources([]);
+      await api.gutter.update();
+      assert.strictEqual(sectionDesc(), '3');
+      assert.deepStrictEqual(api.gutter.linesFor(fileR(), 'favorite'), [0]);
+    });
+
+    it('隱藏「我的」：有備註的函式書籤不會改顯示成備註圖示；只有備註（沒加書籤）的函式照常顯示備註圖示', async () => {
+      await setupThree();
+      await api.store.update(folder(), (d) => setNote(setNote(d, alphaKey, 'alpha 的備註', 0), betaKey, 'beta 的備註', 6));
+      await api.favorites.refresh();
+      await openR(0);
+      await api.gutter.update();
+      assert.deepStrictEqual(api.gutter.linesFor(fileR(), 'favorite'), [0]);
+      assert.deepStrictEqual(api.gutter.linesFor(fileR(), 'note'), [6], 'beta 只有備註');
+
+      api.store.setHiddenSources(['']);
+      await api.gutter.update();
+      assert.deepStrictEqual(api.gutter.linesFor(fileR(), 'favorite'), []);
+      assert.deepStrictEqual(api.gutter.linesFor(fileR(), 'note'), [6], '被隱藏的函式書籤 alpha 不顯示備註圖示');
+    });
+
+    it('隱藏 bob：自己的函式書籤與行號書籤照常顯示', async () => {
+      await setupThree();
+      await openR(0);
+      api.store.setHiddenSources(['bob']);
+      await api.gutter.update();
+      assert.strictEqual(sectionDesc(), '2');
+      assert.deepStrictEqual(api.gutter.linesFor(fileR(), 'favorite'), [0]);
+      assert.deepStrictEqual(api.gutter.linesFor(fileR(), 'foreign'), []);
+    });
+
+    describe('不在此分支（notOnBranch）的書籤不會被誤刪、誤改', () => {
+      /** 把指定行的書籤標成「不在此分支」（不一定要真的切分支）。 */
+      async function plantAway(line = 4): Promise<string> {
+        const id = newBookmarkId();
+        // 真正不在此分支的書籤，那一行的內容和 anchor 對不上（內容相符時會被當成已找回而恢復）
+        const other = ['feature_a()', 'feature_b()', 'feature_c()', 'feature_d()', 'feature_e()', 'feature_f()', 'feature_g()'];
+        await api.store.update(folder(), (d) => addBookmark(d, { id, file: relR, line, anchor: makeAnchor(other, line), status: 'notOnBranch' }));
+        return id;
+      }
+      const away = (id: string) => lineBms().find((b) => b.id === id);
+
+      it('在同一行切換書籤：只新增自己的，不刪除不在此分支的那個', async () => {
+        const id = await plantAway(4);
+        await openR(4);
+        await api.bookmarks.toggle({ uri: fileR(), line: 4 });
+        const list = lineBms();
+        assert.strictEqual(list.length, 2);
+        assert.strictEqual(away(id)?.status, 'notOnBranch');
+        assert.ok(list.some((b) => b.id !== id && b.line === 4 && b.status === undefined), '新增了自己的書籤');
+        // 再切換一次：只拿掉自己的，不在此分支的仍在
+        await api.bookmarks.toggle({ uri: fileR(), line: 4 });
+        assert.deepStrictEqual(lineBms().map((b) => b.id), [id]);
+        assert.strictEqual(away(id)?.status, 'notOnBranch');
+      });
+
+      for (const mode of ['remove', 'markLost'] as const) {
+        it(`刪除那一行（onLineDelete = ${mode}）：自己的書籤依設定處理，不在此分支的不刪除、狀態不變`, async () => {
+          await config().update('bookmarks.onLineDelete', mode, vscode.ConfigurationTarget.Workspace);
+          const awayId = await plantAway(4);
+          const mineId = newBookmarkId();
+          await api.store.update(folder(), (d) => addBookmark(d, { id: mineId, file: relR, line: 4, anchor: makeAnchor(LINES, 4) }));
+          const editor = await openR(4);
+          // 先改一個不相干的地方，讓文件進入已修改狀態（乾淨文件的第一次編輯事件會被當成重新載入）
+          assert.ok(await editor.edit((b) => b.insert(new vscode.Position(7, LINES[7].length), '  # x')));
+          await api.external.idle();
+          assert.ok(await editor.edit((b) => b.delete(new vscode.Range(3, 0, 4, LINES[4].length))));
+          const mine = await waitFor(
+            () => lineBms().find((b) => b.id === mineId),
+            (v) => (mode === 'remove' ? v === undefined : v?.status === 'lost'),
+          );
+          if (mode === 'remove') {
+            assert.strictEqual(mine, undefined, '自己的書籤被刪除');
+          } else {
+            assert.strictEqual(mine?.status, 'lost', '自己的書籤標成需確認');
+          }
+          const kept = away(awayId);
+          assert.ok(kept, '不在此分支的書籤還在');
+          assert.strictEqual(kept.status, 'notOnBranch');
+        });
+      }
+
+      it('清除檔案、清除全部：保留不在此分支與被來源篩選隱藏的書籤', async () => {
+        await setupThree();
+        const awayId = await plantAway(1);
+        await openR(0);
+        api.store.setHiddenSources(['bob']);
+        await api.bookmarks.clearFile(fileR(), true);
+        assert.strictEqual(lineBms().length, 2, '剩下不在此分支與 bob 的');
+        assert.strictEqual(away(awayId)?.status, 'notOnBranch');
+        assert.ok(lineBms().some((b) => b.source?.author === 'bob'), '被隱藏的 bob 書籤保留');
+        await api.favorites.refresh();
+        assert.strictEqual(api.favorites.all.length, 0, '自己的函式書籤被清除');
+
+        // clearAll：同理
+        await api.store.update(folder(), (d) => setFavorite(addBookmark(d, { id: newBookmarkId(), file: relR, line: 5, anchor: makeAnchor(LINES, 5) }), betaKey, true, 6));
+        await api.favorites.refresh();
+        await api.bookmarks.clearAll(true);
+        await api.favorites.refresh();
+        assert.strictEqual(lineBms().length, 2);
+        assert.strictEqual(away(awayId)?.status, 'notOnBranch');
+        assert.ok(lineBms().some((b) => b.source?.author === 'bob'));
+        assert.strictEqual(api.favorites.all.length, 0);
+      });
+
+      it('「我的」被隱藏時清除檔案、清除全部：只清除看得到的，看不到的函式書籤與行號書籤保留', async () => {
+        await setupThree();
+        await openR(0);
+        api.store.setHiddenSources(['']);
+        await api.bookmarks.clearFile(fileR(), true);
+        // 看得到的（bob 的）被清掉；看不到的（自己的行號書籤與函式書籤）保留
+        assert.deepStrictEqual(lineBms().map((b) => [b.line, b.source?.author]), [[4, undefined]], '自己的行號書籤沒被清掉');
+        assert.ok(api.store.get(fileR(), alphaKey)?.favorite, '自己的函式書籤沒被清掉');
+        await api.bookmarks.clearAll(true);
+        assert.strictEqual(lineBms().length, 1, '整個畫面上沒有書籤，什麼都不清');
+        assert.ok(api.store.get(fileR(), alphaKey)?.favorite);
+        // 顯示出來之後清除：全部清掉
+        api.store.setHiddenSources([]);
+        await api.bookmarks.clearAll(true);
+        await api.favorites.refresh();
+        assert.strictEqual(lineBms().length, 0);
+        assert.strictEqual(api.favorites.all.length, 0);
+      });
+    });
+
+    describe('「我的」被隱藏時新增書籤：不改篩選，提示可以顯示', () => {
+      it('在函式名稱那一行切換：新增函式書籤，篩選不變並提示', async () => {
+        await openR(6);
+        api.store.setHiddenSources(['']);
+        const before = api.bookmarks.mineHiddenNotices;
+        await api.bookmarks.toggle({ uri: fileR(), line: 6 });
+        assert.ok(api.store.get(fileR(), betaKey)?.favorite);
+        assert.ok(api.store.hiddenSourceList.includes(''), '篩選不自動改');
+        assert.strictEqual(api.bookmarks.mineHiddenNotices, before + 1, '有提示');
+      });
+
+      it('原本已是函式書籤：看不到時按切換不會取消，只提示', async () => {
+        await api.store.update(folder(), (d) => setFavorite(d, alphaKey, true, 0));
+        await api.favorites.refresh();
+        await openR(0);
+        api.store.setHiddenSources(['']);
+        const before = api.bookmarks.mineHiddenNotices;
+        await api.bookmarks.toggle({ uri: fileR(), line: 0 });
+        await api.favorites.refresh();
+        assert.ok(api.store.get(fileR(), alphaKey)?.favorite, '沒有被取消');
+        assert.strictEqual(api.bookmarks.mineHiddenNotices, before + 1);
+        // 「我的」顯示著再按一次才是取消
+        api.store.setHiddenSources([]);
+        await api.bookmarks.toggle({ uri: fileR(), line: 0 });
+        assert.ok(!api.store.get(fileR(), alphaKey)?.favorite);
+      });
+
+      it('在一般行切換：新增行號書籤；那一行已有看不到的自己的書籤時不重複新增、也不拿掉', async () => {
+        await openR(5);
+        api.store.setHiddenSources(['']);
+        await api.bookmarks.toggle({ uri: fileR(), line: 5 });
+        assert.deepStrictEqual(lineBms().map((b) => b.line), [5]);
+        assert.ok(api.store.hiddenSourceList.includes(''));
+        await api.bookmarks.toggle({ uri: fileR(), line: 5 });
+        assert.deepStrictEqual(lineBms().map((b) => b.line), [5], '再按一次：看不到的書籤保留，也沒有多一個');
+      });
+
+      it('設定號碼：隱藏中也能對剛加的書籤設定', async () => {
+        await openR(5);
+        api.store.setHiddenSources(['']);
+        await api.extras.setNumber({ type: 'line', uri: fileR(), line: 5 }, 7, true);
+        const b = lineBms().find((x) => x.line === 5);
+        assert.strictEqual(b?.number, 7);
+        assert.ok(api.store.hiddenSourceList.includes(''));
+      });
+    });
+
+    it('依來源分組：行號書籤與函式書籤都顯示「檔名:行號」；依檔案分組只有行號', async () => {
+      await setupThree();
+      await openR(0);
+      await vscode.commands.executeCommand('functionBookmarks.groupBookmarksBySource');
+      const groups = await groupsOf();
+      assert.deepStrictEqual(groups.map((g) => g.key), ['', 'bob']);
+      const descOf = async (g: BmGroupNode) =>
+        Promise.all((await api.provider.getChildren(g)).map(async (n) => [n.type, String(api.provider.getTreeItem(n).description)] as const));
+      const mine = await descOf(groups[0]);
+      assert.strictEqual(mine.length, 2);
+      const favDesc = mine.find(([t]) => t === 'favorite')![1];
+      const lineDesc = mine.find(([t]) => t === 'bookmark')![1];
+      assert.ok(favDesc.includes('tmp_review.py:1'), favDesc);
+      assert.ok(lineDesc.includes('tmp_review.py:5'), lineDesc);
+      const bob = await descOf(groups[1]);
+      assert.ok(bob[0][1].includes('tmp_review.py:6'), bob[0][1]);
+
+      await vscode.commands.executeCommand('functionBookmarks.groupBookmarksByFile');
+      const byFile = await groupsOf();
+      assert.deepStrictEqual(byFile.map((g) => g.rel), [relR]);
+      for (const [, d] of await descOf(byFile[0])) {
+        assert.ok(!d.includes('tmp_review.py'), `依檔案分組不重複檔名：${d}`);
+      }
+    });
+
+    it('快速切換分頁：連續 refresh 兩個編輯器不等第一個，最後顯示的是第二個', async () => {
+      const a = await open(workspaceFile('app', 'views.py'), api);
+      const b = await open(fileR(), api);
+      const sameFile = (u: vscode.Uri | undefined, want: vscode.Uri) => u?.toString() === want.toString();
+      const p1 = api.provider.refresh(a);
+      const p2 = api.provider.refresh(b);
+      await Promise.all([p1, p2]);
+      assert.ok(sameFile(api.provider.currentFile?.uri, b.document.uri), '最後一次 refresh 的檔案');
+      // 反過來
+      const p3 = api.provider.refresh(b);
+      const p4 = api.provider.refresh(a);
+      await Promise.all([p3, p4]);
+      assert.ok(sameFile(api.provider.currentFile?.uri, a.document.uri));
+      assert.deepStrictEqual(names(api.provider.currentSymbolNodes), ['index', { ArticleView: ['get', 'post'] }]);
+    });
+  });
+
+  describe('常駐搜尋列', () => {
+    const fsp = require('fs/promises') as typeof import('fs/promises');
+    const fileA = () => workspaceFile('app', 'tmp_find_a.py');
+    const fileB = () => workspaceFile('app', 'tmp_find_b.py');
+    const relA = 'app/tmp_find_a.py';
+    const relB = 'app/tmp_find_b.py';
+    const A_LINES = [
+      'def alpha():',
+      '    total = compute_price()',
+      '    return total',
+      '',
+      'def beta():',
+      '    return 2',
+      '',
+      'class Box:',
+      '    def open(self):',
+      '        return "lid"',
+      '',
+    ];
+    const B_LINES = ['def gamma():', '    send_mail()', ''];
+    const alphaKey = { file: relA, path: 'alpha', kind: 'function' as const };
+    const source = (author: string) => ({ author, importId: 'i-search', originalId: newBookmarkId(), importedAt: '2026-01-01T00:00:00.000Z' });
+    const sectionItem = () => api.provider.getTreeItem(api.provider.sections.bookmarks);
+    const groupsOf = async () => (await api.provider.getChildren(api.provider.sections.bookmarks)) as BmGroupNode[];
+    const labelOf = (item: vscode.TreeItem) => (typeof item.label === 'string' ? item.label : (item.label?.label ?? ''));
+    type Row = { label: string; node: TreeNode; item: vscode.TreeItem; group: BmGroupNode };
+    /** 目前側邊欄「書籤」區列出的全部書籤，依顯示順序（分組依序、組內依序）。 */
+    async function rows(): Promise<Row[]> {
+      const out: Row[] = [];
+      for (const group of await groupsOf()) {
+        for (const node of await api.provider.getChildren(group)) {
+          const item = api.provider.getTreeItem(node);
+          out.push({ label: labelOf(item), node, item, group });
+        }
+      }
+      return out;
+    }
+    const labels = async () => (await rows()).map((r) => r.label);
+    /** 搜尋後列出的書籤名稱（依顯示順序）。 */
+    async function find(query: string): Promise<string[]> {
+      api.searchBox.setQuery(query);
+      return labels();
+    }
+    const sorted = (a: string[]) => [...a].sort();
+
+    // b1 價格計算、b2 return 2（沒有名稱，顯示那一行程式碼）、b3 return "lid"（bob 的）、b4 mail sender、f priceEntry（函式書籤 alpha 的自訂名稱）
+    const NAMES = { f: 'priceEntry', b1: '價格計算', b2: 'return 2', b3: 'return "lid"', b4: 'mail sender' };
+    /** 沒有搜尋時的顯示順序：檔案 a 的（第 0 行的函式書籤、第 1、5、9 行），再來檔案 b。 */
+    const ALL = [NAMES.f, NAMES.b1, NAMES.b2, NAMES.b3, NAMES.b4];
+
+    /**
+     * 自己的：行號書籤 b1（名稱、標籤 pricing todo、備註）、b2（標籤 api）、b4（另一個檔案）、函式書籤 alpha（自訂名稱、標籤 pricing、備註）；
+     * bob 的：b3（標籤 todo）。
+     */
+    async function setup(): Promise<void> {
+      await api.store.update(folder(), (d) => {
+        let next = addBookmark(d, {
+          id: newBookmarkId(),
+          file: relA,
+          line: 1,
+          label: NAMES.b1,
+          tags: ['pricing', 'todo'],
+          note: 'check rounding',
+          anchor: makeAnchor(A_LINES, 1, 'alpha', 0),
+        });
+        next = addBookmark(next, { id: newBookmarkId(), file: relA, line: 5, tags: ['api'], anchor: makeAnchor(A_LINES, 5, 'beta', 4) });
+        next = addBookmark(next, {
+          id: newBookmarkId(),
+          file: relA,
+          line: 9,
+          tags: ['todo'],
+          anchor: makeAnchor(A_LINES, 9, 'Box.open', 8),
+          source: source('bob'),
+        });
+        next = addBookmark(next, { id: newBookmarkId(), file: relB, line: 1, label: NAMES.b4, anchor: makeAnchor(B_LINES, 1, 'gamma', 0) });
+        next = setFavorite(next, alphaKey, true, 0);
+        next = setAlias(next, alphaKey, NAMES.f, 'alpha', 0);
+        next = setTags(next, alphaKey, ['pricing']);
+        return setNote(next, alphaKey, 'entry point', 0);
+      });
+      await api.favorites.refresh();
+      await api.external.idle();
+    }
+
+    before(async () => {
+      await fsp.writeFile(fileA().fsPath, A_LINES.join('\n'));
+      await fsp.writeFile(fileB().fsPath, B_LINES.join('\n'));
+    });
+
+    afterEach(async () => {
+      // 不管測試成功或失敗，都把搜尋清空，避免影響其他測試
+      api.searchBox.setQuery('');
+      api.provider.setQuery('');
+      api.store.setHiddenSources([]);
+      await vscode.commands.executeCommand('functionBookmarks.groupBookmarksByFile');
+    });
+
+    after(async () => {
+      api.searchBox.setQuery('');
+      await fsp.rm(fileA().fsPath, { force: true });
+      await fsp.rm(fileB().fsPath, { force: true });
+    });
+
+    it('setQuery：回傳有沒有變、有變才通知重畫；只有空白或單獨的 #、@ 不算搜尋', () => {
+      assert.strictEqual(api.provider.query, '');
+      assert.strictEqual(api.provider.searching, false);
+      let fired = 0;
+      const sub = api.provider.onDidChangeTreeData(() => fired++);
+      try {
+        assert.strictEqual(api.provider.setQuery(''), false, '空的再設空的：沒變');
+        assert.strictEqual(fired, 0);
+        assert.strictEqual(api.provider.setQuery('Login'), true);
+        assert.strictEqual(fired, 1);
+        assert.strictEqual(api.provider.query, 'Login', 'query 原樣保留（不轉小寫、不去空白）');
+        assert.strictEqual(api.provider.searching, true);
+        assert.strictEqual(api.provider.setQuery('Login'), false, '同樣的字串：沒變');
+        assert.strictEqual(fired, 1);
+        for (const q of ['   ', '#', '@', '# @']) {
+          assert.strictEqual(api.provider.setQuery(q), true);
+          assert.strictEqual(api.provider.query, q);
+          assert.strictEqual(api.provider.searching, false, `「${q}」不算搜尋`);
+        }
+        assert.strictEqual(api.provider.setQuery(''), true);
+        assert.strictEqual(api.provider.searching, false);
+      } finally {
+        sub.dispose();
+      }
+    });
+
+    it('沒有搜尋時：全部書籤照原樣列出，沒有 :search 的分組 id', async () => {
+      await setup();
+      assert.deepStrictEqual(await labels(), ALL);
+      for (const g of await groupsOf()) {
+        assert.ok(!String(api.provider.getTreeItem(g).id).endsWith(':search'), String(api.provider.getTreeItem(g).id));
+      }
+      assert.strictEqual(String(sectionItem().description), '5');
+      assert.strictEqual((sectionItem().iconPath as vscode.ThemeIcon).id, 'bookmark');
+    });
+
+    it('只有單獨的 # 或 @ 不算搜尋：列出全部、分組 id 不加 :search', async () => {
+      await setup();
+      assert.deepStrictEqual(await find('# @'), ALL);
+      assert.ok((await groupsOf()).every((g) => !String(api.provider.getTreeItem(g).id).endsWith(':search')));
+      assert.strictEqual(String(sectionItem().description), '5');
+    });
+
+    it('依名稱搜尋：書籤名稱、函式書籤的自訂名稱與原名、沒有名稱時顯示的那一行程式碼；不分大小寫、部分比對', async () => {
+      await setup();
+      assert.deepStrictEqual(await find('價格'), [NAMES.b1], '行號書籤的名稱');
+      assert.deepStrictEqual(await find('SENDER'), [NAMES.b4], '不分大小寫');
+      assert.deepStrictEqual(await find('priceentry'), [NAMES.f], '函式書籤的自訂名稱');
+      assert.deepStrictEqual(sorted(await find('alpha')), sorted([NAMES.f, NAMES.b1]), '函式書籤的原名（自訂名稱底下）；也比對書籤所在的函式 alpha');
+      assert.deepStrictEqual(await find('return 2'), [NAMES.b2], '沒有名稱的書籤：顯示的是那一行程式碼');
+      assert.deepStrictEqual(await find('nothing_like_this'), []);
+    });
+
+    it('依標籤搜尋（不加 #）：行號書籤與函式書籤的標籤文字都比對', async () => {
+      await setup();
+      assert.deepStrictEqual(await find('pricing'), [NAMES.f, NAMES.b1]);
+      assert.deepStrictEqual(await find('API'), [NAMES.b2]);
+      assert.deepStrictEqual(await find('tod'), [NAMES.b1, NAMES.b3], '部分比對');
+    });
+
+    it('依檔名搜尋（相對路徑）', async () => {
+      await setup();
+      assert.deepStrictEqual(await find('find_b'), [NAMES.b4]);
+      assert.deepStrictEqual(await find('app/tmp_find_a'), [NAMES.f, NAMES.b1, NAMES.b2, NAMES.b3]);
+      assert.deepStrictEqual(await find('TMP_FIND'), ALL);
+    });
+
+    it('依所在函式搜尋：行號書籤所在的函式路徑、函式書籤本身的路徑', async () => {
+      await setup();
+      assert.deepStrictEqual(await find('beta'), [NAMES.b2], '書籤在 beta 裡');
+      assert.deepStrictEqual(await find('box.open'), [NAMES.b3], '函式路徑 Box.open');
+      assert.deepStrictEqual(await find('gamma'), [NAMES.b4]);
+    });
+
+    it('依該行程式碼搜尋', async () => {
+      await setup();
+      assert.deepStrictEqual(await find('compute_price'), [NAMES.b1]);
+      assert.deepStrictEqual(await find('send_mail'), [NAMES.b4]);
+      assert.deepStrictEqual(await find('"lid"'), [NAMES.b3]);
+    });
+
+    it('依備註搜尋：行號書籤與函式書籤的備註', async () => {
+      await setup();
+      assert.deepStrictEqual(await find('rounding'), [NAMES.b1]);
+      assert.deepStrictEqual(await find('POINT'), [NAMES.f]);
+    });
+
+    it('空白隔開的每個字都要符合（可分散在不同欄位）', async () => {
+      await setup();
+      assert.deepStrictEqual(await find('價格 rounding'), [NAMES.b1], '名稱＋備註');
+      assert.deepStrictEqual(await find('find_a return'), [NAMES.b2, NAMES.b3], '檔名＋程式碼');
+      assert.deepStrictEqual(await find('find_b return'), []);
+      assert.deepStrictEqual(await find('  return   lid  '), [NAMES.b3], '多餘的空白忽略');
+    });
+
+    it('#標籤：只比對標籤；多個 #標籤 每個都要有；與一般文字並用', async () => {
+      await setup();
+      assert.deepStrictEqual(await find('#todo'), [NAMES.b1, NAMES.b3]);
+      assert.deepStrictEqual(await find('#TOD'), [NAMES.b1, NAMES.b3], '不分大小寫、部分比對');
+      assert.deepStrictEqual(await find('#pricing'), [NAMES.f, NAMES.b1], '函式書籤的標籤也算');
+      assert.deepStrictEqual(await find('#pricing #todo'), [NAMES.b1]);
+      assert.deepStrictEqual(await find('#pricing #api'), []);
+      assert.deepStrictEqual(await find('#alpha'), [], '#只比對標籤，不比對名稱或函式');
+      assert.deepStrictEqual(await find('#todo return'), [NAMES.b3], '標籤＋一般文字');
+      assert.deepStrictEqual(await find('# api'), [NAMES.b2], '單獨一個 # 忽略');
+    });
+
+    it('@來源：只找那個人匯入的書籤；多個符合任一；自己的書籤找不到', async () => {
+      await setup();
+      assert.deepStrictEqual(await find('@bob'), [NAMES.b3]);
+      assert.deepStrictEqual(await find('@BO'), [NAMES.b3], '不分大小寫、部分比對');
+      assert.deepStrictEqual(await find('@alice'), []);
+      assert.deepStrictEqual(await find('@alice @bob'), [NAMES.b3], '符合任一個');
+      assert.deepStrictEqual(await find('@bob return'), [NAMES.b3]);
+      assert.deepStrictEqual(await find('@bob price'), []);
+      assert.deepStrictEqual(await find('@bob #todo'), [NAMES.b3]);
+      assert.deepStrictEqual(await find('@bob #api'), []);
+      assert.deepStrictEqual(await find('@mail'), [], '自己的書籤沒有來源，名稱裡有 mail 也不會被 @ 找到');
+      assert.deepStrictEqual(await find('@ api'), [NAMES.b2], '單獨一個 @ 忽略');
+    });
+
+    it('標題的計數：「{0} of {1} match」，沒有搜尋時是總數；沒結果時是 0；圖示在搜尋時換成放大鏡', async () => {
+      await setup();
+      assert.strictEqual(String(sectionItem().description), '5');
+      api.searchBox.setQuery('#todo');
+      assert.strictEqual(String(sectionItem().description), '2 of 5 match');
+      assert.strictEqual((sectionItem().iconPath as vscode.ThemeIcon).id, 'search');
+      assert.strictEqual(sectionItem().collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
+      api.searchBox.setQuery('tmp_find');
+      assert.strictEqual(String(sectionItem().description), '5 of 5 match');
+      api.searchBox.setQuery('zzz_nothing');
+      assert.strictEqual(String(sectionItem().description), '0 of 5 match');
+      assert.deepStrictEqual(await groupsOf(), [], '沒有結果：不列任何分組');
+      api.searchBox.setQuery('');
+      assert.strictEqual(String(sectionItem().description), '5');
+      assert.strictEqual((sectionItem().iconPath as vscode.ThemeIcon).id, 'bookmark');
+    });
+
+    it('標題的計數：被來源篩選隱藏的書籤不算在總數裡，搜尋也找不到', async () => {
+      await setup();
+      api.store.setHiddenSources(['bob']);
+      assert.deepStrictEqual(await find('#todo'), [NAMES.b1]);
+      assert.strictEqual(String(sectionItem().description), '1 of 4 match');
+      assert.deepStrictEqual(await find('@bob'), []);
+      assert.strictEqual(String(sectionItem().description), '0 of 4 match');
+    });
+
+    it('符合的字用 highlights 標亮：名稱、不分大小寫、多個字、沒符合名稱時不標', async () => {
+      await setup();
+      const labelFor = async (query: string, name: string) => {
+        api.searchBox.setQuery(query);
+        const hit = (await rows()).find((r) => r.label === name);
+        assert.ok(hit, `「${query}」找不到 ${name}`);
+        return hit.item.label;
+      };
+      assert.deepStrictEqual(await labelFor('sender', NAMES.b4), { label: 'mail sender', highlights: [[5, 11]] });
+      assert.deepStrictEqual(await labelFor('SEND', NAMES.b4), { label: 'mail sender', highlights: [[5, 9]] });
+      assert.deepStrictEqual(await labelFor('price', NAMES.f), { label: 'priceEntry', highlights: [[0, 5]] }, '函式書籤的名稱');
+      assert.deepStrictEqual(await labelFor('return 2', NAMES.b2), { label: 'return 2', highlights: [[0, 6], [7, 8]] }, '多個字各自標亮');
+      assert.deepStrictEqual(await labelFor('價格', NAMES.b1), { label: '價格計算', highlights: [[0, 2]] }, '中文');
+      assert.strictEqual(await labelFor('compute_price', NAMES.b1), NAMES.b1, '符合的是那一行程式碼，不是名稱：不標亮');
+      assert.strictEqual(await labelFor('#todo', NAMES.b1), NAMES.b1, '#標籤 不在書籤名稱上標亮');
+      api.searchBox.setQuery('');
+      assert.strictEqual((await rows())[1].item.label, NAMES.b1, '清除搜尋後是純文字');
+    });
+
+    it('依檔案分組：只列有結果的檔案，分組 id 加上 :search，檔名標亮；清除後 id 恢復', async () => {
+      await setup();
+      const idsBefore = (await groupsOf()).map((g) => String(api.provider.getTreeItem(g).id));
+      assert.strictEqual(idsBefore.length, 2);
+      assert.ok(idsBefore.every((id) => id.startsWith('bmFile:') && !id.endsWith(':search')));
+
+      api.searchBox.setQuery('mail');
+      let groups = await groupsOf();
+      assert.deepStrictEqual(groups.map((g) => g.rel), [relB], '檔案 a 沒有結果，不列出');
+      const item = api.provider.getTreeItem(groups[0]);
+      assert.strictEqual(item.id, `${idsBefore[1]}:search`);
+      assert.strictEqual(item.collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
+
+      api.searchBox.setQuery('find_b');
+      groups = await groupsOf();
+      assert.deepStrictEqual(api.provider.getTreeItem(groups[0]).label, { label: 'tmp_find_b.py', highlights: [[4, 10]] });
+
+      api.searchBox.setQuery('return');
+      groups = await groupsOf();
+      assert.deepStrictEqual(groups.map((g) => [g.rel, g.items.length]), [[relA, 2]]);
+
+      api.searchBox.setQuery('find');
+      groups = await groupsOf();
+      assert.deepStrictEqual(groups.map((g) => [g.rel, g.items.length]), [[relA, 4], [relB, 1]]);
+      assert.ok(groups.every((g) => String(api.provider.getTreeItem(g).id).endsWith(':search')));
+
+      api.searchBox.setQuery('');
+      assert.deepStrictEqual((await groupsOf()).map((g) => String(api.provider.getTreeItem(g).id)), idsBefore);
+    });
+
+    it('依標籤分組：搜尋 #標籤 時只列出符合的標籤分組；一般文字時列出符合書籤的全部標籤', async () => {
+      await setup();
+      await vscode.commands.executeCommand('functionBookmarks.groupBookmarksByTag');
+      const keys = async () => (await groupsOf()).map((g) => [g.key, g.items.length] as const);
+      assert.deepStrictEqual(await keys(), [['api', 1], ['pricing', 2], ['todo', 2], ['', 1]], '沒有搜尋：全部標籤，沒有標籤的在最後');
+
+      api.searchBox.setQuery('#todo');
+      assert.deepStrictEqual(await keys(), [['todo', 2]], 'b1 還有 pricing 標籤，但不另外列出');
+      api.searchBox.setQuery('#pric');
+      assert.deepStrictEqual(await keys(), [['pricing', 2]], '部分比對');
+      api.searchBox.setQuery('#pricing #todo');
+      assert.deepStrictEqual(await keys(), [['pricing', 1], ['todo', 1]], '只有 b1 兩個標籤都有；兩個分組各列一次');
+      assert.deepStrictEqual(await labels(), [NAMES.b1, NAMES.b1]);
+      assert.strictEqual(String(sectionItem().description), '1 of 5 match', '同一個書籤出現在兩個分組，計數只算一次');
+
+      api.searchBox.setQuery('pricing');
+      assert.deepStrictEqual(await keys(), [['pricing', 2], ['todo', 1]], '一般文字：書籤的標籤都列');
+      assert.strictEqual(String(sectionItem().description), '2 of 5 match');
+
+      api.searchBox.setQuery('mail');
+      assert.deepStrictEqual(await keys(), [['', 1]], '沒有標籤的書籤歸在「沒有標籤」');
+
+      api.searchBox.setQuery('#pric');
+      const item = api.provider.getTreeItem((await groupsOf())[0]);
+      assert.strictEqual(item.id, 'bmTag:pricing:search');
+      assert.deepStrictEqual(item.label, { label: '#pricing', highlights: [[1, 5]] }, '標籤分組名稱標亮搜尋的標籤');
+
+      api.searchBox.setQuery('');
+      assert.deepStrictEqual(await keys(), [['api', 1], ['pricing', 2], ['todo', 2], ['', 1]]);
+      assert.strictEqual(api.provider.getTreeItem((await groupsOf())[1]).id, 'bmTag:pricing');
+    });
+
+    it('依來源分組：自己的在前，沒結果的來源不列出；來源名稱標亮', async () => {
+      await setup();
+      await vscode.commands.executeCommand('functionBookmarks.groupBookmarksBySource');
+      const keys = async () => (await groupsOf()).map((g) => [g.key, g.items.length] as const);
+      assert.deepStrictEqual(await keys(), [['', 4], ['bob', 1]]);
+
+      api.searchBox.setQuery('return');
+      assert.deepStrictEqual(await keys(), [['', 1], ['bob', 1]]);
+      api.searchBox.setQuery('mail');
+      assert.deepStrictEqual(await keys(), [['', 1]], 'bob 沒有結果，不列出');
+      assert.strictEqual(api.provider.getTreeItem((await groupsOf())[0]).id, 'bmSource::search', '自己的分組也加 :search');
+      api.searchBox.setQuery('@bob');
+      assert.deepStrictEqual(await keys(), [['bob', 1]], '自己的沒有結果，不列出');
+      api.searchBox.setQuery('@bo');
+      const item = api.provider.getTreeItem((await groupsOf())[0]);
+      assert.deepStrictEqual(item.label, { label: 'bob', highlights: [[0, 2]] });
+      assert.strictEqual(item.id, 'bmSource:bob:search');
+      assert.strictEqual(item.description, '1');
+
+      api.searchBox.setQuery('');
+      assert.deepStrictEqual(await keys(), [['', 4], ['bob', 1]]);
+      assert.strictEqual(api.provider.getTreeItem((await groupsOf())[1]).id, 'bmSource:bob');
+    });
+
+    it('搜尋中分組一律展開（先前收合的分組裡也可能有結果）；清除搜尋後恢復原本的收合狀態', async () => {
+      await setup();
+      const g0 = (await groupsOf())[0];
+      api.provider.setExpanded(g0, false);
+      try {
+        assert.strictEqual(api.provider.getTreeItem(g0).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed, '前提：使用者收合了這個分組');
+        api.searchBox.setQuery('return');
+        assert.strictEqual(api.provider.getTreeItem((await groupsOf())[0]).collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
+        api.searchBox.setQuery('');
+        assert.strictEqual(api.provider.getTreeItem((await groupsOf())[0]).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
+      } finally {
+        api.provider.setExpanded(g0, true);
+      }
+    });
+
+    it('firstMatch：依側邊欄順序的第一個結果；沒結果是 undefined', async () => {
+      await setup();
+      const first = () => {
+        const n = api.provider.firstMatch();
+        return n ? labelOf(api.provider.getTreeItem(n)) : undefined;
+      };
+      api.searchBox.setQuery('tmp_find');
+      assert.strictEqual(first(), NAMES.f, '同一個檔案：依行號，函式書籤（第 0 行）在前');
+      assert.strictEqual(api.provider.firstMatch()?.type, 'favorite');
+      assert.deepStrictEqual(await labels(), ALL, '整個列表的順序：檔案、行號');
+      api.searchBox.setQuery('find_b');
+      assert.strictEqual(first(), NAMES.b4, '只有第二個檔案有結果');
+      api.searchBox.setQuery('#todo');
+      assert.strictEqual(first(), NAMES.b1);
+      assert.strictEqual(api.provider.firstMatch()?.type, 'bookmark');
+      api.searchBox.setQuery('return');
+      assert.strictEqual(first(), NAMES.b2);
+      api.searchBox.setQuery('zzz_nothing');
+      assert.strictEqual(api.provider.firstMatch(), undefined);
+
+      await vscode.commands.executeCommand('functionBookmarks.groupBookmarksBySource');
+      api.searchBox.setQuery('return');
+      assert.strictEqual(first(), NAMES.b2, '依來源分組：自己的分組在前');
+      api.searchBox.setQuery('@bob');
+      assert.strictEqual(first(), NAMES.b3);
+
+      await vscode.commands.executeCommand('functionBookmarks.groupBookmarksByTag');
+      api.searchBox.setQuery('return');
+      assert.strictEqual(first(), NAMES.b2, '依標籤分組：api 在 todo 前');
+      api.searchBox.setQuery('#todo');
+      assert.strictEqual(first(), NAMES.b1);
+      api.searchBox.setQuery('mail');
+      assert.strictEqual(first(), NAMES.b4, '沒有標籤的分組');
+    });
+
+    it('firstMatch 與列表第一列一致（三種分組）', async () => {
+      await setup();
+      for (const group of ['groupBookmarksByFile', 'groupBookmarksByTag', 'groupBookmarksBySource']) {
+        await vscode.commands.executeCommand(`functionBookmarks.${group}`);
+        for (const q of ['', 'tmp_find', 'return', '#todo', '@bob', 'find_b', 'zzz_nothing']) {
+          api.searchBox.setQuery(q);
+          const all = await rows();
+          const first = api.provider.firstMatch();
+          assert.strictEqual(first ? labelOf(api.provider.getTreeItem(first)) : undefined, all[0]?.label, `${group}，搜尋「${q}」`);
+        }
+      }
+    });
+
+    it('清除搜尋後恢復原本的書籤與分組（依檔案、標籤、來源）', async () => {
+      await setup();
+      const snapshot = async () => {
+        const out: unknown[] = [];
+        for (const g of await groupsOf()) {
+          const gi = api.provider.getTreeItem(g);
+          const kids = await api.provider.getChildren(g);
+          out.push([gi.id, labelOf(gi), String(gi.description), kids.map((k) => [api.provider.getTreeItem(k).id, labelOf(api.provider.getTreeItem(k))])]);
+        }
+        return { groups: out, section: String(sectionItem().description), icon: (sectionItem().iconPath as vscode.ThemeIcon).id };
+      };
+      for (const group of ['groupBookmarksByFile', 'groupBookmarksByTag', 'groupBookmarksBySource']) {
+        await vscode.commands.executeCommand(`functionBookmarks.${group}`);
+        const before = await snapshot();
+        assert.ok(before.groups.length > 0, group);
+        api.searchBox.setQuery('#todo');
+        assert.notDeepStrictEqual(await snapshot(), before, `${group}：搜尋中列表不同`);
+        api.searchBox.setQuery('');
+        assert.deepStrictEqual(await snapshot(), before, `${group}：清除搜尋後恢復`);
+      }
+    });
+
+    it('searchFields：行號書籤與函式書籤比對的欄位', async () => {
+      await setup();
+      const all = await rows();
+      const fieldsOf = (name: string) => {
+        const node = all.find((r) => r.label === name)!.node as BookmarkNode | FavoriteNode;
+        return searchFields((node.type === 'bookmark' ? { kind: 'line', entry: node.entry } : { kind: 'symbol', fav: node.fav }) as never);
+      };
+      assert.strictEqual(all.length, 5);
+      assert.deepStrictEqual(fieldsOf(NAMES.b1), {
+        names: ['價格計算'],
+        tags: ['pricing', 'todo'],
+        author: '',
+        file: relA,
+        func: 'alpha',
+        line: 'total = compute_price()',
+        note: 'check rounding',
+      });
+      assert.deepStrictEqual(fieldsOf(NAMES.b2), { names: ['return 2'], tags: ['api'], author: '', file: relA, func: 'beta', line: 'return 2', note: undefined });
+      assert.deepStrictEqual(fieldsOf(NAMES.b3), {
+        names: ['return "lid"'],
+        tags: ['todo'],
+        author: 'bob',
+        file: relA,
+        func: 'Box.open',
+        line: 'return "lid"',
+        note: undefined,
+      });
+      assert.deepStrictEqual(fieldsOf(NAMES.f), {
+        names: ['priceEntry', 'alpha'],
+        tags: ['pricing'],
+        author: '',
+        file: relA,
+        func: 'alpha',
+        note: 'entry point',
+      });
+    });
+
+    it('searchFields：沒有 anchor 的別人的函式書籤用 symbol 路徑當所在函式；函式書籤沒有自訂名稱時只有原名', () => {
+      const foreignFn = {
+        kind: 'line',
+        entry: { bookmark: { id: 'x', file: 'a/b.py', line: 3, symbol: { path: 'Outer.inner', kind: 'method' }, source: { author: 'amy' } } },
+      };
+      assert.deepStrictEqual(searchFields(foreignFn as never), {
+        names: ['inner'],
+        tags: [],
+        author: 'amy',
+        file: 'a/b.py',
+        func: 'Outer.inner',
+        line: undefined,
+        note: undefined,
+      });
+      const fav = { kind: 'symbol', fav: { mark: { file: 'a/b.py', path: 'Outer.inner', kind: 'method', tags: ['t'], note: 'n' } } };
+      assert.deepStrictEqual(searchFields(fav as never), { names: ['inner'], tags: ['t'], author: '', file: 'a/b.py', func: 'Outer.inner', note: 'n' });
+    });
+
+    it('searchBox.setQuery 同步到側邊欄；清除後恢復', async () => {
+      await setup();
+      assert.strictEqual(api.searchBox.query, '');
+      api.searchBox.setQuery('#todo');
+      assert.strictEqual(api.searchBox.query, '#todo');
+      assert.strictEqual(api.provider.query, '#todo');
+      assert.strictEqual(api.provider.searching, true);
+      assert.deepStrictEqual(await labels(), [NAMES.b1, NAMES.b3]);
+      api.searchBox.setQuery('');
+      assert.strictEqual(api.searchBox.query, '');
+      assert.strictEqual(api.provider.query, '');
+      assert.strictEqual(api.provider.searching, false);
+      assert.deepStrictEqual(await labels(), ALL);
+    });
+
+    it('BookmarkSearchBox：搜尋字串存在工作區狀態 searchQuery，重新建立時讀回；同樣的字串不重複通知', () => {
+      const state = new Map<string, unknown>([['searchQuery', '#saved']]);
+      const memento = {
+        keys: () => [...state.keys()],
+        get: (key: string, fallback?: unknown) => (state.has(key) ? state.get(key) : fallback),
+        update: async (key: string, value: unknown) => {
+          if (value === undefined) {
+            state.delete(key);
+          } else {
+            state.set(key, value);
+          }
+        },
+      } as unknown as vscode.Memento;
+      const seen: string[] = [];
+      const make = () => new BookmarkSearchBox(memento, { onQuery: (q) => seen.push(q), onEnter: () => undefined, onDown: () => undefined });
+      const box = make();
+      assert.strictEqual(box.query, '#saved', '重開編輯器後讀回上次的搜尋');
+      assert.deepStrictEqual(seen, [], '建立時不通知');
+      box.setQuery('#saved');
+      assert.deepStrictEqual(seen, [], '沒變：不通知');
+      box.setQuery('login view');
+      assert.deepStrictEqual(seen, ['login view']);
+      assert.strictEqual(state.get('searchQuery'), 'login view');
+      assert.strictEqual(box.query, 'login view');
+      box.setQuery('login view');
+      assert.deepStrictEqual(seen, ['login view'], '同樣的字串不重複通知');
+      box.setQuery('');
+      assert.deepStrictEqual(seen, ['login view', '']);
+      assert.strictEqual(state.get('searchQuery'), '');
+      assert.strictEqual(make().query, '', '清除後重開是空的');
+      box.dispose();
+    });
+
+    it('指令 clearSearch：清除搜尋，側邊欄恢復；沒有搜尋時再執行也不會出錯', async () => {
+      await setup();
+      api.searchBox.setQuery('#todo @bob');
+      assert.strictEqual(api.provider.searching, true);
+      await vscode.commands.executeCommand('functionBookmarks.clearSearch');
+      assert.strictEqual(api.provider.query, '');
+      assert.strictEqual(api.provider.searching, false);
+      assert.strictEqual(api.searchBox.query, '');
+      assert.deepStrictEqual(await labels(), ALL);
+      await vscode.commands.executeCommand('functionBookmarks.clearSearch');
+      assert.strictEqual(api.provider.query, '');
+    });
+
+    it('指令 focusSearch：開啟輸入框，不改動搜尋字串；關閉輸入框後字串保留', async () => {
+      api.searchBox.setQuery('keep');
+      try {
+        await vscode.commands.executeCommand('functionBookmarks.focusSearch');
+        assert.strictEqual(api.searchBox.isOpen, true);
+        assert.strictEqual(api.searchBox.query, 'keep');
+        assert.strictEqual(api.provider.query, 'keep');
+        // 輸入框開著時從程式改字串：一起更新
+        api.searchBox.setQuery('keep2');
+        assert.strictEqual(api.provider.query, 'keep2');
+        api.searchBox.close();
+        assert.strictEqual(api.searchBox.isOpen, false);
+        assert.strictEqual(api.provider.query, 'keep2', '點到別處關閉：字串保留');
+      } finally {
+        api.searchBox.close();
+        api.searchBox.setQuery('');
+      }
+    });
+
+    it('Esc（searchClearAndClose）：清除搜尋並關閉輸入框', async () => {
+      await setup();
+      api.searchBox.setQuery('price');
+      await vscode.commands.executeCommand('functionBookmarks.focusSearch');
+      try {
+        await vscode.commands.executeCommand('functionBookmarks.searchClearAndClose');
+        assert.strictEqual(api.searchBox.isOpen, false);
+        assert.strictEqual(api.provider.query, '');
+        assert.deepStrictEqual(await labels(), ALL);
+      } finally {
+        api.searchBox.close();
+      }
+    });
+
+    it('↓（searchToList）：關閉輸入框，選取第一個結果並保留搜尋', async () => {
+      await setup();
+      api.searchBox.setQuery('#todo');
+      await vscode.commands.executeCommand('functionBookmarks.focusSearch');
+      try {
+        await vscode.commands.executeCommand('functionBookmarks.searchToList');
+        assert.strictEqual(api.searchBox.isOpen, false);
+        assert.strictEqual(api.provider.query, '#todo');
+        const first = api.provider.firstMatch();
+        assert.ok(first);
+        const sel = api.treeView.selection[0];
+        assert.ok(sel && (sel.type === 'bookmark' || sel.type === 'favorite'), '選取了書籤');
+        assert.strictEqual(api.provider.getTreeItem(sel).id, api.provider.getTreeItem(first).id);
+      } finally {
+        api.searchBox.close();
+      }
+    });
+
+    it('清單第一列是搜尋列：沒有搜尋時顯示提示，搜尋中顯示字串並有清除鈕', async () => {
+      const roots = await api.provider.getChildren();
+      assert.strictEqual(roots[0].type, 'search');
+      let item = api.provider.getTreeItem(api.provider.searchNode);
+      assert.strictEqual(item.label, '');
+      assert.strictEqual(item.description, 'Search bookmarks…');
+      assert.strictEqual(item.contextValue, 'fbSearch');
+      assert.strictEqual(item.command?.command, 'functionBookmarks.focusSearch');
+      api.searchBox.setQuery('#todo login');
+      item = api.provider.getTreeItem(api.provider.searchNode);
+      assert.strictEqual(item.label, '#todo login');
+      assert.strictEqual(item.description, undefined);
+      assert.strictEqual(item.contextValue, 'fbSearch:active');
+    });
+
+    it('指令都有登記（命令選擇區找得到）', async () => {
+      const all = await vscode.commands.getCommands(true);
+      for (const id of ['clearSearch', 'focusSearch', 'searchToList', 'searchClearAndClose']) {
+        assert.ok(all.includes(`functionBookmarks.${id}`), id);
+      }
+    });
+  });
+
 });
 
 export type { TreeNode };

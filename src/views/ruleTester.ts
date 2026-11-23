@@ -99,7 +99,9 @@ export class RuleTester implements vscode.Disposable {
     }
     const summary = [...counts.entries()].map(([id, n]) => `${id} ×${n}`).join(', ');
     const how =
-      file.source === 'languageServer'
+      readSettings(editor.document.uri).source === 'languageServer'
+        ? vscode.l10n.t('Rules are not used because detection.source is set to languageServer.')
+        : file.source === 'languageServer'
         ? vscode.l10n.t('No rule applies to this file; the functions come from the language server.')
         : file.source === 'none'
           ? vscode.l10n.t('No rule applies to this file (language: {0}).', editor.document.languageId)

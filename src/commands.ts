@@ -88,7 +88,7 @@ export class Commands {
   private located(t: Target) {
     const loc = this.store.locate(t.uri);
     if (!loc) {
-      void vscode.window.showWarningMessage(vscode.l10n.t('Only files inside a workspace folder can be favorited or renamed.'));
+      void vscode.window.showWarningMessage(vscode.l10n.t('Only files inside a workspace folder can be bookmarked or renamed.'));
       return undefined;
     }
     return { ...loc, key: { file: loc.rel, ...t.key } as MarkKey };

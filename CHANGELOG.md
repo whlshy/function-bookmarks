@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.8.0 (2026-11-23) — search bar, more languages, bug fixes and performance
+
+- **Search** from the first row of the side bar (or `Ctrl+Alt+F`): type to filter the bookmarks right away — by name, tag, file, function, the code on the line or the note. Matches are highlighted, groups with no match are hidden, and the title shows *N of M match*. `#tag` searches tags only, `@source` shows only that person's bookmarks. `Enter` opens the first match, `↓` moves to the list, `Esc` clears; the ✕ on the row clears too. The text is kept after a restart. The drop-down *Search Bookmarks* (`Ctrl+Alt+/`) is still there
+
+- **Protocol Buffers**: `service` with its `rpc`s, nested `message`s, `enum`, `oneof` and `extend` (works with or without a proto extension)
+- **Vue and Svelte**: functions in `<script>`, `<script setup>`, `<script lang="ts">` and `<script lang="jsx">`; a `<script>` commented out in the template is not listed
+- **Shell** (sh, bash, zsh): `name() {}` and `function name {}`; comments, strings, heredocs and `case` patterns do not break range detection
+- **SQL**: `CREATE FUNCTION`, `PROCEDURE`, `TRIGGER`, `VIEW` and Oracle `PACKAGE`, each up to the end of its statement — `;`, `GO` (SQL Server), `/` (Oracle) or MySQL's `DELIMITER`; PostgreSQL `$$` bodies are handled. In a file split by `GO`, a missing `GO` before the next `CREATE VIEW` / `PROCEDURE` does not stretch the previous one. New rule body type `statement` for your own rules
+- *Whole Project* includes `.proto`, `.vue`, `.svelte`, `.sh`, `.bash`, `.zsh` and `.sql` files
+- Internal: each language now lives in its own file (comment and string handling, file extensions and rules together), so adding a language touches one place
+
+- Fix: **Filter by Source…** now also hides your own function bookmarks when *Mine* is unchecked — in the side bar and its count, the gutter, next / previous, search and the status bar (a hidden function bookmark with a note no longer shows a note icon instead)
+- Fix: a bookmark that is *not on this branch* is no longer removed when you press `Ctrl+Alt+B` on the line where it happens to sit, and is not deleted or marked as *needs checking* when that line is deleted (`bookmarks.onLineDelete`). Actions on the cursor line (toggle, rename, tags, note, number, color, move) only see the bookmarks shown in the gutter
+- *Clear Bookmarks in File* and *Clear All Bookmarks* only clear the bookmarks you can see; bookmarks from other branches and hidden sources are kept
+- Adding a bookmark while *Mine* is hidden by the source filter keeps your filter and shows a message with a *Show* button. A hidden bookmark of yours on that line is not removed or duplicated
+- Fix: when grouping bookmarks by source, each bookmark shows its file name (as when grouping by tag)
+- Fix: switching tabs quickly could leave the side bar or gutter showing the previous file's functions
+- Fix: with Windows line endings (CRLF), a string continued with a backslash at the end of a line (JavaScript, C family, Python) hid every function after it; Markdown sections no longer include the blank line before the next heading
+- The *Add bookmark* / *Remove bookmark* link in the hover closes the hover (it cannot update while open) and shows the result in the status bar
+- Fix: Mermaid diagrams in a note (or any Markdown preview) were only drawn after the text was changed, not when the preview first opened
+- Fix: the Mermaid preview could miss an update while it was still drawing
+- Faster: the Markdown preview loads Mermaid (about 5 MB) only when the page has a Mermaid block
+- Faster: one shared file watcher instead of three; changes inside `.git` are ignored, and *Whole Project* rescans only the affected workspace folder when a matching file is added or deleted
+- Faster: *Whole Project* shows a folder's files right away and counts their functions in the background
+- Less memory when relocating bookmarks after large changes to big files
+- Function detection for the same file version is shared between the side bar, gutter and hover, and the cache drops the least recently used files instead of clearing everything
+- Clearer wording in the settings, messages, README and Traditional Chinese translation; the example detection rule in the README no longer overrides the built-in Go rule
+
 ## 0.7.0 (2026-11-22) — more languages
 
 - Functions, classes and methods are detected in **C / C++, Rust, Go, Java, C#, Kotlin, Swift, PHP and Ruby** without any language extension: C++ `Class::method`, namespaces and templates; Rust `impl` blocks (`Display for Point`), traits, `mod` and `macro_rules!`; Go methods shown as `Server.Start`; Java / C# annotations, attributes, constructors and `=>` bodies; Kotlin data classes and `= expression` functions; PHP only inside `<?php ?>`; Ruby `def` … `end` by indentation

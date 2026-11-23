@@ -16,11 +16,11 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 
 ### Bookmarks that follow the code
 
-- `Ctrl+Alt+B` (or right-click a line number) — on a function name it bookmarks the **function**, anywhere else the **line**
+- `Ctrl+Alt+B` (or right-click a line number) — on the line with a function's name it bookmarks the **function**, anywhere else the **line**
 - Follows edits, `git pull`, branch switches, merges, stashes, formatters, scripts and AI edits — even for files that are not open
 - A bookmark that cannot be found (or sits inside a merge conflict) is marked *needs checking*; put it back with **Move Bookmark to Cursor**
 - **Branch aware**: each branch remembers its own positions; bookmarks on code that is not on the current branch wait until you switch back; a bookmark can belong to one branch only
-- Function bookmarks are found again by name, even after the function is renamed
+- Function bookmarks follow functions by name, and stay attached even after a function is renamed
 
 ### Organize and jump
 
@@ -28,14 +28,15 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 - **Numbered bookmarks**: `Ctrl+Alt+Shift+1`–`9` sets a number on the current line, `Ctrl+Alt+1`–`9` jumps to it
 - **Colors** for bookmarks and tags — the gutter icon and side bar follow
 - The bookmark name shown faintly at the end of the line
-- Next / previous (`Ctrl+Alt+.` / `Ctrl+Alt+,`), search (`Ctrl+Alt+/`), group by file, tag or source
+- **Search** from the first row of the side bar (`Ctrl+Alt+F`): the bookmarks are filtered as you type; `#tag` and `@source` narrow it down
+- Next / previous (`Ctrl+Alt+.` / `Ctrl+Alt+,`), quick search (`Ctrl+Alt+/`), group by file, tag or source
 - **Hide bookmark icons temporarily** (to set breakpoints) from the side bar's `…` menu
 - Status bar: bookmarks in the current file; click to search
 
 ### Function list
 
-- The functions of the current file in their own side bar, a **whole project** browser, and **Search Functions**
-- **Display names** (F2) without changing the code; hover to see the original name
+- The functions of the current file in the side bar, a **Whole project** browser, and **Search Functions**
+- **Display names** (`F2`) for bookmarked functions without changing the code; hover to see the original name
 - Django templates: `{% block %}`, `extends` / `include` links and overridden blocks; event listeners and requests (`.on('click')`, `$.ajax`, `fetch`) are listed too
 - **Your own detection rules** with regular expressions; **Test Detection Rules on This File** shows what each rule finds
 - Works out of the box for most common languages, no language extension needed; others fall back to the language server
@@ -57,7 +58,7 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 | `Ctrl+Alt+/` | Search bookmarks |
 | `Ctrl+Alt+Shift+1`–`9` | Set / remove number 1–9 on this line |
 | `Ctrl+Alt+1`–`9` | Go to bookmark 1–9 |
-| `F2` (side bar) | Rename display name |
+| `F2` (side bar) | Rename bookmark or display name |
 
 On keyboard layouts where `Ctrl+Alt` works as `AltGr` (for example German), `Ctrl+Alt+digit` may type characters; change these shortcuts in *Keyboard Shortcuts* if needed.
 
@@ -103,16 +104,16 @@ On keyboard layouts where `Ctrl+Alt` works as `AltGr` (for example German), `Ctr
 ```jsonc
 "functionBookmarks.detection.rules": [
   {
-    "id": "go-func",
-    "languages": ["go"],
-    "pattern": "^func[ \\t]+(?:\\([^)]*\\)[ \\t]*)?(?<name>\\w+)",
+    "id": "lua-function",
+    "languages": ["lua"],
+    "pattern": "^[ \\t]*(?:local[ \\t]+)?function[ \\t]+(?<name>[\\w.:]+)",
     "kind": "function",
-    "body": "brace"
+    "body": "end"
   }
 ]
 ```
 
-`body` decides how the end of a symbol is found: `brace`, `indent`, `pair` (with `end`), `line` or `embedded` (with `end` and `embeddedLanguage`). Run **Test Detection Rules on This File** to see what each rule finds.
+`body` decides how the end of a symbol is found: `brace`, `indent`, `pair` (with `end`), `line`, `embedded` (with `end` and `embeddedLanguage`), `end` or `statement`. Run **Test Detection Rules on This File** to see what each rule finds.
 
 ## Multi-root workspaces and remote development
 

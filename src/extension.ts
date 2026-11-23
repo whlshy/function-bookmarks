@@ -24,10 +24,12 @@ import { mermaidPlugin } from './markdown/mermaid';
 import { BookmarkHoverProvider, HOVER_ACTION, HoverActionArg } from './views/hover';
 import { findByPath } from './detection/engine';
 import { FavoriteGutter } from './views/gutter';
+import { FileEvents } from './util/fileEvents';
 import { NoteEditor, PREVIEW_NOTE_COMMAND } from './views/noteEditor';
 import { collectProjectSymbols, searchFunctions, searchMarks } from './views/search';
 import { BookmarkGrouping, BookmarkNode, COMMANDS, FilterMode, FunctionTreeProvider, SymbolNode, TreeNode } from './views/tree';
 import { sameUri } from './util/uris';
+import { BookmarkSearchBox } from './views/searchBox';
 
 const VIEW_ID = 'functionBookmarks.tree';
 const STATE_FILTER = 'filterMode';
@@ -61,6 +63,7 @@ export interface ExtensionApi {
   statusBar: BookmarkStatusBar;
   ruleTester: RuleTester;
   notes: NoteEditor;
+  searchBox: BookmarkSearchBox;
   refreshNow(): Promise<void>;
   /** 立即執行一次游標跟隨，回傳被標示的節點。 */
   followCursor(): SymbolNode | undefined;
@@ -77,15 +80,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
   const branches = new BranchService();
   store.branchOf = (folder) => branches.name(folder);
   await branches.refresh();
-  const favorites = new FavoritesModel(store, service);
-  const project = new ProjectFiles();
+  const files = new FileEvents();
+  const favorites = new FavoritesModel(store, service, files);
+  const project = new ProjectFiles(files);
   const resolver = new TemplateResolver(service);
   const provider = new FunctionTreeProvider(service, store, favorites, project, resolver, context.workspaceState);
   const notes = new NoteEditor(context.globalStorageUri);
   const commands = new Commands(service, store, resolver, notes);
   const bookmarks = new BookmarkCommands(store, service, notes, favorites);
   const tracker = new BookmarkTracker(store, service);
-  const external = new ExternalChangeWatcher(store, service, context.workspaceState, branches);
+  const external = new ExternalChangeWatcher(store, service, context.workspaceState, branches, files);
   tracker.handledByDiff = (e, changes) => external.handlesByDiff(e, changes);
   const reconciler = new ReconcileWatcher(store, service);
   const gutter = new FavoriteGutter(context.extensionUri, service, store);
@@ -111,6 +115,40 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     showCollapseAll: true,
   });
   const reportedErrors = new Set<string>();
+
+  // 書籤搜尋：清單第一列顯示搜尋字串，輸入框開在畫面上方，打字即時篩選「書籤」區
+  const openMatch = async (node: TreeNode | undefined) => {
+    if (node?.type === 'bookmark') {
+      await revealLine(node.entry.uri, node.entry.bookmark.line);
+    } else if (node?.type === 'favorite') {
+      await commands.openFavorite(node.fav);
+    }
+  };
+  const setSearchContext = () => void vscode.commands.executeCommand('setContext', 'functionBookmarks.searching', provider.searching);
+  const searchBox = new BookmarkSearchBox(context.workspaceState, {
+    onQuery: (q) => {
+      const was = provider.searching;
+      if (!provider.setQuery(q)) {
+        return;
+      }
+      setSearchContext();
+      // 開始搜尋時展開「書籤」區（使用者先前收合了也看得到結果）
+      if (!was && provider.searching) {
+        void treeView.reveal(provider.sections.bookmarks, { expand: true, select: false, focus: false }).then(undefined, () => undefined);
+      }
+    },
+    onEnter: () => openMatch(provider.firstMatch()),
+    onDown: async () => {
+      const node = provider.firstMatch();
+      if (node) {
+        await treeView.reveal(node, { select: true, focus: true }).then(undefined, () => undefined);
+      } else {
+        await vscode.commands.executeCommand(`${VIEW_ID}.focus`);
+      }
+    },
+  });
+  provider.setQuery(searchBox.query);
+  setSearchContext();
 
   // 側邊欄標題旁顯示目前分支（多個資料夾在不同分支時不顯示）
   const updateBranchLabel = () => {
@@ -254,6 +292,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
   const reg = (id: string, fn: (...args: any[]) => unknown) => vscode.commands.registerCommand(id, fn);
 
   context.subscriptions.push(
+    files,
     store,
     favorites,
     project,
@@ -270,6 +309,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     watchGitHead(() => void branches.refresh().then(() => external.checkAll())),
     reconciler,
     treeView,
+    searchBox,
+    reg('functionBookmarks.focusSearch', async () => {
+      // 先打開側邊欄，打字時才看得到下方的書籤即時篩選
+      if (!treeView.visible) {
+        await vscode.commands.executeCommand(`${VIEW_ID}.focus`);
+      }
+      searchBox.open();
+    }),
+    reg('functionBookmarks.clearSearch', () => searchBox.setQuery('')),
+    reg('functionBookmarks.searchToList', () => searchBox.toList()),
+    reg('functionBookmarks.searchClearAndClose', () => searchBox.clearAndClose()),
     reg('functionBookmarks.refresh', () => {
       service.invalidate();
       reportedErrors.clear();
@@ -306,7 +356,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     reg(HOVER_ACTION, async (arg: HoverActionArg) => {
       const uri = vscode.Uri.parse(arg.uri);
       if (arg.action === 'toggle') {
-        return commands.toggleFavoriteAt(uri, arg.path, arg.kind as SymbolKindName, arg.line);
+        await commands.toggleFavoriteAt(uri, arg.path, arg.kind as SymbolKindName, arg.line);
+        // 開著的提示內容無法更新（還寫著「加入書籤」）：關掉它，滑鼠再移上去就是新的內容；結果顯示在狀態列
+        await vscode.commands.executeCommand('editor.action.hideHover').then(undefined, () => undefined);
+        const name = arg.path.split('.').pop() ?? arg.path;
+        const on = !!store.get(uri, { path: arg.path, kind: arg.kind as SymbolKindName })?.favorite;
+        vscode.window.setStatusBarMessage(
+          on ? `$(star-full) ${vscode.l10n.t('Bookmark added: {0}', name)}` : `$(star-empty) ${vscode.l10n.t('Bookmark removed: {0}', name)}`,
+          3000,
+        );
+        return undefined;
       }
       const file = await service.getForUri(uri);
       const symbol = file && findByPath(file.symbols, arg.path, arg.kind);
@@ -463,6 +522,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     statusBar,
     ruleTester,
     notes,
+    searchBox,
     refreshNow,
     followCursor,
     treeView,

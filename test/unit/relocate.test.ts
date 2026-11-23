@@ -49,6 +49,92 @@ describe('行差異比對（diffLines）', () => {
     ]);
   });
 
+  it('插入、刪除、替換混合：差異區塊與位置固定（回歸）', () => {
+    const a = L(20);
+    const b = [
+      ...a.slice(0, 2),
+      'ins1',
+      'ins2', // 第 2 行前插入 2 行
+      ...a.slice(2, 6),
+      'repl', // 第 6 行替換
+      ...a.slice(7, 10),
+      // 第 10、11 行刪除
+      ...a.slice(12, 15),
+      'rA',
+      'rB', // 第 15 行替換成 2 行
+      ...a.slice(16),
+    ];
+    assert.deepStrictEqual(diffLines(a.map(hashLine), b.map(hashLine)), [
+      { oldStart: 2, oldEnd: 2, newStart: 2, newEnd: 4 },
+      { oldStart: 6, oldEnd: 7, newStart: 8, newEnd: 9 },
+      { oldStart: 10, oldEnd: 12, newStart: 12, newEnd: 12 },
+      { oldStart: 15, oldEnd: 16, newStart: 15, newEnd: 17 },
+    ]);
+    assert.deepStrictEqual(apply(a, b), b);
+  });
+
+  describe('大檔大改', () => {
+    const N = 20000;
+    const a = L(N);
+    const ha = a.map(hashLine);
+
+    it('2 萬行、每 12 行改一行（編輯距離約 3300，接近上限）：3 秒內完成，結果正確', () => {
+      const changed = new Set<number>();
+      const b = a.map((s, i) => {
+        if (i % 12 === 6) {
+          changed.add(i);
+          return `${s} // edited`;
+        }
+        return s;
+      });
+      const t0 = Date.now();
+      const hunks = diffLines(ha, b.map(hashLine));
+      const ms = Date.now() - t0;
+      assert.ok(ms < 3000, `diffLines 花了 ${ms}ms`);
+      assert.strictEqual(hunks.length, changed.size, '每個被改的行各一個差異區塊');
+      assert.deepStrictEqual(apply(a, b), b);
+      for (const i of [0, 5, 7, 11, 13, 5999, 6001, 19999]) {
+        assert.deepStrictEqual(mapLine(i, hunks), { line: i, changed: changed.has(i) }, `第 ${i} 行`);
+      }
+    });
+
+    it('2 萬行、多處插入與刪除讓行號大幅位移：未改動的行換算正確', () => {
+      const out: string[] = [];
+      const newIndex = new Map<number, number>();
+      for (let i = 0; i < N; i++) {
+        if (i % 15 === 3) {
+          continue; // 刪除
+        }
+        if (i % 15 === 9) {
+          out.push(`inserted_before_${i}`); // 插入
+        }
+        newIndex.set(i, out.length);
+        out.push(a[i]);
+      }
+      const t0 = Date.now();
+      const hunks = diffLines(ha, out.map(hashLine));
+      const ms = Date.now() - t0;
+      assert.ok(ms < 3000, `diffLines 花了 ${ms}ms`);
+      assert.deepStrictEqual(apply(a, out), out);
+      for (const i of [0, 2, 4, 8, 9, 10, 14, 15, 18, 9999, 10001, 19998]) {
+        const expected = newIndex.get(i);
+        if (expected !== undefined) {
+          assert.deepStrictEqual(mapLine(i, hunks), { line: expected, changed: false }, `第 ${i} 行`);
+        }
+      }
+    });
+
+    it('改動超過編輯距離上限（每 5 行改一行）：不卡住，整段視為被取代，套用後仍等於新內容', () => {
+      const b = a.map((s, i) => (i % 5 === 2 ? `${s} // edited` : s));
+      const t0 = Date.now();
+      const hunks = diffLines(ha, b.map(hashLine));
+      const ms = Date.now() - t0;
+      assert.ok(ms < 3000, `diffLines 花了 ${ms}ms`);
+      assert.deepStrictEqual(apply(a, b), b);
+      assert.ok(hunks.length >= 1);
+    });
+  });
+
   it('行尾空白與 \\r 不影響比對', () => {
     assert.strictEqual(hashLine('abc  '), hashLine('abc'));
     assert.deepStrictEqual(diffLines(H('a\r\nb'), H('a\nb')), []);

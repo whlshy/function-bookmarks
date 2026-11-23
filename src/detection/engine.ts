@@ -260,6 +260,79 @@ function findIndentEnd(masked: string, matchStart: number, from: number): number
  * 以 `end` 結尾的語言（Ruby）：找到縮排與開頭那一行相同（或更外層）的 `end`。
  * 同一行就結束的寫法（`def x; 1; end`、`def x = 1`）只算那一行。
  */
+/** 不算區塊開頭的 BEGIN：交易（BEGIN TRANSACTION、BEGIN WORK…）。 */
+const SQL_BEGIN_NOT_BLOCK = /^[ \t]+(?:TRAN|TRANSACTION|WORK|DISTRIBUTED|DEFERRED|IMMEDIATE|EXCLUSIVE)\b|^[ \t]*;/i;
+
+/**
+ * SQL 敘述的結尾（body: statement）：
+ * - BEGIN／CASE … END 配對之外的第一個 ;（用了 MySQL 的 DELIMITER 時是當時的分隔字串）
+ * - 檔案用單獨一行的 GO（SQL Server）或 /（Oracle）分隔時，到那一行之前；
+ *   以 GO 分隔但下一個 CREATE VIEW／PROCEDURE…前漏寫了 GO 時，到上一個分號（沒有就到那一行之前）
+ * - Oracle（以 / 分隔）的預存程序、套件：宣告區與內層程序都有 ;，只以 / 為準
+ * 都找不到時到檔案結尾。
+ */
+function findStatementEnd(masked: string, matchStart: number, matchEnd: number): number {
+  let delim = ';';
+  for (const m of masked.slice(0, matchStart).matchAll(/^[ \t]*DELIMITER[ \t]+(\S+)/gim)) {
+    delim = m[1];
+  }
+  const goSep = delim === ';' && /^[ \t]*GO[ \t]*;?[ \t]*\r?$/im.test(masked);
+  const slashSep = delim === ';' && /^[ \t]*\/[ \t]*\r?$/m.test(masked);
+  const routine = /\b(?:FUNCTION|PROCEDURE|PROC|TRIGGER|PACKAGE)\b/i.test(masked.slice(matchStart, matchEnd));
+  const escaped = delim.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+  const re = new RegExp(
+    String.raw`\b(BEGIN|CASE|END)\b(?:[ \t]+(IF|LOOP|WHILE|REPEAT|FOR|CASE)\b)?|^([ \t]*GO[ \t]*;?[ \t]*)\r?$|^([ \t]*\/[ \t]*)\r?$|(${escaped})|` +
+      String.raw`^[ \t]*((?:CREATE|ALTER)(?:[ \t]+OR[ \t]+(?:ALTER|REPLACE))?[ \t]+(?:VIEW|PROC|PROCEDURE|FUNCTION|TRIGGER)\b)`,
+    'gim',
+  );
+  re.lastIndex = matchEnd;
+  let depth = 0;
+  /** 以 GO 分隔的檔案裡，最外層最後一個分號的結尾（下一個 CREATE 前漏寫 GO 時用）。 */
+  let lastDelimEnd: number | undefined;
+  for (let m = re.exec(masked); m; m = re.exec(masked)) {
+    if (m[0].length === 0) {
+      re.lastIndex++;
+      continue;
+    }
+    const word = m[1]?.toUpperCase();
+    if (word === 'BEGIN') {
+      if (!SQL_BEGIN_NOT_BLOCK.test(masked.slice(m.index + 5, m.index + 30))) {
+        depth++;
+      }
+    } else if (word === 'CASE') {
+      depth++;
+    } else if (word === 'END') {
+      const suffix = m[2]?.toUpperCase();
+      if (!suffix || suffix === 'CASE') {
+        depth = Math.max(0, depth - 1);
+      }
+    } else if (m[3] !== undefined) {
+      if (goSep) {
+        return m.index;
+      }
+    } else if (m[4] !== undefined) {
+      if (slashSep) {
+        return m.index;
+      }
+    } else if (m[5] !== undefined) {
+      if (goSep && depth === 0) {
+        lastDelimEnd = m.index + m[5].length;
+      }
+      if (goSep || depth > 0 || (slashSep && routine)) {
+        continue;
+      }
+      return m.index + m[5].length;
+    } else if (m[6] !== undefined) {
+      // 以 GO 分隔的檔案裡，下一個 CREATE VIEW／PROCEDURE…（最外層）前漏寫了 GO：
+      // 到上一個分號為止（沒有分號就到那一行之前），不要一路延伸到後面的 GO
+      if (goSep && depth === 0) {
+        return lastDelimEnd ?? m.index;
+      }
+    }
+  }
+  return masked.length;
+}
+
 function findEndKeywordEnd(masked: string, matchStart: number, from: number): number {
   const headerEnd = lineEndOffset(masked, from);
   const rest = masked.slice(from, headerEnd);
@@ -393,6 +466,9 @@ function collect(
         case 'end':
           endOffset = findEndKeywordEnd(masked, matchStart, matchEnd);
           break;
+        case 'statement':
+          endOffset = findStatementEnd(masked, matchStart, matchEnd);
+          break;
         case 'call':
           endOffset = findCallEnd(masked, matchEnd);
           break;
@@ -430,12 +506,20 @@ function headingLevel(groups: Record<string, string | undefined>): number {
 }
 
 /** 標題的範圍：到下一個同層或更上層標題之前（沒有的話到檔案結尾）。 */
-function fixHeadingEnds(raw: RawSymbol[], textLength: number): void {
+function fixHeadingEnds(raw: RawSymbol[], text: string): void {
   const headings = raw.filter((s) => s.level !== undefined).sort((a, b) => a.startOffset - b.startOffset);
   for (let i = 0; i < headings.length; i++) {
     const h = headings[i];
     const next = headings.slice(i + 1).find((x) => x.level! <= h.level!);
-    h.endOffset = Math.max(h.endOffset, next ? next.startOffset - 1 : textLength);
+    let end = text.length;
+    if (next) {
+      // 結束在下一個標題前的換行；CRLF 時連 \r 一起退回，否則會多算一行
+      end = next.startOffset - 1;
+      if (text[end - 1] === '\r') {
+        end--;
+      }
+    }
+    h.endOffset = Math.max(h.endOffset, end);
   }
 }
 
@@ -557,7 +641,7 @@ export function detectSymbols(
   const errors: RuleError[] = [];
   const masked = maskText(text, syntaxForLanguage(languageId));
   const raw = collect(text, masked, 0, languageId, rules, options, errors, 0);
-  fixHeadingEnds(raw, text.length);
+  fixHeadingEnds(raw, text);
   const tree = applyHide(dedupe(applyWithin(nest(raw), undefined), new Set()), undefined);
   const uniqueErrors = errors.filter(
     (e, i) => errors.findIndex((x) => x.ruleId === e.ruleId && x.message === e.message) === i,

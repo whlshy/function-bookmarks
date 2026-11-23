@@ -2,7 +2,7 @@ import * as path from 'path';
 import { openDocumentFor } from '../symbols/documentSource';
 import { bookmarkPreviewLink, previewNoteLink, trustPreviewLink } from './noteEditor';
 import { bookmarkTitle } from '../bookmarks/commands';
-import { allBookmarkItems, BookmarkItem, compareItems, itemSource, itemTags } from '../bookmarks/unified';
+import { BookmarkItem, compareItems, itemSource, itemTags, shownBookmarkItems } from '../bookmarks/unified';
 import { BookmarkEntry } from '../storage/store';
 import { uriKey } from '../util/uris';
 import * as vscode from 'vscode';
@@ -16,6 +16,7 @@ import { DirTree } from '../symbols/projectTree';
 import { FileSymbols, SymbolService } from '../symbols/symbolService';
 import { basenamePosix } from '../util/paths';
 import { circled, effectiveColor, paletteColor } from '../bookmarks/decor';
+import { BookmarkQuery, highlightRanges, isEmptyQuery, matchesQuery, parseQuery, SearchFields } from '../bookmarks/filter';
 
 export type SectionId = 'bookmarks' | 'currentFile' | 'project';
 export type FilterMode = 'all' | 'bookmarks';
@@ -24,6 +25,10 @@ export type BookmarkGrouping = 'file' | 'tag' | 'source';
 export interface SectionNode {
   type: 'section';
   section: SectionId;
+}
+/** 清單最上面的搜尋列：顯示目前的搜尋字串，點一下開啟輸入框。 */
+export interface SearchNode {
+  type: 'search';
 }
 /** 函式書籤（原本的收藏）。 */
 export interface FavoriteNode {
@@ -75,6 +80,7 @@ export interface BookmarkNode {
   parent: SectionNode | BmGroupNode;
 }
 export type TreeNode =
+  | SearchNode
   | SectionNode
   | FavoriteNode
   | BmGroupNode
@@ -122,9 +128,10 @@ export function displayName(name: string, alias: string | undefined): string {
 }
 
 export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable {
-  private readonly changed = new vscode.EventEmitter<TreeNode | undefined>();
+  private readonly changed = new vscode.EventEmitter<TreeNode | TreeNode[] | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
 
+  readonly searchNode: SearchNode = { type: 'search' };
   readonly sections: Record<SectionId, SectionNode> = {
     bookmarks: { type: 'section', section: 'bookmarks' },
     currentFile: { type: 'section', section: 'currentFile' },
@@ -138,6 +145,9 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   bookmarkGrouping: BookmarkGrouping = 'file';
   /** 隱藏「不在此分支」的書籤。 */
   hideNotOnBranch = false;
+  /** 搜尋列的字串；有內容時「書籤」區只列出符合的。 */
+  private queryText = '';
+  private parsedQuery: BookmarkQuery = parseQuery('');
   private disposables: vscode.Disposable[] = [];
   /** 使用者展開／收合過的節點（以節點 id 記錄），切換檔案、重開編輯器後沿用。 */
   private expansion: Record<string, boolean>;
@@ -202,6 +212,32 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     this.changed.fire(undefined);
   }
 
+  get query(): string {
+    return this.queryText;
+  }
+
+  /** 搜尋中（搜尋字串不是空的）。 */
+  get searching(): boolean {
+    return !isEmptyQuery(this.parsedQuery);
+  }
+
+  /** 設定搜尋列的字串並重畫；回傳是否有變。 */
+  setQuery(query: string): boolean {
+    if (query === this.queryText) {
+      return false;
+    }
+    this.queryText = query;
+    this.parsedQuery = parseQuery(query);
+    this.fire();
+    return true;
+  }
+
+  /** 搜尋結果的第一個書籤（依側邊欄的順序），Enter 跳過去、↓ 移到這裡。 */
+  firstMatch(): BookmarkNode | FavoriteNode | undefined {
+    const group = this.bookmarkChildren(this.sections.bookmarks)[0];
+    return group ? this.groupChildren(group)[0] : undefined;
+  }
+
   get currentFile(): FileSymbols | undefined {
     return this.current;
   }
@@ -210,8 +246,18 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     return this.currentNodes;
   }
 
-  /** 重新讀取目前編輯器的函式。回傳 true 表示有內容。 */
-  async refresh(editor: vscode.TextEditor | undefined): Promise<boolean> {
+  /** 每次 refresh 遞增；等偵測結果期間又切換了檔案時，舊的那次放棄（快速切換分頁時慢的舊結果不會蓋掉新畫面）。 */
+  private refreshSeq = 0;
+  private latestRefresh: Promise<boolean> = Promise.resolve(false);
+
+  /** 重新讀取目前編輯器的函式。回傳 true 表示有內容；被較新的一次取代時回傳那一次的結果。 */
+  refresh(editor: vscode.TextEditor | undefined): Promise<boolean> {
+    const p = this.doRefresh(editor, ++this.refreshSeq);
+    this.latestRefresh = p;
+    return p;
+  }
+
+  private async doRefresh(editor: vscode.TextEditor | undefined, seq: number): Promise<boolean> {
     if (!editor && this.current && openDocumentFor(this.current.uri)) {
       // 焦點暫時移到終端機、設定頁等非文字編輯器：檔案還開著就維持顯示，不清空也不重建
       const doc = openDocumentFor(this.current.uri)!;
@@ -233,8 +279,11 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     const doc = editor.document;
     const file = await this.service.getSymbols(doc);
     let overrides = new Map<string, OverrideInfo>();
-    if (file.symbols.some((s) => s.ruleId === 'dj-extends')) {
+    if (seq === this.refreshSeq && file.symbols.some((s) => s.ruleId === 'dj-extends')) {
       overrides = await this.resolver.overrides(doc.uri, file.symbols).catch(() => new Map<string, OverrideInfo>());
+    }
+    if (seq !== this.refreshSeq) {
+      return this.latestRefresh;
     }
     this.current = file;
     this.fileLabel = path.basename(doc.uri.fsPath || doc.uri.path);
@@ -298,19 +347,15 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   async getChildren(element?: TreeNode): Promise<TreeNode[]> {
     if (!element) {
       if (this.filterMode === 'bookmarks') {
-        return [this.sections.bookmarks];
+        return [this.searchNode, this.sections.bookmarks];
       }
-      return [this.sections.bookmarks, this.sections.currentFile, this.sections.project];
+      return [this.searchNode, this.sections.bookmarks, this.sections.currentFile, this.sections.project];
     }
     switch (element.type) {
       case 'section':
         return this.sectionChildren(element);
       case 'bmGroup':
-        return element.items.map((i) =>
-          i.kind === 'line'
-            ? ({ type: 'bookmark', entry: i.entry, parent: element } as BookmarkNode)
-            : ({ type: 'favorite', fav: i.fav, parent: element } as FavoriteNode),
-        );
+        return this.groupChildren(element);
       case 'symbol':
         return element.children;
       case 'wsFolder': {
@@ -348,18 +393,46 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     return folders.map((folder) => ({ type: 'wsFolder', folder, parent: section }) as WsFolderNode);
   }
 
-  /** 先偵測檔案節點的函式數量（有快取），沒有函式的檔案才能不顯示展開鈕。 */
-  private async withCounts(nodes: TreeNode[]): Promise<TreeNode[]> {
+  /**
+   * 檔案節點立刻回傳（檔案多或在遠端時不必等全部讀完）；背景偵測函式數量（有快取），
+   * 沒有函式的檔案再局部更新成不顯示展開鈕。
+   */
+  private withCounts(nodes: TreeNode[]): TreeNode[] {
     const files = nodes.filter((n): n is FileNode => n.type === 'file' && !this.fileCounts.has(uriKey(n.uri)));
+    if (files.length) {
+      const job = this.countFiles(files);
+      this.counting.add(job);
+      void job.finally(() => this.counting.delete(job));
+    }
+    return nodes;
+  }
+
+  private counting = new Set<Promise<void>>();
+
+  /** 給測試用：等背景的函式計數做完。 */
+  async whenCounted(): Promise<void> {
+    while (this.counting.size) {
+      await Promise.all([...this.counting]);
+    }
+  }
+
+  private async countFiles(files: FileNode[]): Promise<void> {
     for (let i = 0; i < files.length; i += 16) {
+      const empty: FileNode[] = [];
       await Promise.all(
         files.slice(i, i + 16).map(async (f) => {
           const r = await this.service.getForUri(f.uri).catch(() => undefined);
-          this.fileCounts.set(uriKey(f.uri), r?.symbols.length ?? 0);
+          const n = r?.symbols.length ?? 0;
+          this.fileCounts.set(uriKey(f.uri), n);
+          if (n === 0) {
+            empty.push(f);
+          }
         }),
       );
+      if (empty.length) {
+        this.changed.fire(empty);
+      }
     }
-    return nodes;
   }
 
   private dirChildren(folder: vscode.WorkspaceFolder, dir: DirTree, parent: TreeNode): TreeNode[] {
@@ -370,15 +443,45 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   }
 
   getParent(element: TreeNode): TreeNode | undefined {
-    return element.type === 'section' ? undefined : element.parent;
+    return element.type === 'section' || element.type === 'search' ? undefined : element.parent;
   }
 
-  /** 書籤（函式書籤＋行號書籤）依檔案（預設）或依標籤分組；同一組內依檔名、行號混排。 */
-  private bookmarkChildren(section: SectionNode): TreeNode[] {
-    const all = allBookmarkItems(this.store, this.favorites)
-      .filter((i) => !(this.hideNotOnBranch && i.kind === 'line' && i.entry.bookmark.status === 'notOnBranch'))
-      .filter((i) => i.kind !== 'line' || this.store.shownBySource(i.entry.bookmark))
-      .sort(compareItems);
+  /** 側邊欄列出的書籤（套用來源篩選與「隱藏不在此分支」）；標題的數字也用這份。 */
+  private shownItems(): BookmarkItem[] {
+    return shownBookmarkItems(this.store, this.favorites, { includeNotOnBranch: !this.hideNotOnBranch });
+  }
+
+  /** 側邊欄列出的書籤再套用搜尋列的篩選。 */
+  private matchedItems(): BookmarkItem[] {
+    const items = this.shownItems();
+    return this.searching ? items.filter((i) => matchesQuery(this.parsedQuery, searchFields(i))) : items;
+  }
+
+  private groupChildren(group: BmGroupNode): (BookmarkNode | FavoriteNode)[] {
+    return group.items.map((i) =>
+      i.kind === 'line'
+        ? ({ type: 'bookmark', entry: i.entry, parent: group } as BookmarkNode)
+        : ({ type: 'favorite', fav: i.fav, parent: group } as FavoriteNode),
+    );
+  }
+
+  /** 名稱標亮搜尋字（只標一般文字；#標籤、@來源 另外在分組名稱上標）。 */
+  private highlighted(label: string, extraTerms: string[] = []): string | vscode.TreeItemLabel {
+    if (!this.searching) {
+      return label;
+    }
+    const highlights = highlightRanges(label, [...this.parsedQuery.text, ...extraTerms]);
+    return highlights.length ? { label, highlights } : label;
+  }
+
+  /** 搜尋中，分組節點換一組 id：讓分組都展開（使用者先前收合的分組裡也可能有結果），清除搜尋後恢復原本的展開狀態。 */
+  private groupId(id: string): string {
+    return this.searching ? `${id}:search` : id;
+  }
+
+  /** 書籤（函式書籤＋行號書籤）依檔案（預設）或依標籤分組；同一組內依檔名、行號混排。沒有結果的分組不列出。 */
+  private bookmarkChildren(section: SectionNode): BmGroupNode[] {
+    const all = this.matchedItems().sort(compareItems);
     const groups = new Map<string, BmGroupNode>();
     const add = (key: string, e: BookmarkItem, extra: Partial<BmGroupNode>) => {
       let g = groups.get(key);
@@ -393,7 +496,10 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
         add(itemSource(e), e, {});
       } else if (this.bookmarkGrouping === 'tag') {
         const tags = itemTags(e);
-        for (const tag of tags.length ? tags : ['']) {
+        // 搜尋 #標籤 時只列出那些標籤的分組（書籤的其他標籤不另外列）
+        const wanted = this.parsedQuery.tags;
+        const shown = wanted.length ? tags.filter((t) => wanted.some((w) => t.toLowerCase().includes(w))) : tags;
+        for (const tag of shown.length ? shown : ['']) {
           add(tag, e, {});
         }
       } else {
@@ -425,6 +531,8 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
 
   private buildItem(element: TreeNode): vscode.TreeItem {
     switch (element.type) {
+      case 'search':
+        return this.searchItem();
       case 'section':
         return this.sectionItem(element);
       case 'favorite':
@@ -470,8 +578,11 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
 
   private bmGroupItem(element: BmGroupNode): vscode.TreeItem {
     if (element.by === 'source') {
-      const item = new vscode.TreeItem(element.key || vscode.l10n.t('Mine'), vscode.TreeItemCollapsibleState.Expanded);
-      item.id = `bmSource:${element.key}`;
+      const item = new vscode.TreeItem(
+        this.highlighted(element.key || vscode.l10n.t('Mine'), element.key ? this.parsedQuery.authors : []),
+        vscode.TreeItemCollapsibleState.Expanded,
+      );
+      item.id = this.groupId(`bmSource:${element.key}`);
       item.iconPath = new vscode.ThemeIcon(element.key ? 'person' : 'account', element.key ? new vscode.ThemeColor(FOREIGN_COLOR) : undefined);
       item.description = String(element.items.length);
       item.contextValue = element.key ? 'fbBmSource:foreign' : 'fbBmSource';
@@ -479,10 +590,10 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     }
     if (element.by === 'tag') {
       const item = new vscode.TreeItem(
-        element.key ? `#${element.key}` : vscode.l10n.t('No tag'),
+        element.key ? this.highlighted(`#${element.key}`, this.parsedQuery.tags) : vscode.l10n.t('No tag'),
         vscode.TreeItemCollapsibleState.Expanded,
       );
-      item.id = `bmTag:${element.key}`;
+      item.id = this.groupId(`bmTag:${element.key}`);
       const tc = paletteColor(this.store.tagColors().get(element.key));
       item.iconPath = new vscode.ThemeIcon('tag', tc ? new vscode.ThemeColor(tc.theme) : undefined);
       item.contextValue = element.key ? 'fbBmTag' : undefined;
@@ -490,8 +601,8 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
       return item;
     }
     const rel = element.rel ?? '';
-    const item = new vscode.TreeItem(basenamePosix(rel), vscode.TreeItemCollapsibleState.Expanded);
-    item.id = `bmFile:${element.key}`;
+    const item = new vscode.TreeItem(this.highlighted(basenamePosix(rel)), vscode.TreeItemCollapsibleState.Expanded);
+    item.id = this.groupId(`bmFile:${element.key}`);
     item.resourceUri = element.uri;
     item.iconPath = vscode.ThemeIcon.File;
     item.description = path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel);
@@ -502,7 +613,10 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
 
   private bookmarkItem(element: BookmarkNode): vscode.TreeItem {
     const b = element.entry.bookmark;
-    const item = new vscode.TreeItem(b.number ? `${circled(b.number)} ${bookmarkTitle(b)}` : bookmarkTitle(b), vscode.TreeItemCollapsibleState.None);
+    const item = new vscode.TreeItem(
+      this.highlighted(b.number ? `${circled(b.number)} ${bookmarkTitle(b)}` : bookmarkTitle(b)),
+      vscode.TreeItemCollapsibleState.None,
+    );
     const color = paletteColor(effectiveColor(b, this.store.tagColors()));
     item.id = `bm:${element.parent.type === 'bmGroup' ? element.parent.key : ''}:${b.id}`;
     const lost = b.status === 'lost';
@@ -528,8 +642,8 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     if (b.source && !(element.parent.type === 'bmGroup' && element.parent.by === 'source')) {
       parts.push(`@${b.source.author}`);
     }
-    // 依標籤分組時看不出是哪個檔案，補上檔名
-    parts.push(element.parent.type === 'bmGroup' && element.parent.by === 'tag' ? `${basenamePosix(b.file)}:${b.line + 1}` : String(b.line + 1));
+    // 不是依檔案分組（依標籤、依來源）時看不出是哪個檔案，補上檔名
+    parts.push(notByFile(element) ? `${basenamePosix(b.file)}:${b.line + 1}` : String(b.line + 1));
     if (b.tags?.length && !(element.parent.type === 'bmGroup' && element.parent.by === 'tag')) {
       parts.push(b.tags.map((t) => `#${t}`).join(' '));
     }
@@ -573,13 +687,31 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     return item;
   }
 
+  private searchItem(): vscode.TreeItem {
+    // 沒有搜尋時名稱留空、用淡色的 description 當提示文字（像輸入框的 placeholder）
+    const item = new vscode.TreeItem(this.queryText, vscode.TreeItemCollapsibleState.None);
+    item.id = 'search';
+    item.iconPath = new vscode.ThemeIcon('search');
+    if (!this.queryText) {
+      item.description = vscode.l10n.t('Search bookmarks…');
+    }
+    item.tooltip = vscode.l10n.t('Search bookmarks by name, tag, file, function, code or note. #tag searches tags only, @source shows one person\'s bookmarks.');
+    item.contextValue = this.queryText ? 'fbSearch:active' : 'fbSearch';
+    item.command = { command: 'functionBookmarks.focusSearch', title: vscode.l10n.t('Search bookmarks…') };
+    return item;
+  }
+
   private sectionItem(element: SectionNode): vscode.TreeItem {
     if (element.section === 'bookmarks') {
-      const count = this.store.allBookmarks().length + this.favorites.all.length;
+      const count = this.shownItems().length;
       const item = new vscode.TreeItem(vscode.l10n.t('Bookmarks'), vscode.TreeItemCollapsibleState.Expanded);
       item.id = 'section:bookmarks';
-      item.iconPath = new vscode.ThemeIcon('bookmark');
-      item.description = count ? String(count) : vscode.l10n.t('Ctrl+Alt+B, or ☆ on a function');
+      item.iconPath = new vscode.ThemeIcon(this.searching ? 'search' : 'bookmark');
+      item.description = this.searching
+        ? vscode.l10n.t('{0} of {1} match', distinctCount(this.matchedItems()), count)
+        : count
+          ? String(count)
+          : vscode.l10n.t('Ctrl+Alt+B, or ☆ on a function');
       item.contextValue = 'fbSection.bookmarks';
       return item;
     }
@@ -695,7 +827,7 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     const { fav } = element;
     const name = fav.mark.path.split('.').pop() ?? fav.mark.path;
     const item = new vscode.TreeItem(
-      fav.mark.number ? `${circled(fav.mark.number)} ${this.favLabel(fav)}` : this.favLabel(fav),
+      this.highlighted(fav.mark.number ? `${circled(fav.mark.number)} ${this.favLabel(fav)}` : this.favLabel(fav)),
       vscode.TreeItemCollapsibleState.None,
     );
     const color = paletteColor(effectiveColor(fav.mark, this.store.tagColors()));
@@ -707,7 +839,7 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
       parts.push('✎');
     }
     if (fav.status === 'ok') {
-      parts.push(byTag ? `${basenamePosix(fav.mark.file)}:${line! + 1}` : String(line! + 1));
+      parts.push(notByFile(element) ? `${basenamePosix(fav.mark.file)}:${line! + 1}` : String(line! + 1));
       item.iconPath = new vscode.ThemeIcon(
         ICONS[fav.mark.kind] ?? 'symbol-misc',
         color ? new vscode.ThemeColor(color.theme) : fav.mark.note ? new vscode.ThemeColor(NOTE_COLOR) : undefined,
@@ -740,6 +872,42 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     item.command = { command: COMMANDS.openFavorite, title: vscode.l10n.t('Go to symbol'), arguments: [fav] };
     return item;
   }
+}
+
+/** 搜尋列比對的欄位：名稱、標籤、檔名、所在函式、那一行的程式碼、備註、來源。 */
+export function searchFields(i: BookmarkItem): SearchFields {
+  if (i.kind === 'line') {
+    const b = i.entry.bookmark;
+    return {
+      names: [bookmarkTitle(b)],
+      tags: b.tags ?? [],
+      author: b.source?.author ?? '',
+      file: b.file,
+      func: b.anchor?.symbolPath ?? b.symbol?.path,
+      line: b.anchor?.text,
+      note: b.note,
+    };
+  }
+  const m = i.fav.mark;
+  const name = m.path.split('.').pop() ?? m.path;
+  return {
+    names: m.alias ? [m.alias, name] : [name],
+    tags: m.tags ?? [],
+    author: '',
+    file: m.file,
+    func: m.path,
+    note: m.note,
+  };
+}
+
+/** 依標籤分組時同一個書籤會出現在多個分組：計數只算一次。 */
+function distinctCount(items: BookmarkItem[]): number {
+  return new Set(items.map((i) => (i.kind === 'line' ? `l:${i.entry.bookmark.id}` : `f:${i.fav.uri.toString()}::${i.fav.mark.kind}:${i.fav.mark.path}`))).size;
+}
+
+/** 書籤節點不在「依檔案分組」底下（依標籤、依來源）：描述要補上檔名。 */
+function notByFile(element: BookmarkNode | FavoriteNode): boolean {
+  return element.parent.type === 'bmGroup' && element.parent.by !== 'file';
 }
 
 function escapeMd(s: string): string {

@@ -117,7 +117,7 @@ interface MarkItem extends vscode.QuickPickItem {
  */
 export async function searchMarks(store: MarkStore, favorites: FavoritesModel): Promise<void> {
   const items: MarkItem[] = [];
-  for (const e of store.allBookmarks().filter((x) => store.shownBySource(x.bookmark)).sort((a, b) => a.bookmark.file.localeCompare(b.bookmark.file) || a.bookmark.line - b.bookmark.line)) {
+  for (const e of store.shownBookmarks().sort((a, b) => a.bookmark.file.localeCompare(b.bookmark.file) || a.bookmark.line - b.bookmark.line)) {
     const b = e.bookmark;
     const desc = [b.tags?.map((t) => `#${t}`).join(' '), b.anchor?.symbolPath].filter(Boolean).join('  ');
     const text = b.label && b.anchor?.text ? `  ·  ${b.anchor.text.slice(0, 80)}` : '';
@@ -129,7 +129,7 @@ export async function searchMarks(store: MarkStore, favorites: FavoritesModel): 
       line: b.line,
     });
   }
-  for (const f of favorites.all) {
+  for (const f of store.favoritesShown ? favorites.all : []) {
     const line = f.symbol?.nameLine ?? f.mark.line ?? 0;
     const name = f.mark.path.split('.').pop() ?? f.mark.path;
     items.push({
@@ -143,11 +143,11 @@ export async function searchMarks(store: MarkStore, favorites: FavoritesModel): 
     });
   }
   if (items.length === 0) {
-    void vscode.window.showInformationMessage(vscode.l10n.t('No bookmarks or favorites yet.'));
+    void vscode.window.showInformationMessage(vscode.l10n.t('No bookmarks yet.'));
     return;
   }
   const pick = await vscode.window.showQuickPick(items, {
-    placeHolder: vscode.l10n.t('Search bookmarks and favorites (name, tag, file, function or line)'),
+    placeHolder: vscode.l10n.t('Search bookmarks (name, tag, file, function or line)'),
     matchOnDescription: true,
     matchOnDetail: true,
   });

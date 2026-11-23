@@ -61,7 +61,10 @@ export class BookmarkTracker implements vscode.Disposable {
           if (!this.store.isVisible(loc.folder, b)) {
             return b;
           }
-          const r = applyChanges(b, changes, mode);
+          // 不在此分支：行號只是在這個分支上的大概位置（切回原分支時由分支快照換算），
+          // 跟著平移，但刪到那一行時不刪除、也不改狀態
+          const away = b.status === 'notOnBranch';
+          const r = applyChanges(b, changes, away ? 'moveToNext' : mode);
           if (!r) {
             return undefined;
           }

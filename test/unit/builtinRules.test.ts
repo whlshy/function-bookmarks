@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { BUILTIN_RULES } from '../../src/detection/builtinRules';
+import { BUILTIN_RULES } from '../../src/detection/languages';
 import { detect, lines, outline } from './helpers';
 
 describe('內建規則', () => {

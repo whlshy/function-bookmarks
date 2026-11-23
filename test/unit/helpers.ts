@@ -1,4 +1,4 @@
-import { BUILTIN_RULES } from '../../src/detection/builtinRules';
+import { BUILTIN_RULES } from '../../src/detection/languages';
 import { detectSymbols, mergeRules } from '../../src/detection/engine';
 import { DetectedSymbol, DetectionRule } from '../../src/detection/types';
 

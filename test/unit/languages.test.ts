@@ -341,3 +341,41 @@ describe('更多語言（C／C++、Rust、Go、Java、C#、Kotlin、Swift、PHP�
     assert.deepStrictEqual(Object.keys(outline(r.symbols, false)), ['method a', 'function b']);
   });
 });
+
+describe('Windows 換行（CRLF）', () => {
+  const crlf = (text: string) => text.replace(/\n/g, '\r\n');
+
+  it('JS：行尾反斜線接續的多行字串（含跳脫的單引號），後面的函式照樣找得到', () => {
+    const t = lines(
+      "var notes = ' \\",
+      '<b>v1</b><br>\\',
+      "- it didn\\'t work<br>\\",
+      "- the team\\'s path<br>';",
+      '',
+      'function first(a) {',
+      '  return a;',
+      '}',
+      '',
+      'function second() {',
+      '  if (x) { y(); }',
+      '}',
+    );
+    const want = { 'function first@5-7': {}, 'function second@9-11': {} };
+    assert.deepStrictEqual(outline(detect(t, 'javascript').symbols), want, 'LF');
+    assert.deepStrictEqual(outline(detect(crlf(t), 'javascript').symbols), want, 'CRLF');
+  });
+
+  it('C 與 Python：字串裡的行尾反斜線接續', () => {
+    const c = lines('const char *s = "a \\', 'b\'s";', 'int f(void) {', '  return 0;', '}');
+    assert.deepStrictEqual(outline(detect(crlf(c), 'c').symbols), outline(detect(c, 'c').symbols));
+    assert.deepStrictEqual(Object.keys(outline(detect(crlf(c), 'c').symbols, false)), ['function f']);
+    const py = lines("s = 'a \\", "b'", 'def f():', '    return 1');
+    assert.deepStrictEqual(outline(detect(crlf(py), 'python').symbols), outline(detect(py, 'python').symbols));
+    assert.deepStrictEqual(Object.keys(outline(detect(crlf(py), 'python').symbols, false)), ['function f']);
+  });
+
+  it('Markdown：標題範圍和 LF 相同（不多算下一個標題前的空白行）', () => {
+    const md = lines('# A', '', '## B', 'text', '', '## C', 'more');
+    assert.deepStrictEqual(outline(detect(crlf(md), 'markdown').symbols), outline(detect(md, 'markdown').symbols));
+  });
+});

@@ -25,6 +25,27 @@ export function allBookmarkItems(store: MarkStore, favorites: FavoritesModel): B
   return items;
 }
 
+/**
+ * 畫面上顯示的書籤（側邊欄、標題計數、跳轉、搜尋、狀態列共用）：套用來源篩選，
+ * 行號書籤排除只屬於別的分支的；「不在此分支」的只有 `includeNotOnBranch` 時列出（側邊欄以灰色顯示）。
+ */
+export function shownBookmarkItems(
+  store: MarkStore,
+  favorites: FavoritesModel,
+  options: { includeNotOnBranch?: boolean } = {},
+): BookmarkItem[] {
+  const items: BookmarkItem[] = [];
+  for (const e of store.shownBookmarks(options)) {
+    items.push({ kind: 'line', folder: e.folder, uri: e.uri, file: e.bookmark.file, line: e.bookmark.line, entry: e });
+  }
+  if (store.favoritesShown) {
+    for (const fav of favorites.all) {
+      items.push({ kind: 'symbol', folder: fav.folder, uri: fav.uri, file: fav.mark.file, line: fav.symbol?.nameLine, fav });
+    }
+  }
+  return items;
+}
+
 export function itemTags(i: BookmarkItem): string[] {
   return (i.kind === 'line' ? i.entry.bookmark.tags : i.fav.mark.tags) ?? [];
 }

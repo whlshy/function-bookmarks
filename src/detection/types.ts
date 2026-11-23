@@ -10,7 +10,7 @@ export type SymbolKindName =
   | 'heading'
   | 'reference';
 
-export type BodyKind = 'brace' | 'indent' | 'pair' | 'line' | 'call' | 'heading' | 'embedded' | 'end';
+export type BodyKind = 'brace' | 'indent' | 'pair' | 'line' | 'call' | 'heading' | 'embedded' | 'end' | 'statement';
 
 /**
  * 一條函式偵測規則。
@@ -88,4 +88,23 @@ export interface DetectionResult {
   errors: RuleError[];
 }
 
-export type Syntax = 'c' | 'jsx' | 'python' | 'template' | 'markdown' | 'cpp' | 'rust' | 'go' | 'java' | 'kotlin' | 'csharp' | 'php' | 'ruby' | 'none';
+export type Syntax =
+  | 'c'
+  | 'jsx'
+  | 'python'
+  | 'template'
+  | 'markdown'
+  | 'cpp'
+  | 'rust'
+  | 'go'
+  | 'java'
+  | 'kotlin'
+  | 'csharp'
+  | 'php'
+  | 'ruby'
+  | 'proto'
+  | 'shell'
+  | 'sql'
+  /** Vue、Svelte 單檔元件的外層（template 的 HTML 註解）。 */
+  | 'sfc'
+  | 'none';

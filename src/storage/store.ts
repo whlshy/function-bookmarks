@@ -139,6 +139,34 @@ export class MarkStore implements vscode.Disposable {
     return !this.hiddenSources.has(b.source?.author ?? '');
   }
 
+  /** 函式書籤（一律是自己的）目前要不要顯示。 */
+  get favoritesShown(): boolean {
+    return !this.hiddenSources.has('');
+  }
+
+  /** 行號書籤在目前分支上：不是只屬於別的分支，也不是「不在此分支」（那時行號對應的是別的分支的內容）。 */
+  isPresent(folder: vscode.WorkspaceFolder, b: LineBookmark): boolean {
+    return this.isVisible(folder, b) && b.status !== 'notOnBranch';
+  }
+
+  /** 畫面上顯示的行號書籤：在目前分支上，且來源沒被篩選掉。行號旁圖示、搜尋、跳轉與游標所在行的操作都以此為準。 */
+  isShown(folder: vscode.WorkspaceFolder, b: LineBookmark): boolean {
+    return this.isPresent(folder, b) && this.shownBySource(b);
+  }
+
+  /** 某個檔案畫面上顯示的行號書籤（依行號排序）。 */
+  shownBookmarksFor(uri: vscode.Uri): LineBookmark[] {
+    const loc = this.locate(uri);
+    return loc ? this.bookmarksFor(uri).filter((b) => this.isShown(loc.folder, b)) : [];
+  }
+
+  /** 所有畫面上顯示的行號書籤。`includeNotOnBranch`：側邊欄沒有隱藏「不在此分支」時也列出（灰色）。 */
+  shownBookmarks(options: { includeNotOnBranch?: boolean } = {}): BookmarkEntry[] {
+    return this.allBookmarks().filter(
+      (e) => this.shownBySource(e.bookmark) && (options.includeNotOnBranch || e.bookmark.status !== 'notOnBranch'),
+    );
+  }
+
   /** 所有出現過的匯入來源（不含自己），依名稱排序。 */
   sources(): string[] {
     const out = new Set<string>();

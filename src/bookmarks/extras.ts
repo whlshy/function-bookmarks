@@ -111,7 +111,8 @@ export class BookmarkExtras {
     }
     // 這一行還沒有書籤：照 Ctrl+Alt+B 的規則加入（函式名稱那一行加函式書籤，其他行加行號書籤）
     await this.bookmarks.toggle({ uri, line });
-    return this.atLine(doc, line);
+    // 「我的」被篩選隱藏時，剛加（或原本就有）的自己的書籤看不到，也要找得到
+    return this.atLine(doc, line, true);
   }
 
   private symbolTarget(uri: vscode.Uri, key: Pick<MarkKey, 'path' | 'kind'>): ExtrasTarget | undefined {
@@ -131,20 +132,22 @@ export class BookmarkExtras {
     };
   }
 
-  /** 這一行的書籤：行號書籤，或名稱在這一行的函式書籤。 */
-  private async atLine(doc: vscode.TextDocument, line: number): Promise<ExtrasTarget | undefined> {
+  /** 這一行的書籤：行號書籤，或名稱在這一行的函式書籤。`includeHiddenMine`：也找被來源篩選隱藏的自己的書籤。 */
+  private async atLine(doc: vscode.TextDocument, line: number, includeHiddenMine = false): Promise<ExtrasTarget | undefined> {
     const loc = this.store.locate(doc.uri);
     if (!loc) {
       return undefined;
     }
-    const b = this.store.bookmarksFor(doc.uri).find((x) => x.line === line);
+    const b =
+      this.store.shownBookmarksFor(doc.uri).find((x) => x.line === line) ??
+      (includeHiddenMine ? this.bookmarks.hiddenMineAt(doc.uri, [line])[0] : undefined);
     if (b) {
       return { kind: 'line', folder: loc.folder, uri: doc.uri, id: b.id, title: bookmarkTitle(b), number: b.number, color: b.color };
     }
     let hit: DetectedSymbol | undefined;
     const walk = (list: DetectedSymbol[]) => {
       for (const s of list) {
-        if (s.nameLine === line && this.store.get(doc.uri, s)?.favorite) {
+        if (s.nameLine === line && (this.store.favoritesShown || includeHiddenMine) && this.store.get(doc.uri, s)?.favorite) {
           hit = s;
         }
         walk(s.children);

@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { BUILTIN_RULES } from '../../src/detection/builtinRules';
+import { BUILTIN_RULES } from '../../src/detection/languages';
 import { detectSymbols, findInnermost, mergeRules, renderNameTemplate } from '../../src/detection/engine';
 import { DetectionRule } from '../../src/detection/types';
 import { detect, lines, outline } from './helpers';

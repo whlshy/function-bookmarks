@@ -2,7 +2,7 @@
   "name": "function-bookmarks",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "publisher": "whlshy",
   "icon": "media/icon.png",
   "galleryBanner": {
@@ -289,6 +289,18 @@
         "icon": "$(list-filter)"
       },
       {
+        "command": "functionBookmarks.focusSearch",
+        "title": "%command.focusSearch%",
+        "category": "%command.category%",
+        "icon": "$(search)"
+      },
+      {
+        "command": "functionBookmarks.clearSearch",
+        "title": "%command.clearSearch%",
+        "category": "%command.category%",
+        "icon": "$(close)"
+      },
+      {
         "command": "functionBookmarks.showBookmarksOnly",
         "title": "%command.showBookmarksOnly%",
         "category": "%command.category%",
@@ -482,6 +494,11 @@
       ],
       "view/item/context": [
         {
+          "command": "functionBookmarks.clearSearch",
+          "when": "view == functionBookmarks.tree && viewItem == fbSearch:active",
+          "group": "inline"
+        },
+        {
           "command": "functionBookmarks.addFavorite",
           "when": "view == functionBookmarks.tree && viewItem =~ /^fbSymbol:nofav(?!.*:ref)/",
           "group": "inline@1"
@@ -578,7 +595,7 @@
         },
         {
           "command": "functionBookmarks.setBookmarkBranchOnly",
-          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/ && viewItem !~ /:branchOnly/",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/ && viewItem !~ /^fbBookmark:fn/ && viewItem !~ /:branchOnly/",
           "group": "1_bookmark@5"
         },
         {
@@ -747,6 +764,10 @@
         {
           "command": "functionBookmarks.showBookmarkIcons",
           "when": "functionBookmarks.iconsHidden"
+        },
+        {
+          "command": "functionBookmarks.clearSearch",
+          "when": "functionBookmarks.searching"
         }
       ],
       "explorer/context": [
@@ -910,7 +931,8 @@
                     "call",
                     "heading",
                     "embedded",
-                    "end"
+                    "end",
+                    "statement"
                   ],
                   "description": "%config.rule.body%"
                 },
@@ -999,7 +1021,7 @@
         "properties": {
           "functionBookmarks.project.include": {
             "type": "string",
-            "default": "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,html,htm,md,markdown,c,h,cpp,cc,cxx,hpp,hh,hxx,cu,cuh,m,mm,rs,go,java,kt,kts,swift,cs,php,rb,rake}",
+            "default": "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,c,h,cpp,cc,cxx,hpp,hh,hxx,cu,cuh,m,mm,rs,go,java,cs,kt,kts,swift,php,rb,rake,md,markdown,html,htm,proto,vue,svelte,sh,bash,zsh,sql}",
             "markdownDescription": "%config.project.include%",
             "order": 0
           },
@@ -1093,6 +1115,21 @@
         "command": "functionBookmarks.searchBookmarks",
         "key": "ctrl+alt+/",
         "mac": "cmd+alt+/"
+      },
+      {
+        "command": "functionBookmarks.focusSearch",
+        "key": "ctrl+alt+f",
+        "mac": "cmd+alt+shift+f"
+      },
+      {
+        "command": "functionBookmarks.searchClearAndClose",
+        "key": "escape",
+        "when": "functionBookmarks.searchInputOpen && inQuickOpen"
+      },
+      {
+        "command": "functionBookmarks.searchToList",
+        "key": "down",
+        "when": "functionBookmarks.searchInputOpen && inQuickOpen"
       },
       {
         "command": "functionBookmarks.goToNumberedBookmark",
@@ -1232,7 +1269,6 @@
     ],
     "markdown.markdownItPlugins": true,
     "markdown.previewScripts": [
-      "./dist/mermaid.min.js",
       "./media/mermaid-preview.js"
     ],
     "icons": {

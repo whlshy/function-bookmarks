@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { FileEvents } from '../util/fileEvents';
 import { uriKey } from '../util/uris';
 import { findByPath } from '../detection/engine';
 import { DetectedSymbol } from '../detection/types';
@@ -29,8 +30,8 @@ export class FavoritesModel implements vscode.Disposable {
   constructor(
     private readonly store: MarkStore,
     private readonly service: SymbolService,
+    files: FileEvents,
   ) {
-    const watcher = vscode.workspace.createFileSystemWatcher('**/*');
     const onFs = (uri: vscode.Uri) => {
       if (this.involves(uri)) {
         this.service.invalidate(uri);
@@ -38,10 +39,9 @@ export class FavoritesModel implements vscode.Disposable {
       }
     };
     this.disposables.push(
-      watcher,
-      watcher.onDidChange(onFs),
-      watcher.onDidCreate(onFs),
-      watcher.onDidDelete(onFs),
+      files.onDidChange(onFs),
+      files.onDidCreate(onFs),
+      files.onDidDelete(onFs),
       store.onDidChange(() => this.schedule(0)),
       vscode.workspace.onDidChangeTextDocument((e) => {
         if (e.contentChanges.length && this.involves(e.document.uri)) {

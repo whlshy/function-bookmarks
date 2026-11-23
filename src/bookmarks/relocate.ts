@@ -63,11 +63,12 @@ export function diffLines(a: number[], b: number[]): Hunk[] {
   }
   const max = n + m;
   const offset = max;
-  let v = new Int32Array(2 * max + 2);
+  const v = new Int32Array(2 * max + 2);
+  // 第 d 步開始前的 v：回溯時只會用到 k ∈ [-d, d]，只存這 2d+1 個（存整條在大檔大改時會配置上百 MB）
   const trace: Int32Array[] = [];
   let found = false;
   for (let d = 0; d <= max && d <= MAX_EDIT_DISTANCE; d++) {
-    trace.push(v.slice());
+    trace.push(v.slice(offset - d, offset + d + 1));
     for (let k = -d; k <= d; k += 2) {
       let x: number;
       if (k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1])) {
@@ -98,15 +99,16 @@ export function diffLines(a: number[], b: number[]): Hunk[] {
   let x = n;
   let y = m;
   for (let d = trace.length - 1; d >= 0 && (x > 0 || y > 0); d--) {
+    // trace[d][i] 對應 v[offset + i - d]
     const vd = trace[d];
     const k = x - y;
     let prevK: number;
-    if (k === -d || (k !== d && vd[offset + k - 1] < vd[offset + k + 1])) {
+    if (k === -d || (k !== d && vd[d + k - 1] < vd[d + k + 1])) {
       prevK = k + 1;
     } else {
       prevK = k - 1;
     }
-    const prevX = vd[offset + prevK];
+    const prevX = d > 0 ? vd[d + prevK] : 0;
     const prevY = prevX - prevK;
     while (x > prevX && y > prevY) {
       x--;

@@ -3,6 +3,7 @@ import { SECTION } from '../config';
 import { MarkStore } from '../storage/store';
 import { FavoritesModel } from '../symbols/favorites';
 import { sameUri } from '../util/uris';
+import { shownBookmarkItems } from '../bookmarks/unified';
 import { FavoriteGutter } from './gutter';
 
 /**
@@ -68,13 +69,9 @@ export class BookmarkStatusBar implements vscode.Disposable {
       this.hide();
       return;
     }
-    const lines = uri
-      ? this.store.bookmarksFor(uri).filter((b) => b.status !== 'notOnBranch' && this.store.shownBySource(b)).length
-      : 0;
-    const fns = uri ? this.favorites.all.filter((f) => sameUri(f.uri, uri)).length : 0;
-    const inFile = lines + fns;
-    const total =
-      this.store.allBookmarks().filter((e) => this.store.shownBySource(e.bookmark)).length + this.favorites.all.length;
+    const items = shownBookmarkItems(this.store, this.favorites);
+    const inFile = uri ? items.filter((i) => sameUri(i.uri, uri)).length : 0;
+    const total = items.length;
     const parts = [`$(bookmark) ${inWorkspace ? inFile : total}`];
     if (filtered) {
       parts.push('$(filter)');

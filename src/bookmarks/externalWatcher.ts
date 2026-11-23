@@ -8,6 +8,7 @@ import { Located, MarkStore } from '../storage/store';
 import { openDocumentFor } from '../symbols/documentSource';
 import { SymbolService } from '../symbols/symbolService';
 import { languageForPath } from '../util/paths';
+import { FileEvents } from '../util/fileEvents';
 import { uriKey } from '../util/uris';
 import { BranchPosition, isBlockReplace, isWholeDocumentReplace, LineBookmark, LineChange, makeAnchor } from './model';
 import { onLineDeleteSetting } from './tracker';
@@ -107,22 +108,21 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     private readonly service: SymbolService,
     private readonly state: vscode.Memento,
     private readonly branches: BranchService,
+    files: FileEvents,
   ) {
     this.load();
-    const watcher = vscode.workspace.createFileSystemWatcher('**/*');
     const onFs = (uri: vscode.Uri) => {
       if (!openDocumentFor(uri) && this.has(uri)) {
         this.schedule([uri]);
       }
     };
     this.disposables.push(
-      watcher,
-      watcher.onDidChange(onFs),
-      watcher.onDidCreate((uri) => {
+      files.onDidChange(onFs),
+      files.onDidCreate((uri) => {
         this.noteCreated(uri);
         onFs(uri);
       }),
-      watcher.onDidDelete(onFs),
+      files.onDidDelete(onFs),
       vscode.workspace.onDidChangeTextDocument((e) => this.onChange(e)),
       vscode.workspace.onDidOpenTextDocument((doc) => this.has(doc.uri) && this.schedule([doc.uri])),
       vscode.workspace.onDidCloseTextDocument((doc) => this.onClose(doc)),

@@ -12,13 +12,12 @@ import {
   setSymbolExtras,
   unfavoriteFiles,
   updateBookmark,
-  updateBookmarksInFile,
 } from '../storage/marks';
 import { nextFreeNumber } from './decor';
 import { BookmarkEntry, MarkStore } from '../storage/store';
 import { FavoritesModel } from '../symbols/favorites';
 import { SymbolService } from '../symbols/symbolService';
-import { allBookmarkItems } from './unified';
+import { shownBookmarkItems } from './unified';
 import { NoteEditor } from '../views/noteEditor';
 import { LineBookmark, makeAnchor, neighbor, newBookmarkId, parseTags, suggestName } from './model';
 
@@ -121,12 +120,19 @@ export class BookmarkCommands {
     }
     const { editor, folder, rel } = ctx;
     const lines = target ? [target.line] : [...new Set(editor.selections.map((s) => s.active.line))];
-    const existing = this.store.bookmarksFor(editor.document.uri);
+    const existing = this.store.shownBookmarksFor(editor.document.uri);
     const toRemove = existing.filter((b) => lines.includes(b.line)).map((b) => b.id);
+    const hiddenMine = this.hiddenMineAt(editor.document.uri, lines);
+    let keptHidden = false;
     const toAdd: LineBookmark[] = [];
     const symbolKeys: { key: MarkKey; line: number }[] = [];
     for (const line of lines) {
       if (existing.some((b) => b.line === line)) {
+        continue;
+      }
+      if (hiddenMine.some((b) => b.line === line)) {
+        // 這一行已有自己的書籤，只是被篩選隱藏：不重複新增，提示即可
+        keptHidden = true;
         continue;
       }
       const sym = await this.symbolAtNameLine(editor.document, line);
@@ -137,18 +143,58 @@ export class BookmarkCommands {
       }
     }
     const numbers = autoNumbers(this.store, toAdd.length + symbolKeys.length);
+    // 「我的」被來源篩選隱藏時，看不到的函式書籤不拿掉（看不到就不會想取消）
+    const favoritesShown = this.store.favoritesShown;
     await this.store.update(folder, (d) => {
       let next = toAdd.reduce((acc, b) => addBookmark(acc, withNumber(b, numbers)), removeBookmarks(d, toRemove));
       for (const { key, line } of symbolKeys) {
-        const on = !findMark(next, key)?.favorite;
+        const was = !!findMark(next, key)?.favorite;
+        const on = !was || !favoritesShown;
         next = setFavorite(next, key, on, line);
-        const n = on ? numbers.shift() : undefined;
+        const n = on && !was ? numbers.shift() : undefined;
         if (n) {
           next = setSymbolExtras(next, key, { number: n });
         }
       }
       return next;
     });
+    if (toAdd.length || symbolKeys.length || keptHidden) {
+      this.noticeMineHidden();
+    }
+  }
+
+  /** 給測試用：跳出「『我的』被隱藏」提示的次數。 */
+  mineHiddenNotices = 0;
+
+  /**
+   * 「我的」被來源篩選隱藏時，這幾行看不到的自己的行號書籤（在目前分支上）。
+   * 切換、命名時當成這一行已有書籤，不重複新增、也不拿掉看不到的書籤。
+   */
+  hiddenMineAt(uri: vscode.Uri, lines: number[]): LineBookmark[] {
+    const loc = this.store.locate(uri);
+    if (!loc || this.store.favoritesShown) {
+      return [];
+    }
+    return this.store.bookmarksFor(uri).filter((b) => !b.source && lines.includes(b.line) && this.store.isPresent(loc.folder, b));
+  }
+
+  /**
+   * 新增或修改了自己的書籤，但「我的」被來源篩選隱藏（畫面上看不到）：提示並提供「顯示」，
+   * 不自動改使用者的篩選。
+   */
+  private noticeMineHidden(): void {
+    if (this.store.favoritesShown) {
+      return;
+    }
+    this.mineHiddenNotices++;
+    const show = vscode.l10n.t('Show');
+    void vscode.window
+      .showInformationMessage(vscode.l10n.t('This bookmark belongs to "Mine", which is hidden by the source filter.'), show)
+      .then((pick) => {
+        if (pick === show) {
+          this.store.showSources(['']);
+        }
+      });
   }
 
   /** 新增有名稱的書籤（游標所在行已有書籤時改它的名稱）；名稱依選取、單字、函式、該行內容建議。 */
@@ -162,7 +208,8 @@ export class BookmarkCommands {
     const doc = editor.document;
     const wordRange = doc.getWordRangeAtPosition(editor.selection.active);
     const sym = findInnermost((await this.service.getSymbols(doc)).symbols, line);
-    const existing = this.store.bookmarksFor(doc.uri).find((b) => b.line === line);
+    const existing =
+      this.store.shownBookmarksFor(doc.uri).find((b) => b.line === line) ?? this.hiddenMineAt(doc.uri, [line])[0];
     const named = existing ? undefined : await this.symbolAtNameLine(doc, line);
     const namedKey: MarkKey | undefined = named ? { file: rel, path: named.path, kind: named.kind } : undefined;
     const suggestion =
@@ -193,14 +240,19 @@ export class BookmarkCommands {
         const next = setAlias(setFavorite(d, namedKey, true, line), namedKey, label, named!.name, line);
         return n ? setSymbolExtras(next, namedKey, { number: n }) : next;
       });
+      this.noticeMineHidden();
       return;
     }
     if (existing) {
       await this.store.update(folder, (d) => updateBookmark(d, existing.id, (b) => withLabel(b, label)));
+      if (!this.store.shownBySource(existing)) {
+        this.noticeMineHidden();
+      }
       return;
     }
     const bm = withNumber(await this.newBookmark(doc, rel, line, label), autoNumbers(this.store, 1));
     await this.store.update(folder, (d) => addBookmark(d, bm));
+    this.noticeMineHidden();
   }
 
   /** 從樹狀節點，或（沒有節點時）從游標所在行取得書籤。 */
@@ -220,7 +272,7 @@ export class BookmarkCommands {
     }
     const line = editor.selection.active.line;
     const loc = this.store.locate(editor.document.uri);
-    const bm = this.store.bookmarksFor(editor.document.uri).find((b) => b.line === line);
+    const bm = this.store.shownBookmarksFor(editor.document.uri).find((b) => b.line === line);
     return loc && bm ? { folder: loc.folder, uri: editor.document.uri, bookmark: bm } : undefined;
   }
 
@@ -289,7 +341,7 @@ export class BookmarkCommands {
     const editor = vscode.window.activeTextEditor;
     if (!e && node === undefined && editor) {
       // 從命令選擇區執行：在目前檔案的書籤中挑一個（需確認的排前面）
-      const list = this.store.bookmarksFor(editor.document.uri);
+      const list = this.store.shownBookmarksFor(editor.document.uri);
       const loc = this.store.locate(editor.document.uri);
       if (!loc || !list.length) {
         return this.noBookmark();
@@ -327,7 +379,7 @@ export class BookmarkCommands {
     if (line === entry.bookmark.line && entry.bookmark.status !== 'lost') {
       return;
     }
-    const other = this.store.bookmarksFor(doc.uri).find((b) => b.line === line && b.id !== entry.bookmark.id);
+    const other = this.store.shownBookmarksFor(doc.uri).find((b) => b.line === line && b.id !== entry.bookmark.id);
     if (other) {
       void vscode.window.showWarningMessage(vscode.l10n.t('Line {0} already has a bookmark.', line + 1));
       return;
@@ -371,25 +423,29 @@ export class BookmarkCommands {
     if (!loc) {
       return;
     }
-    const count =
-      this.store.bookmarksFor(target).length +
-      this.store.allFavorites().filter((f) => f.folder === loc.folder && f.mark.file === loc.rel).length;
+    // 只清除畫面上看得到的：只屬於別的分支、不在此分支、被來源篩選隱藏的書籤保留
+    const shown = this.store.shownBookmarksFor(target);
+    const favs = this.store.favoritesShown
+      ? this.store.allFavorites().filter((f) => f.folder === loc.folder && f.mark.file === loc.rel)
+      : [];
+    const count = shown.length + favs.length;
     if (count === 0) {
       return;
     }
     if (!(await this.confirm(vscode.l10n.t('Clear {0} bookmark(s) in {1}?', count, loc.rel), confirmed))) {
       return;
     }
-    // 只屬於別的分支（目前看不到）的書籤保留
-    await this.store.update(loc.folder, (d) =>
-      unfavoriteFiles(updateBookmarksInFile(d, loc.rel, (b) => (this.store.isVisible(loc.folder, b) ? undefined : b)), loc.rel),
-    );
+    const ids = shown.map((b) => b.id);
+    await this.store.update(loc.folder, (d) => {
+      const next = removeBookmarks(d, ids);
+      return favs.length ? unfavoriteFiles(next, loc.rel) : next;
+    });
   }
 
-  /** 清除所有書籤（函式書籤＋行號書籤，會先確認）；函式的自訂名稱與備註保留。 */
+  /** 清除所有書籤（函式書籤＋行號書籤，會先確認）；函式的自訂名稱與備註保留。只清除畫面上看得到的書籤。 */
   async clearAll(confirmed?: boolean): Promise<void> {
-    const all = this.store.allBookmarks();
-    const favs = this.store.allFavorites();
+    const all = this.store.shownBookmarks();
+    const favs = this.store.favoritesShown ? this.store.allFavorites() : [];
     const count = all.length + favs.length;
     if (count === 0) {
       return;
@@ -399,7 +455,11 @@ export class BookmarkCommands {
     }
     for (const folder of new Set([...all.map((e) => e.folder), ...favs.map((f) => f.folder)])) {
       const ids = all.filter((e) => e.folder === folder).map((e) => e.bookmark.id);
-      await this.store.update(folder, (d) => unfavoriteFiles(removeBookmarks(d, ids)));
+      const hasFavs = favs.some((f) => f.folder === folder);
+      await this.store.update(folder, (d) => {
+        const next = removeBookmarks(d, ids);
+        return hasFavs ? unfavoriteFiles(next) : next;
+      });
     }
   }
 
@@ -408,12 +468,8 @@ export class BookmarkCommands {
     const folders = vscode.workspace.workspaceFolders ?? [];
     const keyOf = (folder: vscode.WorkspaceFolder, file: string) => `${String(folders.indexOf(folder)).padStart(3, '0')}/${file}`;
     // 函式書籤用目前偵測到的行號；找不到的函式不參與跳轉
-    const items = allBookmarkItems(this.store, this.favorites)
-      .filter(
-        (i) =>
-          i.line !== undefined &&
-          !(i.kind === 'line' && (i.entry.bookmark.status === 'notOnBranch' || !this.store.shownBySource(i.entry.bookmark))),
-      )
+    const items = shownBookmarkItems(this.store, this.favorites)
+      .filter((i) => i.line !== undefined)
       .map((i) => ({ file: keyOf(i.folder, i.file), line: i.line!, entry: { uri: i.uri, line: i.line! } }));
     const editor = vscode.window.activeTextEditor;
     const loc = editor ? this.store.locate(editor.document.uri) : undefined;

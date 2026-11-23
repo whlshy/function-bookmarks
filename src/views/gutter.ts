@@ -135,24 +135,45 @@ export class FavoriteGutter implements vscode.Disposable {
     this.iconTypes.forEach((t) => editor.setDecorations(t, []));
   }
 
-  async update(): Promise<void> {
+  /** 每次 update 遞增；等偵測結果期間又有新的 update 時，舊的那次放棄，避免慢的舊結果蓋掉新畫面。 */
+  private seq = 0;
+  private latest: Promise<void> = Promise.resolve();
+
+  /** 重畫所有可見編輯器；被較新的一次取代時，等那一次畫完才結束。 */
+  update(): Promise<void> {
+    const p = this.render(++this.seq);
+    this.latest = p;
+    return p;
+  }
+
+  private async render(seq: number): Promise<void> {
     const showLabels = vscode.workspace.getConfiguration(SECTION).get<boolean>('bookmarks.showLabelAtLineEnd', true);
     const tagColors = this.store.tagColors();
+    const favoritesShown = this.store.favoritesShown;
     for (const editor of vscode.window.visibleTextEditors) {
       const uri = editor.document.uri;
       const fileKey = uriKey(uri);
-      for (const k of [...this.labelTexts.keys(), ...this.iconKeys.keys()]) {
-        if (k.startsWith(`${fileKey}#`)) {
-          this.labelTexts.delete(k);
-          this.iconKeys.delete(k);
+      // 對照表（測試用）在確定要更新這個檔案時才清：被較新的一次取代時保留舊的
+      const forget = () => {
+        for (const k of [...this.labelTexts.keys(), ...this.iconKeys.keys()]) {
+          if (k.startsWith(`${fileKey}#`)) {
+            this.labelTexts.delete(k);
+            this.iconKeys.delete(k);
+          }
         }
-      }
+      };
       if (!this.store.locate(uri) || this.hiddenValue) {
+        forget();
         this.clear(editor);
         this.lines.set(fileKey, { favorite: [], note: [], bookmark: [], foreign: [], label: [] });
         continue;
       }
       const file = await this.service.getSymbols(editor.document);
+      if (seq !== this.seq) {
+        return this.latest;
+      }
+      forget();
+      const lineCount = editor.document.lineCount;
       const byType = new Map<string, { type: vscode.TextEditorDecorationType; options: vscode.DecorationOptions[] }>();
       const add = (kind: GutterKind, color: string, n: number | undefined, option: vscode.DecorationOptions) => {
         const { key, type } = this.iconType(kind, color, n);
@@ -175,8 +196,12 @@ export class FavoriteGutter implements vscode.Disposable {
       };
       const walk = (list: DetectedSymbol[]) => {
         for (const s of list) {
+          if (s.nameLine >= lineCount) {
+            // 偵測結果對應的是較舊的內容（例如剛刪了很多行）：超出範圍的不標示
+            continue;
+          }
           const mark = this.store.get(uri, s);
-          if (mark?.favorite) {
+          if (mark?.favorite && favoritesShown) {
             // 函式的提示（書籤、備註）由 BookmarkHoverProvider 提供，這裡只標示圖示
             add('favorite', effectiveColor(mark, tagColors) ?? DEFAULT_COLOR, mark.number, { range: new vscode.Range(s.nameLine, 0, s.nameLine, 0) });
             result.favorite.push(s.nameLine);
@@ -186,7 +211,8 @@ export class FavoriteGutter implements vscode.Disposable {
             } else if (mark.alias) {
               addLabel(s.nameLine, mark.alias);
             }
-          } else if (mark?.note) {
+          } else if (mark?.note && !mark.favorite) {
+            // 被來源篩選隱藏的函式書籤（「我的」沒勾）整個不顯示，不要改成顯示備註圖示
             note.push({ range: new vscode.Range(s.nameLine, 0, s.nameLine, 0) });
             result.note.push(s.nameLine);
           }
@@ -194,9 +220,9 @@ export class FavoriteGutter implements vscode.Disposable {
         }
       };
       walk(file.symbols);
-      for (const b of this.store.bookmarksFor(uri)) {
-        // 不在此分支的書籤：那一行不是它原本的位置，不顯示；被來源篩選隱藏的也不顯示
-        if (b.line >= editor.document.lineCount || b.status === 'notOnBranch' || !this.store.shownBySource(b)) {
+      // 不在此分支的書籤：那一行不是它原本的位置，不顯示；被來源篩選隱藏的也不顯示
+      for (const b of this.store.shownBookmarksFor(uri)) {
+        if (b.line >= lineCount) {
           continue;
         }
         const text = editor.document.lineAt(b.line);

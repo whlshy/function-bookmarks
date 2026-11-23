@@ -1,0 +1,33 @@
+syntax = "proto3";
+package demo.v1;
+
+// message NotThis {}
+service Greeter {
+  rpc SayHello(HelloRequest) returns (HelloReply) {}
+  rpc Watch(stream HelloRequest) returns (stream HelloReply);
+  rpc WithOptions (HelloRequest) returns (HelloReply) {
+    option (google.api.http) = { get: "/v1/hello/{name}" };
+  }
+}
+
+message HelloRequest {
+  string name = 1;
+  message Inner {
+    int32 id = 1;
+  }
+  enum Mood {
+    HAPPY = 0;
+  }
+  oneof choice {
+    string text = 2;
+    int32 number = 3;
+  }
+  string note = 4; // a '{' in a comment
+  string message = 5;
+}
+
+message HelloReply { string text = 1; }
+
+extend google.protobuf.MessageOptions {
+  string label = 50000;
+}

@@ -28,7 +28,10 @@ const MAX_CACHE = 2000;
  * 依設定決定用規則或語言伺服器取得函式，並以文件版本快取結果。
  */
 export class SymbolService {
+  /** 依最近使用排序（Map 的插入順序）：超過上限時淘汰最久沒用的。 */
   private cache = new Map<string, FileSymbols>();
+  /** 進行中的偵測：側邊欄、行號旁圖示、滑鼠提示同時要同一個檔案的同一版時共用，不重複偵測。 */
+  private inflight = new Map<string, { version: string; languageId: string; promise: Promise<FileSymbols> }>();
 
   getSymbols(document: vscode.TextDocument): Promise<FileSymbols> {
     return this.getForSource(fromDocument(document));
@@ -40,25 +43,55 @@ export class SymbolService {
     return src ? this.getForSource(src) : undefined;
   }
 
-  async getForSource(src: SourceDoc): Promise<FileSymbols> {
+  getForSource(src: SourceDoc): Promise<FileSymbols> {
     const key = uriKey(src.uri);
     const cached = this.cache.get(key);
     if (cached && cached.version === src.version && cached.languageId === src.languageId) {
-      return cached;
+      this.cache.delete(key);
+      this.cache.set(key, cached);
+      return Promise.resolve(cached);
     }
-    const result = await this.compute(src);
-    if (this.cache.size > MAX_CACHE) {
-      this.cache.clear();
+    const running = this.inflight.get(key);
+    if (running && running.version === src.version && running.languageId === src.languageId) {
+      return running.promise;
     }
-    this.cache.set(key, result);
-    return result;
+    const entry = { version: src.version, languageId: src.languageId, promise: this.compute(src) };
+    this.inflight.set(key, entry);
+    entry.promise.then(
+      (result) => {
+        // 偵測期間被 invalidate（設定改了）或有更新的請求：結果不寫進快取
+        if (this.inflight.get(key) !== entry) {
+          return;
+        }
+        this.inflight.delete(key);
+        this.cache.delete(key);
+        this.cache.set(key, result);
+        if (this.cache.size > MAX_CACHE) {
+          let drop = Math.ceil(MAX_CACHE / 10);
+          for (const k of this.cache.keys()) {
+            if (drop-- <= 0) {
+              break;
+            }
+            this.cache.delete(k);
+          }
+        }
+      },
+      () => {
+        if (this.inflight.get(key) === entry) {
+          this.inflight.delete(key);
+        }
+      },
+    );
+    return entry.promise;
   }
 
   invalidate(uri?: vscode.Uri): void {
     if (uri) {
       this.cache.delete(uriKey(uri));
+      this.inflight.delete(uriKey(uri));
     } else {
       this.cache.clear();
+      this.inflight.clear();
     }
   }
 
