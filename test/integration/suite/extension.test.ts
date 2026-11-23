@@ -841,6 +841,8 @@ describe('Function Bookmarks（整合測試）', () => {
       await vscode.commands.executeCommand('workbench.view.extension.functionBookmarks');
       await at(7);
       await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+      // 等移動游標觸發的「游標跟隨」做完：它的 reveal 是非同步的，慢的機器上會晚到、蓋掉下面選取的書籤（CI 偶發）
+      await new Promise((r) => setTimeout(r, 400));
       const groups = (await api.provider.getChildren(api.provider.sections.bookmarks)) as BmGroupNode[];
       const group = groups.find((g) => g.rel === 'app/tmp_mix.py')!;
       const node = (await api.provider.getChildren(group))[0] as BookmarkNode;
@@ -1396,6 +1398,9 @@ describe('Function Bookmarks（整合測試）', () => {
 
     /** 自己的書籤：兩個行號書籤（一個有名稱、標籤、備註）＋一個函式書籤。 */
     async function setupMine(): Promise<void> {
+      // 先讓外部變動監看處理完「清空書籤」（忘掉上一個測試記住的檔案內容），
+      // 否則改檔的事件晚到時，會拿上一個測試的內容換算這次剛加的書籤（CI 偶發）
+      await api.external.idle();
       await fsp.writeFile(fileA().fsPath, text(BASE));
       await api.store.update(folder(), (d) => {
         let next = addBookmark(d, { id: newBookmarkId(), file: relA, line: 10, label: '改標題', tags: ['article'], note: '要檢查權限', anchor: makeAnchor(BASE, 10) });
