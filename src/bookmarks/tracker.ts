@@ -18,6 +18,11 @@ export class BookmarkTracker implements vscode.Disposable {
   private disposables: vscode.Disposable[] = [];
   /** 由 ExternalChangeWatcher 設定：回答 true 的編輯改用差異換算，這裡不平移。 */
   handledByDiff?: (e: vscode.TextDocumentChangeEvent, changes: LineChange[]) => boolean;
+  /**
+   * 由 ExternalChangeWatcher 設定：存檔更新 anchor 前先結算待處理的編輯器變更
+   * （VS Code 在乾淨文件第一次編輯觸發 change 時 isDirty 尚未更新，可能暫留在 pendingReload 尚未換算）。
+   */
+  beforeRefreshAnchors?: (doc: vscode.TextDocument) => Promise<void>;
 
   constructor(
     private readonly store: MarkStore,
@@ -82,6 +87,7 @@ export class BookmarkTracker implements vscode.Disposable {
 
   /** 存檔時更新書籤的 anchor，之後的 git 換算與後備定位會用到。 */
   async refreshAnchors(doc: vscode.TextDocument): Promise<void> {
+    await this.beforeRefreshAnchors?.(doc);
     const loc = this.store.locate(doc.uri);
     if (!loc || this.store.bookmarksFor(doc.uri).length === 0) {
       return;

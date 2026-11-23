@@ -85,6 +85,8 @@ export class ExternalChangeWatcher implements vscode.Disposable {
   private snaps = new Map<string, Map<string, number[]>>();
   /** 從磁碟重新載入、還沒換算的開著的檔案：這段期間的編輯也一起交給差異換算。 */
   private pendingReload = new Set<string>();
+  /** 正在結算誤判為重新載入的編輯器變更（避免重複或並發執行）。 */
+  private flushing = new Map<string, Promise<void>>();
   private busyRetries = new Map<string, number>();
   private reloadWaits = new Map<string, number>();
   /** 檔案不見、還沒找到改名對象的次數（新檔案的通知可能比較晚到，再等一下）。 */
@@ -126,7 +128,19 @@ export class ExternalChangeWatcher implements vscode.Disposable {
       vscode.workspace.onDidChangeTextDocument((e) => this.onChange(e)),
       vscode.workspace.onDidOpenTextDocument((doc) => this.has(doc.uri) && this.schedule([doc.uri])),
       vscode.workspace.onDidCloseTextDocument((doc) => this.onClose(doc)),
-      vscode.workspace.onDidSaveTextDocument((doc) => this.has(doc.uri) && this.remember(doc.uri, hashText(doc.getText()))),
+      vscode.workspace.onDidSaveTextDocument((doc) => {
+        if (!this.has(doc.uri)) {
+          return;
+        }
+        const key = uriKey(doc.uri);
+        // VS Code 在乾淨文件第一次編輯觸發 change 時 isDirty 尚未更新，會誤加入 pendingReload；
+        // 若使用者在 300ms 內立刻存檔，須先結算換算再記住新內容，避免直接 remember() 蓋掉差異導致書籤錯位。
+        if (this.pendingReload.has(key) || this.flushing.has(key)) {
+          void this.flushEditorChanges(doc);
+        } else {
+          this.remember(doc.uri, hashText(doc.getText()));
+        }
+      }),
       vscode.window.onDidChangeWindowState((s) => s.focused && this.checkAll()),
       store.onDidChange(() => this.scheduleSeed()),
       branches.onDidChange((e) => this.onBranchChange(e)),
@@ -158,7 +172,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
 
   /** 等目前排定的檢查都做完（測試用）。 */
   async idle(): Promise<void> {
-    while (this.seedTimer || this.timer || this.running || this.retryTimers.size) {
+    while (this.seedTimer || this.timer || this.running || this.retryTimers.size || this.flushing.size) {
       if (this.seedTimer) {
         clearTimeout(this.seedTimer);
         this.seedTimer = undefined;
@@ -171,10 +185,43 @@ export class ExternalChangeWatcher implements vscode.Disposable {
       }
       if (this.running) {
         await this.running;
+      } else if (this.flushing.size) {
+        await Promise.all(this.flushing.values());
       } else if (this.retryTimers.size) {
         await new Promise((r) => setTimeout(r, 50));
       }
     }
+  }
+
+  /**
+   * 立刻結算被誤判成從磁碟重新載入的編輯器變更：
+   * VS Code 擴充主機在乾淨文件第一次編輯觸發 change 事件時 isDirty 尚未更新（仍為 false），
+   * onChange 會將它放進 pendingReload 等待 300ms；此處改用編輯器內的修改規則（依 onLineDelete 設定）
+   * 換算書籤，寫入完成後再記住新內容。沒有待處理項目時什麼都不做（可重複呼叫、冪等）。
+   */
+  flushEditorChanges(doc: vscode.TextDocument): Promise<void> {
+    const key = uriKey(doc.uri);
+    const active = this.flushing.get(key);
+    if (active) {
+      return active;
+    }
+    if (!this.pendingReload.has(key)) {
+      return Promise.resolve();
+    }
+    this.pendingReload.delete(key);
+    this.pending.delete(key);
+    if (!this.known.has(key)) {
+      return Promise.resolve();
+    }
+    const task = (async () => {
+      await this.relocateBuffer(doc);
+      this.remember(doc.uri, hashText(doc.getText()));
+      this.scheduleConflictCheck(doc);
+    })().finally(() => {
+      this.flushing.delete(key);
+    });
+    this.flushing.set(key, task);
+    return task;
   }
 
   /** 這個分支在某檔案記住的內容（測試、清理用）。 */
@@ -296,6 +343,13 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     const key = uriKey(uri);
     let fromDisk = false;
     if (doc) {
+      if (doc.isDirty && this.pendingReload.has(key)) {
+        // VS Code 在乾淨文件第一次編輯觸發 change 時 isDirty 尚未更新，會誤加入 pendingReload；
+        // 到這裡時文件已是 isDirty，代表是編輯器內的修改而非真正的磁碟重新載入，改走編輯器規則換算。
+        await this.flushEditorChanges(doc);
+        this.checkConflicts(doc);
+        return;
+      }
       text = doc.getText();
       languageId = doc.languageId;
       if (!doc.isDirty) {
@@ -650,7 +704,11 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     }
   }
 
-  /** 從磁碟重新載入（git checkout／pull、外部工具改檔時，編輯器自動載入新內容）：編輯後仍是「未修改」。 */
+  /**
+   * 從磁碟重新載入（git checkout／pull、外部工具改檔時，編輯器自動載入新內容）：編輯後仍是「未修改」。
+   * 注意：VS Code 在乾淨文件第一次編輯觸發 change 時 isDirty 尚未更新（仍為 false），也會誤判進 pendingReload；
+   * 誤判的情況交由 sync()（見到 isDirty 變 true）與存檔時的 flushEditorChanges() 收尾。
+   */
   private isReload(e: vscode.TextDocumentChangeEvent): boolean {
     return !e.document.isDirty && e.reason === undefined;
   }
@@ -668,7 +726,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
       return;
     }
     if (this.handlesByDiff(e, this.toChanges(e))) {
-      this.relocateBuffer(doc);
+      void this.relocateBuffer(doc);
     }
     // 一般編輯由 BookmarkTracker 平移；記住的內容跟著更新
     this.remember(doc.uri, hashText(doc.getText()));
@@ -703,8 +761,8 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     );
   }
 
-  /** 開著的文件：用編輯前記住的內容與目前內容比對，立刻換算（同步完成，避免和接下來的編輯互相干擾）。 */
-  private relocateBuffer(doc: vscode.TextDocument): void {
+  /** 開著的文件：用編輯前記住的內容與目前內容比對，立刻換算（回傳 Promise 讓呼叫端可 await 寫入完成）。 */
+  private async relocateBuffer(doc: vscode.TextDocument): Promise<void> {
     const loc = this.store.locate(doc.uri);
     const old = this.known.get(uriKey(doc.uri));
     const bookmarks = this.store.bookmarksFor(doc.uri);
@@ -715,7 +773,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     const regions = conflictRegions(lines);
     const mode = onLineDeleteSetting(doc.uri);
     const results = new Map(relocateBookmarks(bookmarks, old, lines).map((r) => [r.id, r]));
-    void this.store.update(
+    await this.store.update(
       loc.folder,
       (d) =>
         updateBookmarksInFile(d, loc.rel, (b) => {
@@ -734,6 +792,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
               return undefined;
             }
             if (mode === 'moveToNext') {
+              delete next.status;
               return next;
             }
           }

@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { circled, effectiveColor, gutterSvg, nextFreeNumber, paletteColor, PALETTE, svgDataUri } from '../../src/bookmarks/decor';
+import { circled, effectiveColor, gutterSvg, LOST_HEX, nextFreeNumber, paletteColor, PALETTE, svgDataUri } from '../../src/bookmarks/decor';
 import { LineBookmark } from '../../src/bookmarks/model';
 import {
   clearNumber,
@@ -52,6 +52,20 @@ describe('M7：書籤外觀（顏色、號碼、圖示）', () => {
     assert.ok(uri.startsWith('data:image/svg+xml;base64,'));
     assert.strictEqual(Buffer.from(uri.split(',')[1], 'base64').toString('utf8'), plain);
     assert.strictEqual(new Set(PALETTE.map((c) => c.id)).size, PALETTE.length);
+  });
+
+  it('行號旁圖示：需確認（lost）固定灰色與問號，有號碼時也顯示問號', () => {
+    const red = paletteColor('red')!.hex;
+    const yellow = paletteColor('yellow')!.hex;
+    const lost = gutterSvg('lost', red);
+    assert.ok(lost.includes(`fill="${LOST_HEX}"`), '固定填灰色');
+    assert.ok(!lost.includes(`fill="${red}"`), '不受書籤或標籤顏色影響');
+    assert.ok(lost.includes('fill="#FFFFFF">?</text>'), '顯示白色問號');
+
+    const lostNumbered = gutterSvg('lost', yellow, 3);
+    assert.ok(lostNumbered.includes(`fill="${LOST_HEX}"`), '淺色書籤的需確認圖示也是灰色');
+    assert.ok(lostNumbered.includes('fill="#FFFFFF">?</text>'), '有號碼的需確認書籤仍顯示問號');
+    assert.ok(!lostNumbered.includes('>3</text>'), '有號碼時不顯示號碼');
   });
 
   it('號碼、顏色、標籤顏色會存檔與讀回；不合法的值略過', () => {

@@ -237,6 +237,18 @@ export class MarkStore implements vscode.Disposable {
     return !!loc && (this.data.get(uriKey(loc.folder.uri))?.symbols ?? []).some((m) => m.file === loc.rel);
   }
 
+  /** 這個資料夾目前有沒有任何書籤資料（函式標記、行號書籤或標籤顏色）。 */
+  hasData(folder: vscode.WorkspaceFolder): boolean {
+    const d = this.data.get(uriKey(folder.uri));
+    return !!d && (d.symbols.length > 0 || (d.bookmarks ?? []).length > 0 || Object.keys(d.tagColors ?? {}).length > 0);
+  }
+
+  /** 這個資料夾的 tagColors 裡有沒有這個標籤的顏色設定。 */
+  hasTagColor(folder: vscode.WorkspaceFolder, tag: string): boolean {
+    const tc = this.data.get(uriKey(folder.uri))?.tagColors;
+    return !!tc && Object.prototype.hasOwnProperty.call(tc, tag);
+  }
+
   /** 某個檔案的書籤（依行號排序）。 */
   bookmarksFor(uri: vscode.Uri, options: { includeHidden?: boolean } = {}): LineBookmark[] {
     const loc = this.locate(uri);

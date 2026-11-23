@@ -70,7 +70,10 @@ export function nextFreeNumber(used: Iterable<number | undefined>): number | und
   return undefined;
 }
 
-export type GutterKind = 'bookmark' | 'favorite';
+export type GutterKind = 'bookmark' | 'favorite' | 'lost';
+
+/** 「需確認」書籤的行號旁圖示顏色（固定中性灰，不受書籤或標籤顏色影響）。 */
+export const LOST_HEX = '#8a8a8a';
 
 const SHAPE = 'M4.5 1.5h7a1 1 0 0 1 1 1v12l-4.5-3-4.5 3v-12a1 1 0 0 1 1-1z';
 const STAR = 'M8 4.2l.85 1.75 1.9.27-1.38 1.33.33 1.9L8 8.55l-1.7.9.33-1.9-1.38-1.33 1.9-.27z';
@@ -85,17 +88,21 @@ function textColor(hex: string): string {
 }
 
 /**
- * 行號旁的書籤圖示（16×16 SVG）：書籤形狀，函式書籤加白色星星；有號碼時改顯示號碼。
+ * 行號旁的書籤圖示（16×16 SVG）：書籤形狀，函式書籤加白色星星；有號碼時改顯示號碼；
+ * 需確認（lost）固定填中性灰並顯示問號（有號碼時也顯示問號）。
  */
 export function gutterSvg(kind: GutterKind, hex: string, n?: number): string {
-  const fg = textColor(hex);
+  const fill = kind === 'lost' ? LOST_HEX : hex;
+  const fg = textColor(fill);
   let inner = '';
-  if (n) {
+  if (kind === 'lost') {
+    inner = `<text x="8" y="9.6" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8.5" font-weight="700" fill="${fg}">?</text>`;
+  } else if (n) {
     inner = `<text x="8" y="9.6" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="8.5" font-weight="700" fill="${fg}">${n}</text>`;
   } else if (kind === 'favorite') {
     inner = `<path d="${STAR}" fill="${fg}"/>`;
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path d="${SHAPE}" fill="${hex}"/>${inner}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path d="${SHAPE}" fill="${fill}"/>${inner}</svg>`;
 }
 
 /** 給 gutterIconPath 用的 data URI（base64，避免特殊字元被編碼）。 */

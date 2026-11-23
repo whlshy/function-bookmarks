@@ -967,6 +967,79 @@ describe('Function Bookmarks（整合測試）', () => {
       assert.deepStrictEqual(await settle(uri, ['10']), ['10']);
     });
 
+    it('乾淨文件第一次編輯：上方插入 3 行後立刻存檔，書籤移到 N+3 且 anchor.text 保留原本內容', async () => {
+      const uri = file('first_edit_save');
+      const old = content(20);
+      await plant(uri, old, [8]);
+      const editor = await open(uri, api);
+      await api.external.idle();
+      assert.strictEqual(editor.document.isDirty, false);
+      assert.ok(await editor.edit((b) => b.insert(new vscode.Position(8, 0), 'ins_0 = 0\nins_1 = 1\nins_2 = 2\n')));
+      // 300ms 內立刻存檔（不先等 timer 到期）
+      assert.ok(await editor.document.save());
+      await api.external.idle();
+      const bm = await waitFor(
+        async () => {
+          await api.external.idle();
+          return api.store.bookmarksFor(uri)[0];
+        },
+        (b) => b?.line === 11 && b.anchor?.text === old[8] && b.anchor?.before[1] === 'ins_2 = 2',
+        8000,
+      );
+      assert.strictEqual(bm.line, 11);
+      assert.strictEqual(bm.anchor?.text, old[8]);
+      assert.deepStrictEqual(bm.anchor?.before, ['ins_1 = 1', 'ins_2 = 2']);
+      await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    });
+
+    it('乾淨文件第一次編輯就刪掉書籤那一行：依 onLineDelete 設定處理（remove／markLost／moveToNext）', async () => {
+      const cfg = vscode.workspace.getConfiguration('functionBookmarks');
+      try {
+        for (const mode of ['remove', 'markLost', 'moveToNext'] as const) {
+          await cfg.update('bookmarks.onLineDelete', mode, vscode.ConfigurationTarget.Workspace);
+          const uri = file(`first_del_${mode}`);
+          const old = content(15);
+          await plant(uri, old, [6]);
+          const editor = await open(uri, api);
+          await api.external.idle();
+          assert.strictEqual(editor.document.isDirty, false);
+          assert.ok(await editor.edit((b) => b.delete(new vscode.Range(6, 0, 7, 0))));
+          await waitFor(() => editor.document.isDirty, (v) => v);
+          await api.external.idle();
+          const list = await waitFor(
+            async () => {
+              await api.external.idle();
+              return api.store.bookmarksFor(uri);
+            },
+            (bms) => {
+              if (mode === 'remove') {
+                return bms.length === 0;
+              }
+              if (mode === 'markLost') {
+                return bms.length === 1 && bms[0].status === 'lost';
+              }
+              return bms.length === 1 && bms[0].line === 6 && bms[0].status === undefined;
+            },
+            8000,
+          );
+          if (mode === 'remove') {
+            assert.deepStrictEqual(list, [], 'remove：書籤應被刪除');
+          } else if (mode === 'markLost') {
+            assert.strictEqual(list.length, 1);
+            assert.strictEqual(list[0].status, 'lost', 'markLost：書籤應標成 lost');
+          } else {
+            assert.strictEqual(list.length, 1);
+            assert.strictEqual(list[0].line, 6, 'moveToNext：移到原本的下一行');
+            assert.strictEqual(list[0].status, undefined, 'moveToNext：不應標成 lost');
+            assert.strictEqual(editor.document.lineAt(list[0].line).text, old[7]);
+          }
+          await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+        }
+      } finally {
+        await cfg.update('bookmarks.onLineDelete', undefined, vscode.ConfigurationTarget.Workspace);
+      }
+    });
+
     it('「匯入書籤」也認得 alefragnani Bookmarks 的 .vscode/bookmarks.json：匯入成自己的書籤；重複匯入不會重複', async () => {
       const uri = file('imp');
       made.push(uri);
@@ -1719,6 +1792,51 @@ describe('Function Bookmarks（整合測試）', () => {
       assert.strictEqual(api.gutter.iconAt(fileN(), 6), 'bookmark|teal|');
     });
 
+    it('需確認的書籤在行號旁用灰色問號圖示，滑鼠提示有需確認說明', async () => {
+      const stale = makeAnchor(['deleted_a = 1', 'deleted_b = 2', 'deleted_c = 3'], 1);
+      await api.store.update(folder(), (d) => {
+        let next = addBookmark(d, {
+          id: newBookmarkId(),
+          file: relN,
+          line: 1,
+          label: '待確認項目',
+          color: 'red',
+          tags: ['todo'],
+          status: 'lost',
+          anchor: stale,
+        });
+        return addBookmark(next, {
+          id: newBookmarkId(),
+          file: relN,
+          line: 6,
+          number: 2,
+          status: 'lost',
+          anchor: stale,
+        });
+      });
+      await at(1);
+      await api.gutter.update();
+      assert.deepStrictEqual(api.gutter.linesFor(fileN(), 'bookmark'), [1, 6], 'lines 分類維持 bookmark');
+      assert.strictEqual(api.gutter.iconAt(fileN(), 1), 'lost|red|');
+      assert.strictEqual(api.gutter.iconAt(fileN(), 6), 'lost|teal|2');
+      assert.strictEqual(api.gutter.labelAt(fileN(), 6), '②', '行尾仍顯示號碼');
+      const hover1 = api.gutter.hoverAt(fileN(), 1);
+      assert.ok(hover1, '需確認書籤應有滑鼠提示');
+      assert.ok(hover1.startsWith('**待確認項目**'), hover1);
+      assert.ok(hover1.includes('#todo'), hover1);
+      assert.ok(hover1.includes('The bookmarked line could not be found'), hover1);
+      const hover6 = api.gutter.hoverAt(fileN(), 6);
+      assert.ok(hover6?.includes('The bookmarked line could not be found'), hover6);
+
+      // 移到游標所在的行後不再是需確認，恢復一般書籤圖示
+      const node = (await children()).find((k) => k.type === 'bookmark' && (k as BookmarkNode).entry.bookmark.line === 1) as BookmarkNode;
+      await at(7);
+      await vscode.commands.executeCommand('functionBookmarks.moveBookmarkToCursor', node);
+      await api.gutter.update();
+      assert.strictEqual(api.gutter.iconAt(fileN(), 7), 'bookmark|red|');
+      assert.strictEqual(api.gutter.hoverAt(fileN(), 7), undefined);
+    });
+
     it('行尾顯示名稱（與號碼），可在設定關閉', async () => {
       await at(6);
       await api.bookmarks.addLabeled('第二個變數');
@@ -2064,8 +2182,6 @@ describe('Function Bookmarks（整合測試）', () => {
           const mineId = newBookmarkId();
           await api.store.update(folder(), (d) => addBookmark(d, { id: mineId, file: relR, line: 4, anchor: makeAnchor(LINES, 4) }));
           const editor = await openR(4);
-          // 先改一個不相干的地方，讓文件進入已修改狀態（乾淨文件的第一次編輯事件會被當成重新載入）
-          assert.ok(await editor.edit((b) => b.insert(new vscode.Position(7, LINES[7].length), '  # x')));
           await api.external.idle();
           assert.ok(await editor.edit((b) => b.delete(new vscode.Range(3, 0, 4, LINES[4].length))));
           const mine = await waitFor(

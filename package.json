@@ -2,7 +2,7 @@
   "name": "function-bookmarks",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "publisher": "whlshy",
   "icon": "media/icon.png",
   "galleryBanner": {

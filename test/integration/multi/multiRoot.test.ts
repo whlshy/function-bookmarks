@@ -97,12 +97,82 @@ describe('多資料夾工作區（整合測試）', () => {
     assert.strictEqual(vscode.window.activeTextEditor!.selection.active.line, 4);
   });
 
-  it('標籤顏色兩個資料夾都會套用', async () => {
+  async function fileExists(folder: vscode.WorkspaceFolder): Promise<boolean> {
+    return vscode.workspace.fs.stat(vscode.Uri.joinPath(folder.uri, '.vscode', 'function-bookmarks.json')).then(
+      () => true,
+      () => false,
+    );
+  }
+
+  async function clearDiskFiles(): Promise<void> {
+    for (const f of folders()) {
+      await api.store.update(f, () => emptyStore());
+      await api.store.flush();
+      await vscode.workspace.fs.delete(vscode.Uri.joinPath(f.uri, '.vscode'), { recursive: true }).then(undefined, () => undefined);
+    }
+  }
+
+  it('標籤顏色在有資料的資料夾都會套用', async () => {
+    await at(views(), 5);
+    await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+    await at(util(), 4);
+    await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
     await vscode.commands.executeCommand('functionBookmarks.setTagColor', 'todo', 'orange');
     await api.store.flush();
     assert.deepStrictEqual((await readJson(f1()))?.tagColors, { todo: 'orange' });
     assert.deepStrictEqual((await readJson(f2()))?.tagColors, { todo: 'orange' });
     assert.strictEqual(api.store.tagColors().get('todo'), 'orange');
+  });
+
+  it('設定標籤顏色只寫進有書籤資料的資料夾，沒有資料的資料夾不會出現書籤檔；清除顏色時有該標籤顏色的資料夾都清掉', async () => {
+    await clearDiskFiles();
+    try {
+      assert.strictEqual(await fileExists(f1()), false);
+      assert.strictEqual(await fileExists(f2()), false);
+
+      // 只有第二個資料夾有書籤：設定標籤顏色只寫進第二個，第一個不建立書籤檔
+      await at(util(), 4);
+      await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+      await vscode.commands.executeCommand('functionBookmarks.setTagColor', 'todo', 'green');
+      await api.store.flush();
+      assert.strictEqual(await fileExists(f1()), false, '沒有書籤資料的資料夾不應建立 .vscode/function-bookmarks.json');
+      assert.deepStrictEqual((await readJson(f2()))?.tagColors, { todo: 'green' });
+      assert.strictEqual(api.store.tagColors().get('todo'), 'green');
+
+      // 第一個資料夾也有書籤後再設定顏色：兩邊都寫入；清除顏色時兩邊都清乾淨
+      await at(views(), 5);
+      await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+      await vscode.commands.executeCommand('functionBookmarks.setTagColor', 'todo', 'blue');
+      await api.store.flush();
+      assert.deepStrictEqual((await readJson(f1()))?.tagColors, { todo: 'blue' });
+      assert.deepStrictEqual((await readJson(f2()))?.tagColors, { todo: 'blue' });
+
+      await vscode.commands.executeCommand('functionBookmarks.setTagColor', 'todo', null);
+      await api.store.flush();
+      assert.strictEqual((await readJson(f1()))?.tagColors, undefined);
+      assert.strictEqual((await readJson(f2()))?.tagColors, undefined);
+      assert.strictEqual(api.store.tagColors().get('todo'), undefined);
+
+      // 都沒有書籤資料時：清除不存在的標籤什麼都不寫；設定顏色只寫第一個資料夾
+      await clearDiskFiles();
+      await vscode.commands.executeCommand('functionBookmarks.setTagColor', 'absent', null);
+      await api.store.flush();
+      assert.strictEqual(await fileExists(f1()), false);
+      assert.strictEqual(await fileExists(f2()), false);
+
+      await vscode.commands.executeCommand('functionBookmarks.setTagColor', 'solo', 'purple');
+      await api.store.flush();
+      assert.deepStrictEqual((await readJson(f1()))?.tagColors, { solo: 'purple' });
+      assert.strictEqual(await fileExists(f2()), false, '都沒有資料時只寫第一個資料夾');
+      assert.strictEqual(api.store.tagColors().get('solo'), 'purple');
+
+      await vscode.commands.executeCommand('functionBookmarks.setTagColor', 'solo', null);
+      await api.store.flush();
+      assert.strictEqual((await readJson(f1()))?.tagColors, undefined);
+      assert.strictEqual(await fileExists(f2()), false);
+    } finally {
+      await clearDiskFiles();
+    }
   });
 
   it('狀態列只算目前檔案（所在資料夾）的書籤', async () => {

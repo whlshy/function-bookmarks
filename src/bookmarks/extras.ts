@@ -405,8 +405,20 @@ export class BookmarkExtras {
     if (color !== null && !paletteColor(color)) {
       return;
     }
-    // 每個資料夾各存一份，同一個標籤在所有資料夾都是同一個顏色
-    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    const folders = vscode.workspace.workspaceFolders ?? [];
+    if (!folders.length) {
+      return;
+    }
+    let targets: readonly vscode.WorkspaceFolder[];
+    if (color === null) {
+      // 清除顏色：寫進所有 tagColors 裡有這個標籤的資料夾；沒有任何資料夾有就什麼都不寫
+      targets = folders.filter((f) => this.store.hasTagColor(f, tag!));
+    } else {
+      // 設定顏色：只寫進已經有書籤資料的資料夾（避免在空資料夾建立書籤檔）；都沒有時只寫第一個
+      const withData = folders.filter((f) => this.store.hasData(f));
+      targets = withData.length ? withData : [folders[0]];
+    }
+    for (const folder of targets) {
       await this.store.update(folder, (d) => setTagColor(d, tag!, color ?? undefined));
     }
   }

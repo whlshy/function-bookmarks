@@ -22,6 +22,8 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 - **Branch aware**: each branch remembers its own positions; bookmarks on code that is not on the current branch wait until you switch back; a bookmark can belong to one branch only
 - Function bookmarks follow functions by name, and stay attached even after a function is renamed
 
+![Line bookmarks following code edits and jumping between them](images/line-bookmarks.gif)
+
 ### Organize and jump
 
 - Names, **tags**, multi-line **Markdown notes** (shown on hover)
@@ -33,6 +35,8 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 - **Hide bookmark icons temporarily** (to set breakpoints) from the side bar's `…` menu
 - Status bar: bookmarks in the current file; click to search
 
+![Editing a Markdown note with live preview and viewing it on hover](images/markdown-notes.gif)
+
 ### Function list
 
 - The functions of the current file in the side bar, a **Whole project** browser, and **Search Functions**
@@ -40,6 +44,8 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 - Django templates: `{% block %}`, `extends` / `include` links and overridden blocks; event listeners and requests (`.on('click')`, `$.ajax`, `fetch`) are listed too
 - **Your own detection rules** with regular expressions; **Test Detection Rules on This File** shows what each rule finds
 - Works out of the box for most common languages, no language extension needed; others fall back to the language server
+
+![Bookmarking a function, setting a display name, and jumping back from another file](images/function-bookmarks.gif)
 
 ### Share
 

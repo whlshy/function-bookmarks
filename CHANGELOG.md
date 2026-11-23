@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.1 (2026-11-24) — bookmark fixes and demo GIFs
+
+- Fix: after typing above a bookmark in a file that had just been opened or saved, saving right away (within about 0.3 s) could leave the bookmark on its old line number for good. The first edit of a clean file was mistaken for a reload from disk; it is now handled like any other edit
+- Fix: deleting a bookmarked line as the first edit of a clean file now follows `bookmarks.onLineDelete` (`remove`, `markLost`, `moveToNext`) every time
+- A bookmark that *needs checking* shows a grey bookmark with a question mark in the gutter (and the overview ruler), instead of its normal color; hover the line to see why
+- Setting a tag color in a multi-root workspace no longer creates an empty bookmark file in folders that have no bookmarks; clearing a color removes it from every folder that has it
+- README: short GIFs of function bookmarks, line bookmarks and Markdown notes
+
 ## 0.8.0 (2026-11-23) — search bar, more languages, bug fixes and performance
 
 - **Search** from the first row of the side bar (or `Ctrl+Alt+F`): type to filter the bookmarks right away — by name, tag, file, function, the code on the line or the note. Matches are highlighted, groups with no match are hidden, and the title shows *N of M match*. `#tag` searches tags only, `@source` shows only that person's bookmarks. `Enter` opens the first match, `↓` moves to the list, `Esc` clears; the ✕ on the row clears too. The text is kept after a restart. The drop-down *Search Bookmarks* (`Ctrl+Alt+/`) is still there

@@ -91,6 +91,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
   const tracker = new BookmarkTracker(store, service);
   const external = new ExternalChangeWatcher(store, service, context.workspaceState, branches, files);
   tracker.handledByDiff = (e, changes) => external.handlesByDiff(e, changes);
+  tracker.beforeRefreshAnchors = (doc) => external.flushEditorChanges(doc);
   const reconciler = new ReconcileWatcher(store, service);
   const gutter = new FavoriteGutter(context.extensionUri, service, store);
   const hover = new BookmarkHoverProvider(service, store);

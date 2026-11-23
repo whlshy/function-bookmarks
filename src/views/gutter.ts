@@ -4,7 +4,7 @@ import { MarkStore } from '../storage/store';
 import { SymbolService } from '../symbols/symbolService';
 import { uriKey } from '../util/uris';
 import { bookmarkTitle } from '../bookmarks/commands';
-import { circled, DEFAULT_COLOR, effectiveColor, GutterKind, gutterSvg, paletteColor, svgDataUri } from '../bookmarks/decor';
+import { circled, DEFAULT_COLOR, effectiveColor, GutterKind, gutterSvg, LOST_HEX, paletteColor, svgDataUri } from '../bookmarks/decor';
 import { SECTION } from '../config';
 import { bookmarkPreviewLink, trustPreviewLink } from './noteEditor';
 
@@ -17,6 +17,7 @@ type LineKind = 'favorite' | 'note' | 'bookmark' | 'foreign' | 'label';
 /**
  * 在編輯器行號旁（gutter）標示書籤與有備註的函式：
  * - 行號書籤：書籤圖示；函式書籤：書籤圖示加星星；有號碼時圖示上顯示號碼
+ * - 需確認（lost）的行號書籤：灰色問號圖示，滑鼠提示說明原因
  * - 顏色依書籤自己的顏色 → 標籤顏色 → 預設（自己的青綠、別人的紫色）
  * - 只有備註的函式：藍色備註圖示
  * - 書籤有名稱時，行尾淡淡顯示名稱（可在設定關閉）
@@ -103,8 +104,14 @@ export class FavoriteGutter implements vscode.Disposable {
     return this.iconKeys.get(`${uriKey(uri)}#${line}`);
   }
 
+  /** 給測試用：某一行圖示的滑鼠提示內容（Markdown 原文）。 */
+  hoverAt(uri: vscode.Uri, line: number): string | undefined {
+    return this.hoverTexts.get(`${uriKey(uri)}#${line}`);
+  }
+
   private labelTexts = new Map<string, string>();
   private iconKeys = new Map<string, string>();
+  private hoverTexts = new Map<string, string>();
 
   schedule(delay = 300): void {
     if (this.timer) {
@@ -114,7 +121,7 @@ export class FavoriteGutter implements vscode.Disposable {
   }
 
   private iconType(kind: GutterKind, color: string, n: number | undefined): { key: string; type: vscode.TextEditorDecorationType } {
-    const hex = paletteColor(color)?.hex ?? paletteColor(DEFAULT_COLOR)!.hex;
+    const hex = kind === 'lost' ? LOST_HEX : (paletteColor(color)?.hex ?? paletteColor(DEFAULT_COLOR)!.hex);
     const key = `${kind}|${color}|${n ?? ''}`;
     let type = this.iconTypes.get(key);
     if (!type) {
@@ -155,10 +162,11 @@ export class FavoriteGutter implements vscode.Disposable {
       const fileKey = uriKey(uri);
       // 對照表（測試用）在確定要更新這個檔案時才清：被較新的一次取代時保留舊的
       const forget = () => {
-        for (const k of [...this.labelTexts.keys(), ...this.iconKeys.keys()]) {
+        for (const k of [...this.labelTexts.keys(), ...this.iconKeys.keys(), ...this.hoverTexts.keys()]) {
           if (k.startsWith(`${fileKey}#`)) {
             this.labelTexts.delete(k);
             this.iconKeys.delete(k);
+            this.hoverTexts.delete(k);
           }
         }
       };
@@ -180,7 +188,11 @@ export class FavoriteGutter implements vscode.Disposable {
         const slot = byType.get(key) ?? { type, options: [] };
         slot.options.push(option);
         byType.set(key, slot);
-        this.iconKeys.set(`${fileKey}#${option.range.start.line}`, key);
+        const lineKey = `${fileKey}#${option.range.start.line}`;
+        this.iconKeys.set(lineKey, key);
+        if (option.hoverMessage instanceof vscode.MarkdownString) {
+          this.hoverTexts.set(lineKey, option.hoverMessage.value);
+        }
       };
       const result: Record<LineKind, number[]> = { favorite: [], note: [], bookmark: [], foreign: [], label: [] };
       const note: vscode.DecorationOptions[] = [];
@@ -227,20 +239,27 @@ export class FavoriteGutter implements vscode.Disposable {
         }
         const text = editor.document.lineAt(b.line);
         const color = effectiveColor(b, tagColors) ?? DEFAULT_COLOR;
+        const lost = b.status === 'lost';
+        const kind: GutterKind = lost ? 'lost' : 'bookmark';
         (b.source ? result.foreign : result.bookmark).push(b.line);
         if (b.label || b.number || b.source) {
           const parts = [circled(b.number), b.label ?? (b.symbol ? bookmarkTitle(b) : ''), b.source ? `@${b.source.author}` : ''];
           addLabel(b.line, parts.filter(Boolean).join(' '));
         }
-        if (!b.note && !b.source) {
-          add('bookmark', color, b.number, { range: new vscode.Range(b.line, 0, b.line, 0) });
+        if (!b.note && !b.source && !lost) {
+          add(kind, color, b.number, { range: new vscode.Range(b.line, 0, b.line, 0) });
           continue;
         }
-        // 有備註或是別人的書籤：範圍是整行內容，滑鼠移到那一行就顯示備註與來源
+        // 有備註、是別人的書籤，或需確認：範圍是整行內容，滑鼠移到那一行就顯示說明、備註與來源
         const md = new vscode.MarkdownString();
         md.appendMarkdown(`**${escapeMd(bookmarkTitle(b))}**`);
         if (b.tags?.length) {
           md.appendMarkdown(`  ${b.tags.map((t) => `#${escapeMd(t)}`).join(' ')}`);
+        }
+        if (lost) {
+          md.appendMarkdown(
+            `\n\n${vscode.l10n.t('The bookmarked line could not be found (deleted, changed a lot, or inside a merge conflict). Put the cursor on the correct line and use Move Bookmark to Cursor.')}`,
+          );
         }
         if (b.source) {
           md.appendMarkdown(`\n\n${vscode.l10n.t('From {0}', escapeMd(b.source.author))}`);
@@ -251,7 +270,7 @@ export class FavoriteGutter implements vscode.Disposable {
           md.appendMarkdown(`\n\n${bookmarkPreviewLink(uri, b.id)}`);
           trustPreviewLink(md);
         }
-        add('bookmark', color, b.number, {
+        add(kind, color, b.number, {
           range: new vscode.Range(b.line, text.firstNonWhitespaceCharacterIndex, b.line, text.text.length),
           hoverMessage: md,
         });
