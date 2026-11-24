@@ -17,6 +17,7 @@ import { FileSymbols, SymbolService } from '../symbols/symbolService';
 import { basenamePosix } from '../util/paths';
 import { circled, effectiveColor, paletteColor } from '../bookmarks/decor';
 import { BookmarkQuery, highlightRanges, isEmptyQuery, matchesQuery, parseQuery, SearchFields } from '../bookmarks/filter';
+import { compareByTitle, FileBookmarkSort, lineBookmarkTitle, symbolBookmarkTitle } from '../bookmarks/sort';
 
 export type SectionId = 'bookmarks' | 'currentFile' | 'project';
 export type FilterMode = 'all' | 'bookmarks';
@@ -115,6 +116,8 @@ export const FOREIGN_COLOR = 'charts.purple';
 
 const EXPANSION_KEY = 'treeExpansion';
 const MAX_EXPANSION = 3000;
+const FILE_SORT_KEY = 'bookmarkFileSort';
+const MAX_FILE_SORT = 2000;
 
 export const COMMANDS = {
   revealLine: 'functionBookmarks.revealLine',
@@ -151,6 +154,8 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   private disposables: vscode.Disposable[] = [];
   /** 使用者展開／收合過的節點（以節點 id 記錄），切換檔案、重開編輯器後沿用。 */
   private expansion: Record<string, boolean>;
+  /** 各檔案在「依檔案分組」底下的書籤排序方式（鍵為檔案 uriKey；只記錄非預設的 'title'）。 */
+  private fileSort: Record<string, FileBookmarkSort>;
   private saveTimer: NodeJS.Timeout | undefined;
   /** 「整個專案」中各檔案最上層的函式數量；0 表示沒有函式，不顯示展開鈕。 */
   private fileCounts = new Map<string, number>();
@@ -165,6 +170,15 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     private readonly memento?: vscode.Memento,
   ) {
     this.expansion = { ...(memento?.get<Record<string, boolean>>(EXPANSION_KEY) ?? {}) };
+    this.fileSort = {};
+    const savedSort = memento?.get<Record<string, FileBookmarkSort>>(FILE_SORT_KEY);
+    if (savedSort) {
+      for (const [k, v] of Object.entries(savedSort)) {
+        if (v === 'title') {
+          this.fileSort[k] = 'title';
+        }
+      }
+    }
     this.disposables.push(
       project.onDidChange(() => this.fileCounts.clear()),
       vscode.workspace.onDidSaveTextDocument((d) => this.fileCounts.delete(uriKey(d.uri))),
@@ -206,6 +220,30 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   isExpanded(node: TreeNode): boolean | undefined {
     const id = this.buildItem(node).id;
     return id ? this.expansion[id] : undefined;
+  }
+
+  /** 取得某個檔案在「依檔案分組」底下的排序方式（預設依行號）。 */
+  fileSortOf(target: vscode.Uri | string): FileBookmarkSort {
+    const key = typeof target === 'string' ? target : uriKey(target);
+    return this.fileSort[key] ?? 'line';
+  }
+
+  /** 設定某個檔案在「依檔案分組」底下的排序方式，立即寫入 workspaceState 並重畫。 */
+  async setFileSort(target: vscode.Uri | string, sort: FileBookmarkSort): Promise<void> {
+    const key = typeof target === 'string' ? target : uriKey(target);
+    if (this.fileSortOf(key) === sort) {
+      return;
+    }
+    delete this.fileSort[key];
+    if (sort === 'title') {
+      this.fileSort[key] = 'title';
+      const keys = Object.keys(this.fileSort);
+      for (const k of keys.slice(0, Math.max(0, keys.length - MAX_FILE_SORT))) {
+        delete this.fileSort[k];
+      }
+    }
+    await this.memento?.update(FILE_SORT_KEY, { ...this.fileSort });
+    this.fire();
   }
 
   fire(): void {
@@ -458,7 +496,11 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   }
 
   private groupChildren(group: BmGroupNode): (BookmarkNode | FavoriteNode)[] {
-    return group.items.map((i) =>
+    const items =
+      group.by === 'file'
+        ? [...group.items].sort(this.fileSortOf(group.key) === 'title' ? compareBookmarkItemsByTitle : compareItems)
+        : group.items;
+    return items.map((i) =>
       i.kind === 'line'
         ? ({ type: 'bookmark', entry: i.entry, parent: group } as BookmarkNode)
         : ({ type: 'favorite', fav: i.fav, parent: group } as FavoriteNode),
@@ -511,13 +553,19 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
       // 自己的排第一，其他依名稱
       return list.sort((a, b) => (a.key === '' ? -1 : b.key === '' ? 1 : a.key.localeCompare(b.key)));
     }
-    return this.bookmarkGrouping === 'tag'
-      ? list.sort((a, b) => (a.key === '' ? 1 : b.key === '' ? -1 : a.key.localeCompare(b.key)))
-      : list.sort((a, b) => (a.rel ?? '').localeCompare(b.rel ?? ''));
+    if (this.bookmarkGrouping === 'tag') {
+      return list.sort((a, b) => (a.key === '' ? 1 : b.key === '' ? -1 : a.key.localeCompare(b.key)));
+    }
+    for (const g of list) {
+      if (this.fileSortOf(g.key) === 'title') {
+        g.items.sort(compareBookmarkItemsByTitle);
+      }
+    }
+    return list.sort((a, b) => (a.rel ?? '').localeCompare(b.rel ?? ''));
   }
 
   private favLabel(fav: ResolvedFavorite): string {
-    return displayName(fav.mark.path.split('.').pop() ?? fav.mark.path, fav.mark.alias);
+    return symbolBookmarkTitle(fav.mark);
   }
 
   getTreeItem(element: TreeNode): vscode.TreeItem {
@@ -601,13 +649,15 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
       return item;
     }
     const rel = element.rel ?? '';
+    const byTitle = this.fileSortOf(element.key) === 'title';
     const item = new vscode.TreeItem(this.highlighted(basenamePosix(rel)), vscode.TreeItemCollapsibleState.Expanded);
     item.id = this.groupId(`bmFile:${element.key}`);
     item.resourceUri = element.uri;
     item.iconPath = vscode.ThemeIcon.File;
-    item.description = path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel);
+    const dir = path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel);
+    item.description = [dir, byTitle ? vscode.l10n.t('by title') : ''].filter(Boolean).join(' · ');
     item.tooltip = rel;
-    item.contextValue = 'fbBmFile';
+    item.contextValue = byTitle ? 'fbBmFile:byTitle' : 'fbBmFile';
     return item;
   }
 
@@ -876,6 +926,18 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     item.command = { command: COMMANDS.openFavorite, title: vscode.l10n.t('Go to symbol'), arguments: [fav] };
     return item;
   }
+}
+
+/** 同檔案內的書籤依側邊欄顯示名稱正序排序（函式書籤與行號書籤混排，不含圈號前綴）。 */
+function compareBookmarkItemsByTitle(a: BookmarkItem, b: BookmarkItem): number {
+  return compareByTitle(
+    a.kind === 'line'
+      ? { kind: 'line', title: lineBookmarkTitle(a.entry.bookmark), line: a.line }
+      : { kind: 'symbol', title: symbolBookmarkTitle(a.fav.mark), line: a.line },
+    b.kind === 'line'
+      ? { kind: 'line', title: lineBookmarkTitle(b.entry.bookmark), line: b.line }
+      : { kind: 'symbol', title: symbolBookmarkTitle(b.fav.mark), line: b.line },
+  );
 }
 
 /** 搜尋列比對的欄位：名稱、標籤、檔名、所在函式、那一行的程式碼、備註、來源。 */

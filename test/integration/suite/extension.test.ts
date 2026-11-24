@@ -3536,6 +3536,270 @@ describe('Function Bookmarks（整合測試）', () => {
     });
   });
 
+  describe('書籤依檔案分組：個別檔案排序', () => {
+    const fsp = require('fs/promises') as typeof import('fs/promises');
+    const fileA = () => workspaceFile('app', 'tmp_sort_a.py');
+    const fileB = () => workspaceFile('app', 'tmp_sort_b.py');
+    const fileRoot = () => workspaceFile('tmp_sort_root.py');
+    const relA = 'app/tmp_sort_a.py';
+    const relB = 'app/tmp_sort_b.py';
+    const relRoot = 'tmp_sort_root.py';
+    const A_LINES = [
+      'def zeta():',
+      '    item10 = 10',
+      '    return item10',
+      '',
+      'def alpha():',
+      '    item2 = 2',
+      '    return item2',
+      '',
+      'def mid():',
+      '    same = 1',
+      '    same_two = 2',
+      '',
+    ];
+    const B_LINES = ['def z_b():', '    pass', '', 'def a_b():', '    pass', ''];
+    const ROOT_LINES = ['def root_z():', '    pass', '', 'def root_a():', '    pass', ''];
+
+    const labelOf = (item: vscode.TreeItem) => (typeof item.label === 'string' ? item.label : (item.label?.label ?? ''));
+    const groupsOf = async (p = api.provider) => (await p.getChildren(p.sections.bookmarks)) as BmGroupNode[];
+    const fileGroup = async (rel: string, p = api.provider) => {
+      const g = (await groupsOf(p)).find((x) => x.rel === rel);
+      assert.ok(g, `找不到檔案分組 ${rel}`);
+      return g;
+    };
+    const childLabels = async (rel: string, p = api.provider) => {
+      const g = await fileGroup(rel, p);
+      return (await p.getChildren(g)).map((n) => labelOf(p.getTreeItem(n)));
+    };
+
+    async function setupFiles(): Promise<void> {
+      await api.store.update(folder(), (d) => {
+        // 檔案 A：混排函式書籤與行號書籤、含數字書籤、自然排序、自訂名稱、同名不同行
+        let next = setFavorite(d, { file: relA, path: 'zeta', kind: 'function' }, true, 0);
+        next = { ...next, symbols: next.symbols.map((m) => (m.path === 'zeta' ? { ...m, number: 1 } : m)) };
+        next = addBookmark(next, { id: 'a-item10', file: relA, line: 1, label: 'item10', anchor: makeAnchor(A_LINES, 1, 'zeta', 0) });
+        next = setFavorite(next, { file: relA, path: 'alpha', kind: 'function' }, true, 4);
+        next = setAlias(next, { file: relA, path: 'alpha', kind: 'function' }, 'BetaFn', 'alpha', 4);
+        next = addBookmark(next, { id: 'a-item2', file: relA, line: 5, label: 'item2', number: 2, anchor: makeAnchor(A_LINES, 5, 'alpha', 4) });
+        next = addBookmark(next, { id: 'a-dup2', file: relA, line: 10, label: 'dup', anchor: makeAnchor(A_LINES, 10, 'mid', 8) });
+        next = addBookmark(next, { id: 'a-dup1', file: relA, line: 9, label: 'dup', anchor: makeAnchor(A_LINES, 9, 'mid', 8) });
+
+        // 檔案 B：驗證兩個檔案各自獨立
+        next = addBookmark(next, { id: 'b-z', file: relB, line: 0, label: 'z_line', anchor: makeAnchor(B_LINES, 0) });
+        next = addBookmark(next, { id: 'b-a', file: relB, line: 3, label: 'a_line', anchor: makeAnchor(B_LINES, 3) });
+
+        // 根目錄檔案：驗證沒有子目錄時 description 顯示「by title」
+        next = addBookmark(next, { id: 'r-z', file: relRoot, line: 0, label: 'z_root', anchor: makeAnchor(ROOT_LINES, 0) });
+        next = addBookmark(next, { id: 'r-a', file: relRoot, line: 3, label: 'a_root', anchor: makeAnchor(ROOT_LINES, 3) });
+        return next;
+      });
+      await api.favorites.refresh();
+      await api.external.idle();
+    }
+
+    before(async () => {
+      await fsp.writeFile(fileA().fsPath, A_LINES.join('\n'));
+      await fsp.writeFile(fileB().fsPath, B_LINES.join('\n'));
+      await fsp.writeFile(fileRoot().fsPath, ROOT_LINES.join('\n'));
+    });
+
+    afterEach(async () => {
+      api.searchBox.setQuery('');
+      api.provider.setQuery('');
+      await api.provider.setFileSort(fileA(), 'line');
+      await api.provider.setFileSort(fileB(), 'line');
+      await api.provider.setFileSort(fileRoot(), 'line');
+      await vscode.commands.executeCommand('functionBookmarks.groupBookmarksByFile');
+    });
+
+    after(async () => {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await fsp.rm(fileA().fsPath, { force: true });
+      await fsp.rm(fileB().fsPath, { force: true });
+      await fsp.rm(fileRoot().fsPath, { force: true });
+    });
+
+    it('package.json：檔案列有 inline 排序切換按鈕、不在命令選擇區出現、匯出與清除適用兩種 contextValue', () => {
+      const pkg = findExtension()!.packageJSON as {
+        contributes: {
+          commands: { command: string; icon?: string }[];
+          menus: Record<string, { command: string; group?: string; when?: string }[]>;
+        };
+      };
+      const cmds = new Map(pkg.contributes.commands.map((c) => [c.command, c]));
+      assert.ok(cmds.get('functionBookmarks.sortFileBookmarksByTitle')?.icon, '依標題排序應有圖示');
+      assert.ok(cmds.get('functionBookmarks.sortFileBookmarksByLine')?.icon, '依行號排序應有圖示');
+
+      const itemMenu = pkg.contributes.menus['view/item/context'];
+      const toTitle = itemMenu.find((m) => m.command === 'functionBookmarks.sortFileBookmarksByTitle' && m.group?.startsWith('inline'));
+      const toLine = itemMenu.find((m) => m.command === 'functionBookmarks.sortFileBookmarksByLine' && m.group?.startsWith('inline'));
+      assert.strictEqual(toTitle?.when, 'view == functionBookmarks.tree && viewItem == fbBmFile');
+      assert.strictEqual(toLine?.when, 'view == functionBookmarks.tree && viewItem == fbBmFile:byTitle');
+
+      const exp = itemMenu.find((m) => m.command === 'functionBookmarks.exportBookmarks');
+      const clr = itemMenu.find((m) => m.command === 'functionBookmarks.clearBookmarksInFile');
+      assert.ok(exp?.when?.includes('/^fbBmFile/'), `匯出選單應適用兩種狀態：${exp?.when}`);
+      assert.ok(clr?.when?.includes('/^fbBmFile/'), `清除此檔書籤應適用兩種狀態：${clr?.when}`);
+
+      const palette = pkg.contributes.menus.commandPalette;
+      assert.strictEqual(palette.find((m) => m.command === 'functionBookmarks.sortFileBookmarksByTitle')?.when, 'false');
+      assert.strictEqual(palette.find((m) => m.command === 'functionBookmarks.sortFileBookmarksByLine')?.when, 'false');
+    });
+
+    it('點圖示切換依標題／依行號：混排、自然排序、忽略圈號、自訂名稱、同名依行號、標示可見且不寫書籤檔', async () => {
+      await setupFiles();
+      const gA = await fileGroup(relA);
+      const itemBefore = api.provider.getTreeItem(gA);
+      assert.strictEqual(itemBefore.contextValue, 'fbBmFile');
+      assert.strictEqual(itemBefore.description, 'app');
+      assert.deepStrictEqual(await childLabels(relA), ['① zeta', 'item10', 'BetaFn', '② item2', 'dup', 'dup']);
+
+      // 點 inline「依標題排序」按鈕（傳入 BmGroupNode）
+      await vscode.commands.executeCommand('functionBookmarks.sortFileBookmarksByTitle', gA);
+      const gAAfter = await fileGroup(relA);
+      const itemAfter = api.provider.getTreeItem(gAAfter);
+      assert.strictEqual(itemAfter.contextValue, 'fbBmFile:byTitle');
+      assert.strictEqual(itemAfter.description, 'app · by title');
+      assert.strictEqual(itemAfter.id, itemBefore.id, '節點 id 不變，保留展開狀態');
+      // 順序：BetaFn（自訂名稱）→ dup(line 9) → dup(line 10) → ② item2 → item10 → ① zeta（不含圈號）
+      const kids = await api.provider.getChildren(gAAfter);
+      assert.deepStrictEqual(
+        kids.map((n) => labelOf(api.provider.getTreeItem(n))),
+        ['BetaFn', 'dup', 'dup', '② item2', 'item10', '① zeta'],
+      );
+      const dupLines = kids
+        .filter((n): n is BookmarkNode => n.type === 'bookmark' && n.entry.bookmark.label === 'dup')
+        .map((n) => n.entry.bookmark.line);
+      assert.deepStrictEqual(dupLines, [9, 10], '同名依行號排');
+
+      // 根目錄檔案沒有 dir，description 直接顯示「by title」
+      await vscode.commands.executeCommand('functionBookmarks.sortFileBookmarksByTitle', await fileGroup(relRoot));
+      assert.strictEqual(api.provider.getTreeItem(await fileGroup(relRoot)).description, 'by title');
+      assert.deepStrictEqual(await childLabels(relRoot), ['a_root', 'z_root']);
+
+      // 不寫進書籤檔
+      await api.store.flush();
+      const raw = await readStoreFile();
+      assert.ok(raw && !raw.includes('byTitle') && !raw.includes('bookmarkFileSort'), '排序狀態不應寫進書籤檔');
+
+      // 再點一次切回依行號
+      await vscode.commands.executeCommand('functionBookmarks.sortFileBookmarksByLine', gAAfter);
+      assert.strictEqual(api.provider.getTreeItem(await fileGroup(relA)).contextValue, 'fbBmFile');
+      assert.strictEqual(api.provider.getTreeItem(await fileGroup(relA)).description, 'app');
+      assert.deepStrictEqual(await childLabels(relA), ['① zeta', 'item10', 'BetaFn', '② item2', 'dup', 'dup']);
+    });
+
+    it('重新建立 provider（模擬重開）後保留排序設定，且兩個檔案各自獨立互不影響', async () => {
+      await setupFiles();
+      const gA = await fileGroup(relA);
+      await vscode.commands.executeCommand('functionBookmarks.sortFileBookmarksByTitle', gA);
+      // 檔案 B 仍為依行號
+      assert.strictEqual(api.provider.getTreeItem(await fileGroup(relB)).contextValue, 'fbBmFile');
+      assert.deepStrictEqual(await childLabels(relB), ['z_line', 'a_line']);
+
+      // 用同一個 workspaceState 重新建立 provider 模擬重開編輯器
+      const reopened = api.recreateProvider();
+      try {
+        assert.strictEqual(reopened.fileSortOf(fileA()), 'title');
+        assert.strictEqual(reopened.fileSortOf(fileB()), 'line');
+        assert.strictEqual(reopened.getTreeItem(await fileGroup(relA, reopened)).contextValue, 'fbBmFile:byTitle');
+        assert.strictEqual(reopened.getTreeItem(await fileGroup(relB, reopened)).contextValue, 'fbBmFile');
+        assert.deepStrictEqual(await childLabels(relA, reopened), ['BetaFn', 'dup', 'dup', '② item2', 'item10', '① zeta']);
+        assert.deepStrictEqual(await childLabels(relB, reopened), ['z_line', 'a_line']);
+      } finally {
+        reopened.dispose();
+      }
+    });
+
+    it('切換排序時保留樹的展開／收合狀態，不會整個收合', async () => {
+      await setupFiles();
+      const gA = await fileGroup(relA);
+      const gB = await fileGroup(relB);
+      api.provider.setExpanded(gA, true);
+      api.provider.setExpanded(gB, false);
+      try {
+        await vscode.commands.executeCommand('functionBookmarks.sortFileBookmarksByTitle', gA);
+        assert.strictEqual(api.provider.getTreeItem(await fileGroup(relA)).collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
+        assert.strictEqual(api.provider.getTreeItem(await fileGroup(relB)).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
+      } finally {
+        api.provider.setExpanded(gB, true);
+      }
+    });
+
+    it('搜尋列篩選時保留該檔案的排序方式，且 firstMatch 一致；搜尋中也能切換排序', async () => {
+      await setupFiles();
+      await vscode.commands.executeCommand('functionBookmarks.sortFileBookmarksByTitle', await fileGroup(relA));
+      api.searchBox.setQuery('item');
+      assert.deepStrictEqual(await childLabels(relA), ['② item2', 'item10'], '搜尋時保留自然標題排序');
+      assert.strictEqual(labelOf(api.provider.getTreeItem(api.provider.firstMatch()!)), '② item2');
+      // 搜尋中切回依行號，清除搜尋後仍維持依行號
+      await vscode.commands.executeCommand('functionBookmarks.sortFileBookmarksByLine', await fileGroup(relA));
+      assert.deepStrictEqual(await childLabels(relA), ['item10', '② item2']);
+      api.searchBox.setQuery('');
+      assert.strictEqual(api.provider.fileSortOf(fileA()), 'line');
+    });
+
+    it('依標籤、依來源、目前檔案、上下跳轉、依編號導覽、快速搜尋、匯出順序都不受影響', async () => {
+      await setupFiles();
+      await vscode.commands.executeCommand('functionBookmarks.sortFileBookmarksByTitle', await fileGroup(relA));
+
+      // 1. 目前檔案的函式列表照舊依行號（zeta → alpha → mid）
+      await open(fileA(), api);
+      assert.deepStrictEqual(names(api.provider.currentSymbolNodes), ['zeta', 'alpha', 'mid']);
+
+      // 2. 依標籤分組照舊依行號
+      await vscode.commands.executeCommand('functionBookmarks.groupBookmarksByTag');
+      const noTag = (await groupsOf()).find((g) => g.key === '')!;
+      const inAUnderTag = (await api.provider.getChildren(noTag))
+        .filter((n) => (n.type === 'bookmark' ? n.entry.bookmark.file : n.type === 'favorite' ? n.fav.mark.file : '') === relA)
+        .map((n) => labelOf(api.provider.getTreeItem(n)));
+      assert.deepStrictEqual(inAUnderTag, ['① zeta', 'item10', 'BetaFn', '② item2', 'dup', 'dup']);
+      await vscode.commands.executeCommand('functionBookmarks.groupBookmarksByFile');
+
+      // 3. 上一個／下一個書籤跳轉維持行號順序（第 0 行 → 第 1 行 → 第 4 行 → 第 5 行）
+      const editor = await open(fileA(), api);
+      editor.selection = new vscode.Selection(0, 0, 0, 0);
+      const n1 = await vscode.commands.executeCommand<{ uri: vscode.Uri; line: number }>('functionBookmarks.nextBookmark');
+      assert.strictEqual(n1?.line, 1);
+      const n2 = await vscode.commands.executeCommand<{ uri: vscode.Uri; line: number }>('functionBookmarks.nextBookmark');
+      assert.strictEqual(n2?.line, 4);
+      const n3 = await vscode.commands.executeCommand<{ uri: vscode.Uri; line: number }>('functionBookmarks.nextBookmark');
+      assert.strictEqual(n3?.line, 5);
+
+      // 4. 依編號導覽維持 1 → 2 順序
+      const t1 = await vscode.commands.executeCommand<{ number: number }>('functionBookmarks.tourNext');
+      const t2 = await vscode.commands.executeCommand<{ number: number }>('functionBookmarks.tourNext');
+      assert.deepStrictEqual([t1?.number, t2?.number], [1, 2]);
+
+      // 5. 快速搜尋維持行號順序
+      const quick = buildSearchMarkItems(api.store, api.favorites, { hideNotOnBranch: false })
+        .filter((i) => i.detail?.includes(relA))
+        .map((i) => i.label);
+      assert.ok(quick[0].includes('zeta') && quick[1].includes('item10') && quick[2].includes('BetaFn'), `快速搜尋應維持行號順序：${quick.join(', ')}`);
+
+      // 6. 匯出維持行號順序
+      const outUri = workspaceFile('.tmp-sort-export.json');
+      try {
+        const exp = await vscode.commands.executeCommand<{ text: string }>('functionBookmarks.exportBookmarks', {
+          folder: folder(),
+          scope: { kind: 'path', rel: relA },
+          format: 'json',
+          includeCode: false,
+          target: outUri,
+        });
+        const parsed = JSON.parse(exp!.text) as { bookmarks: { line: number }[] };
+        assert.deepStrictEqual(
+          parsed.bookmarks.map((b) => b.line),
+          [0, 1, 4, 5, 9, 10],
+          '匯出順序應維持行號順序',
+        );
+      } finally {
+        await vscode.workspace.fs.delete(outUri).then(undefined, () => undefined);
+      }
+    });
+  });
+
 });
 
 export type { TreeNode };

@@ -221,4 +221,51 @@ describe('多資料夾工作區（整合測試）', () => {
     assert.strictEqual(s3?.number, 1);
     assert.strictEqual(s3?.uri.toString(), views().toString());
   });
+
+  it('個別檔案排序在多資料夾工作區各自獨立，且不寫進任何資料夾的書籤檔', async () => {
+    const labelOf = (item: vscode.TreeItem) => (typeof item.label === 'string' ? item.label : (item.label?.label ?? ''));
+    const childrenOf = async (uri: vscode.Uri) => {
+      const groups = (await api.provider.getChildren(api.provider.sections.bookmarks)) as BmGroupNode[];
+      const g = groups.find((x) => x.uri?.toString() === uri.toString())!;
+      assert.ok(g);
+      return { g, labels: (await api.provider.getChildren(g)).map((n) => labelOf(api.provider.getTreeItem(n))) };
+    };
+    try {
+      await at(views(), 1);
+      await api.bookmarks.addLabeled('zeta_v');
+      await at(views(), 5);
+      await api.bookmarks.addLabeled('alpha_v');
+      await at(util(), 1);
+      await api.bookmarks.addLabeled('zeta_u');
+      await at(util(), 4);
+      await api.bookmarks.addLabeled('alpha_u');
+
+      const vBefore = await childrenOf(views());
+      const uBefore = await childrenOf(util());
+      assert.deepStrictEqual(vBefore.labels, ['zeta_v', 'alpha_v']);
+      assert.deepStrictEqual(uBefore.labels, ['zeta_u', 'alpha_u']);
+
+      // 只切換第一個資料夾的檔案為依標題排序；第二個資料夾不受影響
+      await vscode.commands.executeCommand('functionBookmarks.sortFileBookmarksByTitle', vBefore.g);
+      assert.deepStrictEqual((await childrenOf(views())).labels, ['alpha_v', 'zeta_v']);
+      assert.deepStrictEqual((await childrenOf(util())).labels, ['zeta_u', 'alpha_u']);
+
+      // 重建 provider 後兩邊各自保留
+      const reopened = api.recreateProvider();
+      try {
+        assert.strictEqual(reopened.fileSortOf(views()), 'title');
+        assert.strictEqual(reopened.fileSortOf(util()), 'line');
+      } finally {
+        reopened.dispose();
+      }
+
+      // 不寫進任何資料夾的書籤檔
+      await api.store.flush();
+      assert.ok(!JSON.stringify(await readJson(f1())).includes('bookmarkFileSort'));
+      assert.ok(!JSON.stringify(await readJson(f2())).includes('bookmarkFileSort'));
+    } finally {
+      await api.provider.setFileSort(views(), 'line');
+      await api.provider.setFileSort(util(), 'line');
+    }
+  });
 });

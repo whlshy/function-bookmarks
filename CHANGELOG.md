@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.3 (2026-11-25) — sort a file's bookmarks by title
+
+- **Sort by title, per file**: when bookmarks are grouped by file, each file row has a sort button (also in its context menu). Click it to list that file's bookmarks by title — natural order, so `item2` comes before `item10`, ignoring case — and click again to go back to line order. Each file remembers its choice after a restart, and a file sorted by title shows *by title* next to its name. Next / Previous Bookmark, tours, search and export keep line order
+
 ## 0.8.2 (2026-11-24) — faster startup, guided tours and smaller fixes
 
 - **Faster startup**: the side bar lists your bookmarks almost immediately after the window opens. Projects with a bookmark file start the extension right away instead of waiting for every other extension, and checking function bookmarks, the current file and changes made while the editor was closed now run in the background — startup no longer waits for language servers (TypeScript, Pylance…). Startup timings are written to the *Function Bookmarks* output channel

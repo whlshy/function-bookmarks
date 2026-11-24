@@ -27,8 +27,8 @@ import { FavoriteGutter } from './views/gutter';
 import { FileEvents } from './util/fileEvents';
 import { NoteEditor, PREVIEW_NOTE_COMMAND } from './views/noteEditor';
 import { collectProjectSymbols, searchFunctions, searchMarks } from './views/search';
-import { BookmarkGrouping, BookmarkNode, COMMANDS, FilterMode, FunctionTreeProvider, SymbolNode, TreeNode } from './views/tree';
-import { sameUri } from './util/uris';
+import { BmGroupNode, BookmarkGrouping, BookmarkNode, COMMANDS, FilterMode, FunctionTreeProvider, SymbolNode, TreeNode } from './views/tree';
+import { sameUri, uriKey } from './util/uris';
 import { BookmarkSearchBox } from './views/searchBox';
 import { StartupLog, StartupTiming } from './util/startupLog';
 
@@ -74,6 +74,8 @@ export interface ExtensionApi {
   extendMarkdownIt(md: unknown): unknown;
   /** 啟動各階段計時紀錄（毫秒）。 */
   startupTimings: StartupTiming[];
+  /** 用同一個 workspaceState 重新建立樹狀檢視提供者（給整合測試模擬重開用，呼叫端負責 dispose）。 */
+  recreateProvider(): FunctionTreeProvider;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<ExtensionApi> {
@@ -196,6 +198,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
   const entryArg = (node?: TreeNode) => bookmarks.entryOf(isBookmarkNode(node) ? node : undefined);
   const sourceArg = (arg?: unknown) =>
     typeof arg === 'string' ? arg : (arg as { type?: string; by?: string; key?: string } | undefined)?.by === 'source' ? (arg as { key: string }).key : undefined;
+  /** 依檔案分組的檔案列參數（BmGroupNode、Uri 或 uriKey 字串），回傳檔案的 uriKey。 */
+  const fileGroupKey = (arg?: unknown): string | undefined => {
+    if (typeof arg === 'string') {
+      return arg;
+    }
+    if (arg instanceof vscode.Uri) {
+      return uriKey(arg);
+    }
+    const g = arg as Partial<BmGroupNode> | undefined;
+    if (g?.type === 'bmGroup' && g.by === 'file') {
+      return g.uri ? uriKey(g.uri) : g.key;
+    }
+    return undefined;
+  };
 
   const setHideAway = async (hide: boolean) => {
     provider.hideNotOnBranch = hide;
@@ -501,6 +517,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     reg('functionBookmarks.showBookmarksOnly', () => applyViewState('bookmarks')),
     reg('functionBookmarks.groupBookmarksByTag', () => applyViewState(provider.filterMode, 'tag')),
     reg('functionBookmarks.groupBookmarksByFile', () => applyViewState(provider.filterMode, 'file')),
+    reg('functionBookmarks.sortFileBookmarksByTitle', (arg?: unknown) => {
+      const key = fileGroupKey(arg);
+      return key ? provider.setFileSort(key, 'title') : undefined;
+    }),
+    reg('functionBookmarks.sortFileBookmarksByLine', (arg?: unknown) => {
+      const key = fileGroupKey(arg);
+      return key ? provider.setFileSort(key, 'line') : undefined;
+    }),
     reg('functionBookmarks.goToReferenceLine', (node?: TreeNode) => commands.goToReferenceLine(node)),
     reg('functionBookmarks.goToParentBlock', (node?: TreeNode) => commands.goToParentBlock(node)),
     reg('functionBookmarks.showAll', () => applyViewState('all')),
@@ -587,6 +611,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
       // 已經裝了 Markdown Preview Mermaid Support 就交給它，避免重複繪圖
       vscode.extensions.getExtension('bierner.markdown-mermaid') ? md : mermaidPlugin(md),
     startupTimings: startup.timings,
+    recreateProvider: () => new FunctionTreeProvider(service, store, favorites, project, resolver, context.workspaceState),
   };
 }
 

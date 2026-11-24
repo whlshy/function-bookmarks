@@ -2,7 +2,7 @@
   "name": "function-bookmarks",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "publisher": "whlshy",
   "icon": "media/icon.png",
   "galleryBanner": {
@@ -318,6 +318,18 @@
         "category": "%command.category%"
       },
       {
+        "command": "functionBookmarks.sortFileBookmarksByTitle",
+        "title": "%command.sortFileBookmarksByTitle%",
+        "category": "%command.category%",
+        "icon": "$(sort-precedence)"
+      },
+      {
+        "command": "functionBookmarks.sortFileBookmarksByLine",
+        "title": "%command.sortFileBookmarksByLine%",
+        "category": "%command.category%",
+        "icon": "$(list-ordered)"
+      },
+      {
         "command": "functionBookmarks.hoverAction",
         "title": "%command.addFavorite%",
         "category": "%command.category%"
@@ -610,8 +622,28 @@
           "group": "2_remove@1"
         },
         {
-          "command": "functionBookmarks.exportBookmarks",
+          "command": "functionBookmarks.sortFileBookmarksByTitle",
           "when": "view == functionBookmarks.tree && viewItem == fbBmFile",
+          "group": "inline@1"
+        },
+        {
+          "command": "functionBookmarks.sortFileBookmarksByLine",
+          "when": "view == functionBookmarks.tree && viewItem == fbBmFile:byTitle",
+          "group": "inline@1"
+        },
+        {
+          "command": "functionBookmarks.sortFileBookmarksByTitle",
+          "when": "view == functionBookmarks.tree && viewItem == fbBmFile",
+          "group": "1_sort@1"
+        },
+        {
+          "command": "functionBookmarks.sortFileBookmarksByLine",
+          "when": "view == functionBookmarks.tree && viewItem == fbBmFile:byTitle",
+          "group": "1_sort@1"
+        },
+        {
+          "command": "functionBookmarks.exportBookmarks",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBmFile/",
           "group": "3_share@1"
         },
         {
@@ -651,7 +683,7 @@
         },
         {
           "command": "functionBookmarks.clearBookmarksInFile",
-          "when": "view == functionBookmarks.tree && viewItem == fbBmFile",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBmFile/",
           "group": "2_remove@1"
         },
         {
@@ -772,6 +804,14 @@
         },
         {
           "command": "functionBookmarks.hoverAction",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.sortFileBookmarksByTitle",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.sortFileBookmarksByLine",
           "when": "false"
         },
         {

@@ -61,6 +61,8 @@
   "command.showBookmarksOnly": "Show Bookmarks Only",
   "command.groupBookmarksByTag": "Group Bookmarks by Tag",
   "command.groupBookmarksByFile": "Group Bookmarks by File",
+  "command.sortFileBookmarksByTitle": "Sort by Title",
+  "command.sortFileBookmarksByLine": "Sort by Line Number",
   "config.onLineDelete": "What happens to a bookmark when its line is deleted in the editor.",
   "config.onLineDelete.moveToNext": "Move it to the next line.",
   "config.onLineDelete.markLost": "Move it to the next line and mark it as \"needs checking\".",

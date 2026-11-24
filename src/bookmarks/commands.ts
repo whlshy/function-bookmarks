@@ -20,6 +20,7 @@ import { SymbolService } from '../symbols/symbolService';
 import { shownBookmarkItems } from './unified';
 import { NoteEditor } from '../views/noteEditor';
 import { LineBookmark, makeAnchor, neighbor, newBookmarkId, parseTags, suggestName } from './model';
+import { lineBookmarkTitle } from './sort';
 
 /** 樹狀檢視的書籤節點（避免與 views/tree 互相引用，只描述需要的欄位）。 */
 export interface BookmarkNodeLike {
@@ -39,7 +40,7 @@ export function isBookmarkLinkArg(arg: unknown): arg is BookmarkLinkArg {
 }
 
 export function bookmarkTitle(b: LineBookmark): string {
-  return b.label ?? (b.symbol ? (b.symbol.path.split('.').pop() ?? b.symbol.path) : undefined) ?? (b.anchor?.text || `#${b.line + 1}`);
+  return lineBookmarkTitle(b);
 }
 
 export async function revealLine(uri: vscode.Uri, line: number): Promise<vscode.TextEditor> {

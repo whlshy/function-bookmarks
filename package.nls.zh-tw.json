@@ -61,6 +61,8 @@
   "command.showBookmarksOnly": "只顯示書籤",
   "command.groupBookmarksByTag": "書籤依標籤分組",
   "command.groupBookmarksByFile": "書籤依檔案分組",
+  "command.sortFileBookmarksByTitle": "依標題排序",
+  "command.sortFileBookmarksByLine": "依行號排序",
   "config.onLineDelete": "在編輯器中刪除書籤所在的行時，書籤要怎麼處理。",
   "config.onLineDelete.moveToNext": "移到下一行。",
   "config.onLineDelete.markLost": "移到下一行，並標記為需確認。",

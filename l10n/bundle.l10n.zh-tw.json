@@ -208,5 +208,6 @@
   "Walkthrough document (Markdown)": "導讀文件（Markdown）",
   "Ordered by number with code snippets and notes, saved as a Markdown file": "依編號排列，附程式碼片段與備註原文，存成 Markdown 檔",
   "{0} — Walkthrough": "{0} — 導讀文件",
-  "… ({0} more line(s) omitted)": "…（以下省略 {0} 行）"
+  "… ({0} more line(s) omitted)": "…（以下省略 {0} 行）",
+  "by title": "依標題"
 }
