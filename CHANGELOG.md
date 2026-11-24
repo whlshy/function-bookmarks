@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.2 (2026-11-24) — faster startup, guided tours and smaller fixes
+
+- **Faster startup**: the side bar lists your bookmarks almost immediately after the window opens. Projects with a bookmark file start the extension right away instead of waiting for every other extension, and checking function bookmarks, the current file and changes made while the editor was closed now run in the background — startup no longer waits for language servers (TypeScript, Pylance…). Startup timings are written to the *Function Bookmarks* output channel
+- **Tour: Next / Previous Numbered Bookmark**: step through bookmarks 1–9 in order, across files and folders. The status bar shows *Tour 2/5: name*, and the hover with the note opens by itself. In the Command Palette and the bookmarks view's `…` menu (no default shortcut)
+- **Export → Walkthrough document (Markdown)**: numbered bookmarks first, then the rest by file and line; each with its location, a code snippet (the function body up to 30 lines, or 3 lines around a line bookmark) and its note. *Without code* leaves the snippets out
+- *Search Bookmarks* (`Ctrl+Alt+/`) shows the first line of the note and searches the whole note, `#tag` and `@source` work there too, bookmarks that *need checking* or are *not on this branch* are marked (and hidden when *Hide Bookmarks Not on This Branch* is on), and in a multi-root workspace the folder name is shown
+- Editing tags suggests the tags used by all bookmarks, function bookmarks included; adding a function bookmark by giving it a tag follows `bookmarks.autoNumber`
+- New setting `notes.closeOnSave` (default `true`): set it to `false` to keep the note tab open after saving
+- Changing `functionBookmarks.storage` asks whether to copy your bookmarks to the new place (or merge / replace when it already has some), so they do not seem to disappear
+- macOS shortcuts for numbered bookmarks: `Cmd+Alt+1`–`9` jumps, `Cmd+Alt+Shift+1`–`9` sets a number; the note editor's status bar message shows `Cmd+S` on macOS
+- The language server fallback also lists interfaces, structs, enums, modules and namespaces
+- Leftover note editor files from a crash are cleaned up at startup
+- **Edit Note** in the line number context menu: right-click a line number to edit the note of the bookmark on that line; a line without a bookmark gets one first (a function bookmark on a function's name line, otherwise a line bookmark)
+- Fix: *Edit Note* from the Command Palette edits the note of the line bookmark under the cursor instead of looking for a function
+- Fix: *Preview Note* appeared twice in the side bar context menu of a bookmark with a note
+
 ## 0.8.1 (2026-11-24) — bookmark fixes and demo GIFs
 
 - Fix: after typing above a bookmark in a file that had just been opened or saved, saving right away (within about 0.3 s) could leave the bookmark on its old line number for good. The first edit of a clean file was mistaken for a reload from disk; it is now handled like any other edit

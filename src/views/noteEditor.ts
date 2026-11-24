@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { SECTION } from '../config';
 import { MarkKey } from '../storage/marks';
 import { uriKey } from '../util/uris';
 
@@ -67,6 +68,11 @@ export function isMarkdownPreviewTab(tab: vscode.Tab, uri: vscode.Uri): boolean 
   );
 }
 
+/** 依作業系統回傳存檔快捷鍵文字，用於備註編輯的狀態列提示。 */
+export function saveShortcut(platform: NodeJS.Platform = process.platform): string {
+  return platform === 'darwin' ? 'Cmd+S' : 'Ctrl+S';
+}
+
 /**
  * 備註編輯分頁：把備註寫進暫存的 Markdown 檔開啟，右側並排內建的 Markdown 預覽；
  * 存檔時寫回書籤資料並關閉編輯與預覽分頁。清空後存檔即刪除備註；不存檔直接關閉則不變更。
@@ -74,14 +80,20 @@ export function isMarkdownPreviewTab(tab: vscode.Tab, uri: vscode.Uri): boolean 
 export class NoteEditor implements vscode.Disposable {
   private sessions = new Map<string, Session>();
   private disposables: vscode.Disposable[] = [];
+  /** 啟動時背景清理殘留暫存檔；建立新暫存檔前先等清理完成，避免刪到剛建的檔。 */
+  readonly cleanup: Promise<void>;
 
   constructor(private readonly storageUri: vscode.Uri) {
     this.disposables.push(
       vscode.workspace.onDidSaveTextDocument((doc) => void this.onSave(doc)),
       vscode.workspace.onDidCloseTextDocument((doc) => void this.onClose(doc)),
+      vscode.window.tabGroups.onDidChangeTabs((e) => this.onTabsChanged(e)),
     );
-    // 上次留下的預覽暫存檔
-    void vscode.workspace.fs.delete(vscode.Uri.joinPath(storageUri, 'previews'), { recursive: true }).then(undefined, () => undefined);
+    // 清理上次異常關閉留下的預覽與編輯暫存檔
+    this.cleanup = Promise.all([
+      vscode.workspace.fs.delete(vscode.Uri.joinPath(storageUri, 'previews'), { recursive: true }).then(undefined, () => undefined),
+      vscode.workspace.fs.delete(vscode.Uri.joinPath(storageUri, 'notes'), { recursive: true }).then(undefined, () => undefined),
+    ]).then(() => undefined);
   }
 
   dispose(): void {
@@ -94,6 +106,7 @@ export class NoteEditor implements vscode.Disposable {
   }
 
   async open(target: NoteTarget): Promise<vscode.TextEditor> {
+    await this.cleanup;
     const dir = vscode.Uri.joinPath(this.storageUri, 'notes');
     await vscode.workspace.fs.createDirectory(dir);
     const id = hash(target.id);
@@ -111,15 +124,23 @@ export class NoteEditor implements vscode.Disposable {
       await vscode.commands.executeCommand('markdown.showPreviewToSide', uri).then(undefined, () => undefined);
       editor = await vscode.window.showTextDocument(editor.document, { viewColumn: editor.viewColumn, preview: false });
     }
+    const closeOnSave = this.closeOnSave();
     vscode.window.setStatusBarMessage(
-      vscode.l10n.t('Editing note for {0} — save (Ctrl+S) to apply and close; save empty to delete', target.subject),
+      closeOnSave
+        ? vscode.l10n.t('Editing note for {0} — save ({1}) to apply and close; save empty to delete', target.subject, saveShortcut())
+        : vscode.l10n.t('Editing note for {0} — save ({1}) to apply; save empty to delete', target.subject, saveShortcut()),
       8000,
     );
     return editor;
   }
 
+  private closeOnSave(): boolean {
+    return vscode.workspace.getConfiguration(SECTION).get<boolean>('notes.closeOnSave', true);
+  }
+
   /** 用內建的 Markdown 預覽分頁查看備註（圖片、表格、程式碼高亮都能完整顯示）。 */
   async preview(title: string, subtitle: string, note: string): Promise<vscode.Uri> {
+    await this.cleanup;
     const dir = vscode.Uri.joinPath(this.storageUri, 'previews');
     await vscode.workspace.fs.createDirectory(dir);
     const uri = vscode.Uri.joinPath(dir, `${vscode.l10n.t('Note')} - ${safeName(title)} (${hash(subtitle)}).md`);
@@ -135,8 +156,12 @@ export class NoteEditor implements vscode.Disposable {
       return;
     }
     await session.apply(doc.getText());
-    this.sessions.delete(uriKey(doc.uri));
-    await this.finish(doc.uri);
+    if (this.closeOnSave()) {
+      this.sessions.delete(uriKey(doc.uri));
+      await this.finish(doc.uri);
+    } else {
+      vscode.window.setStatusBarMessage(vscode.l10n.t('Note saved.'), 2000);
+    }
   }
 
   private async onClose(doc: vscode.TextDocument): Promise<void> {
@@ -144,6 +169,27 @@ export class NoteEditor implements vscode.Disposable {
     if (session) {
       this.sessions.delete(uriKey(doc.uri));
       await this.finish(doc.uri);
+    }
+  }
+
+  /** 使用者手動關閉備註編輯分頁時，立刻收掉 session、並排預覽與暫存檔（不必等 VS Code 延遲釋放 TextDocument）。 */
+  private onTabsChanged(e: vscode.TabChangeEvent): void {
+    for (const tab of e.closed) {
+      if (!(tab.input instanceof vscode.TabInputText)) {
+        continue;
+      }
+      const uri = tab.input.uri;
+      const key = uriKey(uri);
+      if (!this.sessions.has(key)) {
+        continue;
+      }
+      const stillOpen = vscode.window.tabGroups.all
+        .flatMap((g) => g.tabs)
+        .some((t) => t.input instanceof vscode.TabInputText && uriKey(t.input.uri) === key);
+      if (!stillOpen) {
+        this.sessions.delete(key);
+        void this.finish(uri);
+      }
     }
   }
 

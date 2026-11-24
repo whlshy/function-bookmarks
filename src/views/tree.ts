@@ -839,7 +839,11 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
       parts.push('✎');
     }
     if (fav.status === 'ok') {
-      parts.push(notByFile(element) ? `${basenamePosix(fav.mark.file)}:${line! + 1}` : String(line! + 1));
+      if (line !== undefined) {
+        parts.push(notByFile(element) ? `${basenamePosix(fav.mark.file)}:${line + 1}` : String(line + 1));
+      } else if (notByFile(element)) {
+        parts.push(basenamePosix(fav.mark.file));
+      }
       item.iconPath = new vscode.ThemeIcon(
         ICONS[fav.mark.kind] ?? 'symbol-misc',
         color ? new vscode.ThemeColor(color.theme) : fav.mark.note ? new vscode.ThemeColor(NOTE_COLOR) : undefined,

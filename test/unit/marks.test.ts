@@ -1,15 +1,20 @@
 import * as assert from 'assert';
 import {
+  addBookmark,
   emptyStore,
   favorites,
   findMark,
+  hasStoreData,
   MarkKey,
+  mergeStoreData,
   parseStore,
   renamePath,
   serializeStore,
   setAlias,
   setFavorite,
   setNote,
+  setSymbolExtras,
+  setTagColor,
   updateLine,
 } from '../../src/storage/marks';
 
@@ -95,5 +100,31 @@ describe('收藏與自訂名稱資料', () => {
     assert.strictEqual(d?.symbols.length, 1);
     assert.strictEqual(parseStore('{oops'), undefined);
     assert.deepStrictEqual(parseStore('{}'), emptyStore());
+  });
+
+  it('mergeStoreData：合併書籤並以 target 為主，衝突號碼清掉來源端', () => {
+    assert.strictEqual(hasStoreData(emptyStore()), false);
+    let target = setFavorite(emptyStore(), key, true, 1, now);
+    target = setSymbolExtras(target, key, { number: 1 });
+    target = addBookmark(target, { id: 'b1', file: 'app/views.py', line: 5, label: 'target行', number: 2 });
+    target = setTagColor(target, 'todo', 'blue');
+
+    let source = setFavorite(emptyStore(), key, true, 9, now);
+    source = setAlias(source, key, 'source別名', 'get');
+    const key2: MarkKey = { file: 'app/views.py', path: 'index', kind: 'function' };
+    source = setSymbolExtras(setFavorite(source, key2, true, 0, now), key2, { number: 1 }); // 與 target 1 號衝突
+    source = addBookmark(source, { id: 'b2', file: 'app/views.py', line: 5, label: '同位置不重複' });
+    source = addBookmark(source, { id: 'b3', file: 'app/views.py', line: 10, label: 'source行', number: 3 });
+    source = setTagColor(setTagColor(source, 'todo', 'red'), 'auth', 'green');
+
+    const merged = mergeStoreData(target, source);
+    assert.strictEqual(hasStoreData(merged), true);
+    assert.strictEqual(findMark(merged, key)?.alias, undefined, '已存在的函式標記以 target 為主');
+    assert.strictEqual(findMark(merged, key)?.number, 1);
+    assert.strictEqual(findMark(merged, key2)?.favorite, true, '補進 target 沒有的函式書籤');
+    assert.strictEqual(findMark(merged, key2)?.number, undefined, '衝突號碼清掉來源端');
+    assert.deepStrictEqual(merged.bookmarks.map((b) => b.id), ['b1', 'b3'], '同檔同行不重複、不同行補進');
+    assert.strictEqual(merged.bookmarks.find((b) => b.id === 'b3')?.number, 3, '不衝突的號碼保留');
+    assert.deepStrictEqual(merged.tagColors, { todo: 'blue', auth: 'green' });
   });
 });

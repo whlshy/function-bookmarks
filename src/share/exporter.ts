@@ -4,17 +4,34 @@ import { bookmarkTitle } from '../bookmarks/commands';
 import { LineBookmark, makeAnchor } from '../bookmarks/model';
 import { hashLine, splitLines } from '../bookmarks/relocate';
 import { SECTION } from '../config';
+import { findByPath } from '../detection/engine';
 import { readHeadCommit, readRemoteUrl, readUserName } from '../git/branch';
 import { BranchService } from '../git/branchService';
 import { MarkStore } from '../storage/store';
 import { loadSource } from '../symbols/documentSource';
 import { FavoritesModel } from '../symbols/favorites';
-import { encodeHashes, EXPORT_FORMAT, ExportedBookmark, ExportFile, ExportRow, toCsv, toMarkdown } from './format';
+import { SymbolService } from '../symbols/symbolService';
+import { languageForPath } from '../util/paths';
+import {
+  encodeHashes,
+  EXPORT_FORMAT,
+  ExportedBookmark,
+  ExportFile,
+  ExportRow,
+  extractFunctionSnippet,
+  extractLineSnippet,
+  GuideEntry,
+  GuideSnippet,
+  toCsv,
+  toGuideMarkdown,
+  toMarkdown,
+} from './format';
 
 export interface ShareDeps {
   store: MarkStore;
   favorites: FavoritesModel;
   branches: BranchService;
+  service?: SymbolService;
 }
 
 export type ExportScope =
@@ -23,7 +40,7 @@ export type ExportScope =
   | { kind: 'path'; rel: string }
   | { kind: 'pick'; ids: string[] };
 
-export type ExportFormat = 'json' | 'markdown' | 'csv';
+export type ExportFormat = 'json' | 'markdown' | 'guide' | 'csv';
 
 export interface ExportOptions {
   folder?: vscode.WorkspaceFolder;
@@ -43,8 +60,9 @@ interface Candidate {
   title: string;
   tags: string[];
   imported: boolean;
+  number?: number;
   line_?: LineBookmark;
-  symbol?: { path: string; kind: string; alias?: string; note?: string };
+  symbol?: { path: string; kind: string; alias?: string; note?: string; startLine?: number; endLine?: number };
 }
 
 /** 匯出者名稱：設定 → git user.name → 系統使用者名稱。 */
@@ -71,7 +89,7 @@ function candidates(deps: ShareDeps, folder: vscode.WorkspaceFolder): Candidate[
       continue;
     }
     const b = e.bookmark;
-    out.push({ id: b.id, file: b.file, line: b.line, title: bookmarkTitle(b), tags: b.tags ?? [], imported: !!b.source, line_: b });
+    out.push({ id: b.id, file: b.file, line: b.line, title: bookmarkTitle(b), tags: b.tags ?? [], imported: !!b.source, number: b.number, line_: b });
   }
   for (const f of deps.favorites.all) {
     if (f.folder.uri.toString() !== folder.uri.toString()) {
@@ -85,7 +103,15 @@ function candidates(deps: ShareDeps, folder: vscode.WorkspaceFolder): Candidate[
       title: m.alias ?? m.path.split('.').pop() ?? m.path,
       tags: m.tags ?? [],
       imported: false,
-      symbol: { path: m.path, kind: m.kind, alias: m.alias, note: m.note },
+      number: m.number,
+      symbol: {
+        path: m.path,
+        kind: m.kind,
+        alias: m.alias,
+        note: m.note,
+        startLine: f.symbol?.startLine,
+        endLine: f.symbol?.endLine,
+      },
     });
   }
   return out.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
@@ -193,6 +219,7 @@ export async function exportBookmarks(
     const picks: F[] = [
       { label: `$(save) ${vscode.l10n.t('Save to file')}`, description: '*.fbookmarks.json', detail: vscode.l10n.t('Can be imported by others'), format: 'json' },
       { label: `$(clippy) ${vscode.l10n.t('Copy to clipboard')}`, detail: vscode.l10n.t('Can be imported by others; paste it into a chat'), format: 'json', target: 'clipboard' },
+      { label: `$(book) ${vscode.l10n.t('Walkthrough document (Markdown)')}`, detail: vscode.l10n.t('Ordered by number with code snippets and notes, saved as a Markdown file'), format: 'guide' },
       { label: `$(markdown) ${vscode.l10n.t('Markdown table')}`, detail: vscode.l10n.t('Copied to the clipboard, e.g. for a pull request description'), format: 'markdown', target: 'clipboard' },
       { label: `$(table) ${vscode.l10n.t('CSV file')}`, detail: vscode.l10n.t('Opens in Excel'), format: 'csv' },
     ];
@@ -235,14 +262,16 @@ export async function exportBookmarks(
   const text =
     format === 'json'
       ? JSON.stringify(await buildJson(deps, folder, list, contents, includeCode, lineOk), null, 2) + '\n'
-      : buildTable(list, contents, includeCode, format);
+      : format === 'guide'
+        ? await buildGuide(deps, folder, list, contents, includeCode)
+        : buildTable(list, contents, includeCode, format);
 
   if (!target) {
-    const ext = format === 'json' ? 'fbookmarks.json' : format === 'markdown' ? 'md' : 'csv';
-    const name = `${folder.name}-bookmarks.${ext}`;
+    const ext = format === 'json' ? 'fbookmarks.json' : format === 'markdown' || format === 'guide' ? 'md' : 'csv';
+    const name = format === 'guide' ? `${folder.name}-guide.${ext}` : `${folder.name}-bookmarks.${ext}`;
     target = await vscode.window.showSaveDialog({
       defaultUri: vscode.Uri.joinPath(folder.uri, name),
-      filters: format === 'json' ? { 'Function Bookmarks': ['json'] } : format === 'markdown' ? { Markdown: ['md'] } : { CSV: ['csv'] },
+      filters: format === 'json' ? { 'Function Bookmarks': ['json'] } : format === 'markdown' || format === 'guide' ? { Markdown: ['md'] } : { CSV: ['csv'] },
     });
     if (!target) {
       return undefined;
@@ -358,4 +387,55 @@ function buildTable(list: Candidate[], contents: Map<string, string[] | undefine
     lineKind: vscode.l10n.t('line'),
   };
   return format === 'markdown' ? toMarkdown(rows, labels) : toCsv(rows, labels);
+}
+
+/** 產出「導讀文件（Markdown）」：函式書籤取函式本體（最多 30 行），行號書籤取前後各 3 行。 */
+async function buildGuide(
+  deps: ShareDeps,
+  folder: vscode.WorkspaceFolder,
+  list: Candidate[],
+  contents: Map<string, string[] | undefined>,
+  includeCode: boolean,
+): Promise<string> {
+  const entries: GuideEntry[] = [];
+  for (const c of list) {
+    const lines = contents.get(c.file);
+    let snippet: GuideSnippet | undefined;
+    if (includeCode && lines) {
+      const symTarget = c.symbol ?? c.line_?.symbol;
+      if (symTarget) {
+        let startLine = c.symbol?.startLine;
+        let endLine = c.symbol?.endLine;
+        if ((startLine === undefined || endLine === undefined) && deps.service) {
+          const parsed = await deps.service.getForUri(deps.store.uriOf(folder, c.file)).catch(() => undefined);
+          const found = parsed && findByPath(parsed.symbols, symTarget.path, symTarget.kind);
+          if (found) {
+            startLine = found.startLine;
+            endLine = found.endLine;
+          }
+        }
+        snippet =
+          startLine !== undefined && endLine !== undefined
+            ? extractFunctionSnippet(lines, startLine, endLine)
+            : extractLineSnippet(lines, c.line);
+      } else {
+        snippet = extractLineSnippet(lines, c.line);
+      }
+    }
+    entries.push({
+      number: c.number,
+      name: c.title,
+      file: c.file,
+      line: c.line + 1,
+      tags: c.tags,
+      note: c.symbol ? c.symbol.note : c.line_?.note,
+      source: c.line_?.source?.author,
+      language: languageForPath(c.file),
+      snippet,
+    });
+  }
+  return toGuideMarkdown(entries, {
+    title: vscode.l10n.t('{0} — Walkthrough', folder.name),
+    omittedLabel: (n) => vscode.l10n.t('… ({0} more line(s) omitted)', n),
+  });
 }

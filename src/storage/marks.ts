@@ -45,6 +45,75 @@ export function emptyStore(): StoreData {
   return { version: 1, symbols: [], bookmarks: [] };
 }
 
+/** 這份資料有沒有任何書籤、函式標記或標籤顏色。 */
+export function hasStoreData(data: StoreData | undefined): boolean {
+  return !!data && (data.symbols.length > 0 || (data.bookmarks ?? []).length > 0 || Object.keys(data.tagColors ?? {}).length > 0);
+}
+
+/**
+ * 合併兩份書籤資料：以 target 為主，補進 source 裡 target 沒有的函式標記、行號書籤與標籤顏色。
+ * 若號碼（1～9）衝突，保留 target 的號碼並移除 source 衝突的號碼，避免產生重複號碼。
+ */
+export function mergeStoreData(target: StoreData, source: StoreData): StoreData {
+  const usedNumbers = new Set<number>();
+  for (const m of target.symbols) {
+    if (m.favorite && m.number) {
+      usedNumbers.add(m.number);
+    }
+  }
+  for (const b of target.bookmarks ?? []) {
+    if (b.number) {
+      usedNumbers.add(b.number);
+    }
+  }
+
+  const symbols = [...target.symbols];
+  for (const m of source.symbols) {
+    if (findMark(target, m)) {
+      continue;
+    }
+    const copy = { ...m };
+    if (copy.favorite && copy.number) {
+      if (usedNumbers.has(copy.number)) {
+        delete copy.number;
+      } else {
+        usedNumbers.add(copy.number);
+      }
+    }
+    symbols.push(copy);
+  }
+
+  const existingIds = new Set((target.bookmarks ?? []).map((b) => b.id));
+  const existingLines = new Set(
+    (target.bookmarks ?? []).map((b) => `${b.file}\u0000${b.line}\u0000${b.source?.author ?? ''}`),
+  );
+  const bookmarks = [...(target.bookmarks ?? [])];
+  for (const b of source.bookmarks ?? []) {
+    const lineKey = `${b.file}\u0000${b.line}\u0000${b.source?.author ?? ''}`;
+    if (existingIds.has(b.id) || existingLines.has(lineKey)) {
+      continue;
+    }
+    const copy = { ...b };
+    if (copy.number) {
+      if (usedNumbers.has(copy.number)) {
+        delete copy.number;
+      } else {
+        usedNumbers.add(copy.number);
+      }
+    }
+    bookmarks.push(copy);
+    existingIds.add(copy.id);
+    existingLines.add(lineKey);
+  }
+
+  const tagColors = { ...(source.tagColors ?? {}), ...(target.tagColors ?? {}) };
+  const out: StoreData = { version: 1, symbols: prune(symbols), bookmarks };
+  if (Object.keys(tagColors).length) {
+    out.tagColors = tagColors;
+  }
+  return out;
+}
+
 const KINDS = new Set<string>(['function', 'method', 'class', 'block', 'partial', 'macro', 'event', 'request', 'heading', 'reference']);
 
 /** 解析書籤檔；格式不對的項目略過，整份壞掉時回傳 undefined。 */

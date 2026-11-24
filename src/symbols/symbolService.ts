@@ -1,9 +1,15 @@
 import * as vscode from 'vscode';
 import { uriKey } from '../util/uris';
+import { languageForPath } from '../util/paths';
 import { readSettings, ruleApplies } from '../config';
 import { detectSymbols } from '../detection/engine';
 import { DetectedSymbol, RuleError, SymbolKindName } from '../detection/types';
-import { fromDocument, loadSource, SourceDoc } from './documentSource';
+import { fromDocument, loadSource, openDocumentFor, SourceDoc } from './documentSource';
+
+export interface GetSymbolsOptions {
+  /** 不呼叫語言伺服器（背景批次檢查未開啟的檔案時避免拖慢或觸發冷啟動）。 */
+  skipLsp?: boolean;
+}
 
 export interface FileSymbols {
   uri: vscode.Uri;
@@ -15,11 +21,18 @@ export interface FileSymbols {
   errors: RuleError[];
 }
 
-const LSP_KIND: Partial<Record<vscode.SymbolKind, SymbolKindName>> = {
+/** 語言伺服器後備支援的符號種類對應（與各語言內建規則的 kind 慣例一致）。 */
+export const LSP_KIND: Partial<Record<vscode.SymbolKind, SymbolKindName>> = {
   [vscode.SymbolKind.Function]: 'function',
   [vscode.SymbolKind.Method]: 'method',
   [vscode.SymbolKind.Constructor]: 'method',
   [vscode.SymbolKind.Class]: 'class',
+  [vscode.SymbolKind.Interface]: 'class',
+  [vscode.SymbolKind.Struct]: 'class',
+  [vscode.SymbolKind.Enum]: 'class',
+  [vscode.SymbolKind.Module]: 'block',
+  [vscode.SymbolKind.Namespace]: 'block',
+  [vscode.SymbolKind.Package]: 'block',
 };
 
 const MAX_CACHE = 2000;
@@ -33,17 +46,35 @@ export class SymbolService {
   /** 進行中的偵測：側邊欄、行號旁圖示、滑鼠提示同時要同一個檔案的同一版時共用，不重複偵測。 */
   private inflight = new Map<string, { version: string; languageId: string; promise: Promise<FileSymbols> }>();
 
+  /** 這個檔案目前設定下是否會需要呼叫語言伺服器（背景批次可據此把純規則檔案排在前面）。 */
+  needsLanguageServer(uri: vscode.Uri): boolean {
+    const open = openDocumentFor(uri);
+    const lang = open
+      ? open.languageId === 'plaintext'
+        ? (languageForPath(uri.path) ?? open.languageId)
+        : open.languageId
+      : languageForPath(uri.path);
+    if (!lang) {
+      return true;
+    }
+    const settings = readSettings(uri);
+    if (settings.source === 'languageServer' || settings.source === 'both') {
+      return true;
+    }
+    return !settings.rules.some((r) => r.enabled !== false && r.languages.includes(lang) && ruleApplies(r, uri));
+  }
+
   getSymbols(document: vscode.TextDocument): Promise<FileSymbols> {
     return this.getForSource(fromDocument(document));
   }
 
   /** 不必開啟檔案：已開啟就用編輯中的內容，否則讀磁碟。 */
-  async getForUri(uri: vscode.Uri): Promise<FileSymbols | undefined> {
+  async getForUri(uri: vscode.Uri, options: GetSymbolsOptions = {}): Promise<FileSymbols | undefined> {
     const src = await loadSource(uri);
-    return src ? this.getForSource(src) : undefined;
+    return src ? this.getForSource(src, options) : undefined;
   }
 
-  getForSource(src: SourceDoc): Promise<FileSymbols> {
+  getForSource(src: SourceDoc, options: GetSymbolsOptions = {}): Promise<FileSymbols> {
     const key = uriKey(src.uri);
     const cached = this.cache.get(key);
     if (cached && cached.version === src.version && cached.languageId === src.languageId) {
@@ -51,11 +82,15 @@ export class SymbolService {
       this.cache.set(key, cached);
       return Promise.resolve(cached);
     }
+    // skipLsp 只計算規則結果，不寫入快取（避免之後正常開啟時少了語言伺服器結果）
+    if (options.skipLsp) {
+      return this.compute(src, options);
+    }
     const running = this.inflight.get(key);
     if (running && running.version === src.version && running.languageId === src.languageId) {
       return running.promise;
     }
-    const entry = { version: src.version, languageId: src.languageId, promise: this.compute(src) };
+    const entry = { version: src.version, languageId: src.languageId, promise: this.compute(src, options) };
     this.inflight.set(key, entry);
     entry.promise.then(
       (result) => {
@@ -95,13 +130,16 @@ export class SymbolService {
     }
   }
 
-  private async compute(src: SourceDoc): Promise<FileSymbols> {
+  private async compute(src: SourceDoc, options: GetSymbolsOptions = {}): Promise<FileSymbols> {
     const settings = readSettings(src.uri);
     const applicable = settings.rules.filter(
       (r) => r.enabled !== false && r.languages.includes(src.languageId) && ruleApplies(r, src.uri),
     );
     const base = { uri: src.uri, version: src.version, languageId: src.languageId };
     const lsp = async () => {
+      if (options.skipLsp) {
+        return [];
+      }
       const doc = src.document ?? (await vscode.workspace.openTextDocument(src.uri).then(undefined, () => undefined));
       return doc ? fromLanguageServer(doc) : [];
     };
@@ -154,7 +192,7 @@ function convertDocumentSymbols(
   for (const s of [...symbols].sort((a, b) => a.range.start.compareTo(b.range.start))) {
     const kind = LSP_KIND[s.kind];
     if (!kind) {
-      // 不認得的節點（例如變數、模組）略過，但保留裡面的函式
+      // 不認得的節點（例如變數、常數）略過，但保留裡面的函式
       out.push(...convertDocumentSymbols(s.children, document, parentPath));
       continue;
     }

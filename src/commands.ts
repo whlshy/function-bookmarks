@@ -4,7 +4,7 @@ import { findPartial, splitTemplateTarget } from './django/templates';
 import { findByPath, findInnermost } from './detection/engine';
 import { DetectedSymbol, SymbolKindName } from './detection/types';
 import { parseTags } from './bookmarks/model';
-import { autoNumbers } from './bookmarks/commands';
+import { autoNumbers, tagsPrompt } from './bookmarks/commands';
 import { MarkKey, setAlias, setFavorite, setNote, setSymbolExtras, setTags, StoreData } from './storage/marks';
 import { MarkStore } from './storage/store';
 import { ResolvedFavorite } from './symbols/favorites';
@@ -130,7 +130,7 @@ export class Commands {
     if (pick !== add) {
       return false;
     }
-    await this.store.update(loc.folder, (d) => setFavorite(d, loc.key, true, t.line));
+    await this.store.update(loc.folder, (d) => withAutoNumber(this.store, setFavorite(d, loc.key, true, t.line), loc.key, true));
     return true;
   }
 
@@ -188,15 +188,18 @@ export class Commands {
       value ??
       (await vscode.window.showInputBox({
         title: vscode.l10n.t('Tags'),
-        prompt: vscode.l10n.t('Separate with spaces or commas, e.g. #auth #todo'),
+        prompt: tagsPrompt(this.store),
         value: current ? `${current} ` : '',
       }));
     if (input === undefined) {
       return;
     }
     const tags = parseTags(input);
-    // 加標籤代表要當成書籤，順便加入函式書籤
-    await this.store.update(loc.folder, (d) => setTags(tags.length ? setFavorite(d, loc.key, true, t.line) : d, loc.key, tags));
+    // 加標籤代表要當成書籤，順便加入函式書籤（並依 autoNumber 設定給空號）
+    const added = !mark?.favorite && tags.length > 0;
+    await this.store.update(loc.folder, (d) =>
+      setTags(added ? withAutoNumber(this.store, setFavorite(d, loc.key, true, t.line), loc.key, true) : d, loc.key, tags),
+    );
   }
 
   /** 開啟備註編輯分頁；`value` 有值時直接寫入（測試用）。 */

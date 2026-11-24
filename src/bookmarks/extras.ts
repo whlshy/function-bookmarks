@@ -56,16 +56,37 @@ function sameTarget(e: NumberedEntry, t: ExtrasTarget): boolean {
     : t.kind === 'symbol' && e.mark.file === t.key.file && e.mark.path === t.key.path && e.mark.kind === t.key.kind;
 }
 
+/** 依編號導覽一步的結果。 */
+export interface TourStepResult {
+  number: number;
+  index: number;
+  total: number;
+  title: string;
+  uri: vscode.Uri;
+  line: number;
+  hasNote: boolean;
+}
+
+/** 設定數字書籤的快捷鍵文字（依平台）。 */
+function setNumberKeys(): string {
+  return process.platform === 'darwin' ? 'Cmd+Alt+Shift+1–9' : 'Ctrl+Alt+Shift+1–9';
+}
+
 /**
- * M7：數字快速書籤（1～9）、書籤與標籤顏色。
+ * M7：數字快速書籤（1～9）、書籤與標籤顏色、依編號導覽。
  */
 export class BookmarkExtras {
+  private lastTourNumber: number | undefined;
+  /** 給測試用：最近一次導覽顯示的狀態列文字。 */
+  lastTourStatus: string | undefined;
+
   constructor(
     private readonly store: MarkStore,
     private readonly service: SymbolService,
     private readonly favorites: FavoritesModel,
     private readonly bookmarks: BookmarkCommands,
     private readonly openFavorite: (fav: FavoritesModel['all'][number]) => Promise<void>,
+    private readonly beforeShowHover?: () => Promise<void>,
   ) {}
 
   /** 從樹狀節點，或游標所在的行取得對象；`create` 時游標那一行沒有書籤就先加入。 */
@@ -286,7 +307,7 @@ export class BookmarkExtras {
     const used = this.store.numbered();
     if (n === undefined) {
       if (!used.size) {
-        void vscode.window.showInformationMessage(vscode.l10n.t('No numbered bookmarks yet. Press Ctrl+Alt+Shift+1–9 on a line to add one.'));
+        void vscode.window.showInformationMessage(vscode.l10n.t('No numbered bookmarks yet. Press {0} on a line to add one.', setNumberKeys()));
         return undefined;
       }
       const pick = await vscode.window.showQuickPick(
@@ -323,6 +344,87 @@ export class BookmarkExtras {
     }
     await revealLine(e.uri, e.mark.line ?? 0);
     return { uri: e.uri, line: e.mark.line ?? 0 };
+  }
+
+  /**
+   * 依編號（1→9）在有編號的書籤間循環導覽（跨檔案、跨資料夾）。
+   * 跳轉後在狀態列顯示「導覽 i/N：名稱」，若書籤有備註則自動開啟該行滑鼠提示。
+   */
+  async tour(direction: 1 | -1): Promise<TourStepResult | undefined> {
+    const used = this.store.numbered();
+    const steps: { number: number; entry: NumberedEntry; line: number }[] = [];
+    for (const [num, entry] of [...used.entries()].sort(([a], [b]) => a - b)) {
+      if (entry.kind === 'line') {
+        if (!this.store.isShown(entry.folder, entry.bookmark)) {
+          continue;
+        }
+        steps.push({ number: num, entry, line: entry.bookmark.line });
+      } else {
+        if (!this.store.favoritesShown) {
+          continue;
+        }
+        const fav = this.favorites.all.find(
+          (f) => f.folder === entry.folder && f.mark.file === entry.mark.file && f.mark.path === entry.mark.path && f.mark.kind === entry.mark.kind,
+        );
+        const line = fav?.symbol?.nameLine ?? entry.mark.line ?? 0;
+        steps.push({ number: num, entry, line });
+      }
+    }
+    if (!steps.length) {
+      this.lastTourStatus = undefined;
+      void vscode.window.showInformationMessage(vscode.l10n.t('No numbered bookmarks yet. Press {0} on a line to add one.', setNumberKeys()));
+      return undefined;
+    }
+
+    // 優先以目前游標正好停在的編號書籤為起點，否則沿用上次導覽位置
+    const editor = vscode.window.activeTextEditor;
+    let curIdx = -1;
+    if (editor) {
+      const curUri = editor.document.uri.toString();
+      const curLine = editor.selection.active.line;
+      curIdx = steps.findIndex((s) => s.entry.uri.toString() === curUri && s.line === curLine);
+    }
+    if (curIdx === -1 && this.lastTourNumber !== undefined) {
+      curIdx = steps.findIndex((s) => s.number === this.lastTourNumber);
+    }
+    const nextIdx =
+      curIdx === -1
+        ? direction === 1
+          ? 0
+          : steps.length - 1
+        : (curIdx + direction + steps.length) % steps.length;
+    const step = steps[nextIdx];
+    const e = step.entry;
+    let landedLine = step.line;
+    if (e.kind === 'line') {
+      await revealLine(e.uri, e.bookmark.line);
+      landedLine = e.bookmark.line;
+    } else {
+      const fav = this.favorites.all.find(
+        (f) => f.folder === e.folder && f.mark.file === e.mark.file && f.mark.path === e.mark.path && f.mark.kind === e.mark.kind,
+      );
+      if (fav) {
+        await this.openFavorite(fav);
+        landedLine = fav.symbol?.nameLine ?? fav.mark.line ?? 0;
+      } else {
+        await revealLine(e.uri, e.mark.line ?? 0);
+        landedLine = e.mark.line ?? 0;
+      }
+    }
+
+    this.lastTourNumber = step.number;
+    const title = entryTitle(e);
+    const status = vscode.l10n.t('Tour {0}/{1}: {2}', nextIdx + 1, steps.length, title);
+    this.lastTourStatus = status;
+    vscode.window.setStatusBarMessage(`$(compass) ${status}`, 6000);
+
+    const hasNote = e.kind === 'line' ? Boolean(e.bookmark.note) : Boolean(e.mark.note);
+    if (hasNote) {
+      // 先確保編輯器行號旁與整行的備註裝飾已畫上，再打開滑鼠提示
+      await this.beforeShowHover?.();
+      await vscode.commands.executeCommand('editor.action.showHover').then(undefined, () => undefined);
+    }
+    return { number: step.number, index: nextIdx + 1, total: steps.length, title, uri: e.uri, line: landedLine, hasNote };
   }
 
   private colorItems(current: string | undefined, defaultLabel: string) {

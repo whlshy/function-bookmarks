@@ -27,7 +27,7 @@ Function Bookmarks 會記住每個書籤附近的內容，比對檔案修改前�
 ### 整理與跳轉
 
 - 名稱、**標籤**、多行 **Markdown 備註**（滑鼠移上去顯示）
-- **數字書籤**：`Ctrl+Alt+Shift+1`～`9` 替目前這一行設定號碼，`Ctrl+Alt+1`～`9` 直接跳過去
+- **數字書籤**：`Ctrl+Alt+Shift+1`～`9` 替目前這一行設定號碼，`Ctrl+Alt+1`～`9` 直接跳過去；可用「導覽：下一個／上一個編號書籤」依 1～9 順序導覽
 - 書籤與標籤可以設定**顏色**，行號旁圖示與側邊欄跟著變色
 - 書籤那一行的行尾淡淡顯示書籤名稱
 - 側邊欄第一列就是**搜尋**（`Ctrl+Alt+F`）：打字時書籤即時篩選，`#標籤`、`@來源` 可以縮小範圍
@@ -41,7 +41,7 @@ Function Bookmarks 會記住每個書籤附近的內容，比對檔案修改前�
 
 - 側邊欄列出目前檔案的函式，還有「整個專案」與「搜尋函式」
 - 替已加書籤的函式**自訂顯示名稱**（`F2`），不改程式碼；滑鼠移上去看原本的名稱
-- Django template：`{% block %}`、`extends`／`include` 連結與覆寫的 block；事件監聽與請求（`.on('click')`、`$.ajax`、`fetch`）也會列出
+- 事件監聽與請求（`.on('click')`、`$.ajax`、`fetch`）也會列出
 - 可用正規表示式**自訂偵測規則**；「在這個檔案測試偵測規則」會標出每條規則抓到什麼
 - 大多數常用語言不必另外安裝語言擴充套件就能使用；其他語言改用語言伺服器
 
@@ -49,22 +49,23 @@ Function Bookmarks 會記住每個書籤附近的內容，比對檔案修改前�
 
 ### 分享
 
-- **匯出**書籤成檔案或複製到剪貼簿，也可輸出成 Markdown 表格或 CSV
+- **匯出**書籤成檔案或複製到剪貼簿，也可輸出成導讀文件（Markdown）、Markdown 表格或 CSV
 - **匯入**同事的書籤並加上來源註記；就算你的檔案內容和對方不同，也會放在正確的行（不需要 git）
 - 可依來源篩選、分組；別人的書籤是紫色
 - 從 **Bookmarks（alefragnani）** 換過來？「匯入書籤…」可以直接讀它的 `.vscode/bookmarks.json`（請先在該套件開啟 `bookmarks.saveBookmarksInProject`）
 
 ## 快捷鍵
 
-| 快捷鍵 | 功能 |
-|---|---|
-| `Ctrl+Alt+B` | 加入／移除書籤（函式或行） |
-| `Ctrl+Alt+Shift+B` | 加入有名稱的書籤 |
-| `Ctrl+Alt+.`／`Ctrl+Alt+,` | 下一個／上一個書籤 |
-| `Ctrl+Alt+/` | 搜尋書籤 |
-| `Ctrl+Alt+Shift+1`～`9` | 在這一行設定／移除 1～9 號 |
-| `Ctrl+Alt+1`～`9` | 跳到 1～9 號書籤 |
-| `F2`（側邊欄） | 重新命名書籤或顯示名稱 |
+| 快捷鍵（Win / Linux） | macOS | 功能 |
+|---|---|---|
+| `Ctrl+Alt+B` | `Cmd+Alt+B` | 加入／移除書籤（函式或行） |
+| `Ctrl+Alt+Shift+B` | `Cmd+Alt+Shift+B` | 加入有名稱的書籤 |
+| `Ctrl+Alt+.`／`Ctrl+Alt+,` | `Cmd+Alt+.`／`Cmd+Alt+,` | 下一個／上一個書籤 |
+| `Ctrl+Alt+/` | `Cmd+Alt+/` | 搜尋書籤 |
+| `Ctrl+Alt+F` | `Cmd+Alt+Shift+F` | 移到書籤搜尋列 |
+| `Ctrl+Alt+Shift+1`～`9` | `Cmd+Alt+Shift+1`～`9` | 在這一行設定／移除 1～9 號 |
+| `Ctrl+Alt+1`～`9` | `Cmd+Alt+1`～`9` | 跳到 1～9 號書籤 |
+| `F2`（側邊欄） | `F2`（側邊欄） | 重新命名書籤或顯示名稱 |
 
 部分鍵盤配置（例如德文）的 `Ctrl+Alt` 等於 `AltGr`，`Ctrl+Alt+數字` 可能會打出符號，需要時可以在「鍵盤快速鍵」裡改掉。
 
@@ -81,6 +82,12 @@ Function Bookmarks 會記住每個書籤附近的內容，比對檔案修改前�
 | `functionBookmarks.hover.enabled` | `true` | 滑鼠移到函式名稱時顯示加入書籤、改名、編輯備註的提示 |
 | `functionBookmarks.followCursor` | `true` | 側邊欄標示游標所在的函式 |
 
+**備註**
+
+| 設定 | 預設 | 說明 |
+|---|---|---|
+| `functionBookmarks.notes.closeOnSave` | `true` | 備註存檔後自動關閉編輯與預覽分頁 |
+
 **函式偵測**
 
 | 設定 | 預設 | 說明 |
@@ -88,8 +95,7 @@ Function Bookmarks 會記住每個書籤附近的內容，比對檔案修改前�
 | `functionBookmarks.detection.source` | `rules` | `rules`、`languageServer` 或 `both` |
 | `functionBookmarks.detection.rules` | `[]` | 自訂規則；`id` 相同會取代內建規則 |
 | `functionBookmarks.detection.disabledRules` | `["html-id"]` | 要關閉的內建規則 ID |
-| `functionBookmarks.detection.templateFiles` | `["**/templates/**"]` | Django／HTML 規則套用的範圍 |
-| `functionBookmarks.django.templateDirs` | `[]` | 額外的 template 資料夾（名為 `templates` 的資料夾會自動找到） |
+| `functionBookmarks.detection.templateFiles` | `["**/templates/**"]` | template 規則套用的範圍 |
 
 **整個專案**
 

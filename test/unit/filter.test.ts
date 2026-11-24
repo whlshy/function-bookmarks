@@ -66,10 +66,11 @@ describe('搜尋列：matchesQuery 一般文字', () => {
     assert.strictEqual(matches('logout', f), false);
   });
 
-  it('每個欄位都能比對：names、tags、file、func、line、note', () => {
+  it('每個欄位都能比對：names、tags、file、folder、func、line、note', () => {
     assert.strictEqual(matches('alpha', fields({ names: ['alpha_name'] })), true, 'names');
     assert.strictEqual(matches('beta', fields({ tags: ['beta_tag'] })), true, 'tags');
     assert.strictEqual(matches('gamma', fields({ file: 'app/gamma_views.py' })), true, 'file');
+    assert.strictEqual(matches('backend', fields({ folder: 'backend-api' })), true, 'folder');
     assert.strictEqual(matches('delta', fields({ func: 'Outer.delta_method' })), true, 'func');
     assert.strictEqual(matches('epsilon', fields({ line: 'x = epsilon(1)' })), true, 'line');
     assert.strictEqual(matches('zeta', fields({ note: '記得處理 zeta 的情形' })), true, 'note');

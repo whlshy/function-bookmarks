@@ -27,7 +27,7 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 ### Organize and jump
 
 - Names, **tags**, multi-line **Markdown notes** (shown on hover)
-- **Numbered bookmarks**: `Ctrl+Alt+Shift+1`–`9` sets a number on the current line, `Ctrl+Alt+1`–`9` jumps to it
+- **Numbered bookmarks**: `Ctrl+Alt+Shift+1`–`9` sets a number on the current line, `Ctrl+Alt+1`–`9` jumps to it; step through numbered bookmarks in order with **Tour: Next / Previous Numbered Bookmark**
 - **Colors** for bookmarks and tags — the gutter icon and side bar follow
 - The bookmark name shown faintly at the end of the line
 - **Search** from the first row of the side bar (`Ctrl+Alt+F`): the bookmarks are filtered as you type; `#tag` and `@source` narrow it down
@@ -41,7 +41,7 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 
 - The functions of the current file in the side bar, a **Whole project** browser, and **Search Functions**
 - **Display names** (`F2`) for bookmarked functions without changing the code; hover to see the original name
-- Django templates: `{% block %}`, `extends` / `include` links and overridden blocks; event listeners and requests (`.on('click')`, `$.ajax`, `fetch`) are listed too
+- Event listeners and requests (`.on('click')`, `$.ajax`, `fetch`) are listed too
 - **Your own detection rules** with regular expressions; **Test Detection Rules on This File** shows what each rule finds
 - Works out of the box for most common languages, no language extension needed; others fall back to the language server
 
@@ -49,22 +49,23 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 
 ### Share
 
-- **Export** bookmarks to a file or the clipboard, or as a Markdown table / CSV
+- **Export** bookmarks to a file or the clipboard, or as a Markdown walkthrough document, Markdown table, or CSV
 - **Import** a colleague's bookmarks with a source note — they land on the right lines even if your copy of the files is different (no git needed)
 - Filter and group by source; others' bookmarks are purple
 - Coming from **Bookmarks (alefragnani)**? *Import Bookmarks…* reads its `.vscode/bookmarks.json` (turn on `bookmarks.saveBookmarksInProject` there first)
 
 ## Keyboard shortcuts
 
-| Shortcut | Action |
-|---|---|
-| `Ctrl+Alt+B` | Add / remove a bookmark (function or line) |
-| `Ctrl+Alt+Shift+B` | Add a named bookmark |
-| `Ctrl+Alt+.` / `Ctrl+Alt+,` | Next / previous bookmark |
-| `Ctrl+Alt+/` | Search bookmarks |
-| `Ctrl+Alt+Shift+1`–`9` | Set / remove number 1–9 on this line |
-| `Ctrl+Alt+1`–`9` | Go to bookmark 1–9 |
-| `F2` (side bar) | Rename bookmark or display name |
+| Shortcut (Win / Linux) | macOS | Action |
+|---|---|---|
+| `Ctrl+Alt+B` | `Cmd+Alt+B` | Add / remove a bookmark (function or line) |
+| `Ctrl+Alt+Shift+B` | `Cmd+Alt+Shift+B` | Add a named bookmark |
+| `Ctrl+Alt+.` / `Ctrl+Alt+,` | `Cmd+Alt+.` / `Cmd+Alt+,` | Next / previous bookmark |
+| `Ctrl+Alt+/` | `Cmd+Alt+/` | Search bookmarks |
+| `Ctrl+Alt+F` | `Cmd+Alt+Shift+F` | Focus bookmark search bar |
+| `Ctrl+Alt+Shift+1`–`9` | `Cmd+Alt+Shift+1`–`9` | Set / remove number 1–9 on this line |
+| `Ctrl+Alt+1`–`9` | `Cmd+Alt+1`–`9` | Go to bookmark 1–9 |
+| `F2` (side bar) | `F2` (side bar) | Rename bookmark or display name |
 
 On keyboard layouts where `Ctrl+Alt` works as `AltGr` (for example German), `Ctrl+Alt+digit` may type characters; change these shortcuts in *Keyboard Shortcuts* if needed.
 
@@ -81,6 +82,12 @@ On keyboard layouts where `Ctrl+Alt` works as `AltGr` (for example German), `Ctr
 | `functionBookmarks.hover.enabled` | `true` | Popup on function names to add a bookmark, rename, edit the note |
 | `functionBookmarks.followCursor` | `true` | Highlight the function under the cursor in the side bar |
 
+**Notes**
+
+| Setting | Default | Description |
+|---|---|---|
+| `functionBookmarks.notes.closeOnSave` | `true` | Close the note editor and preview tabs after saving |
+
 **Function detection**
 
 | Setting | Default | Description |
@@ -88,8 +95,7 @@ On keyboard layouts where `Ctrl+Alt` works as `AltGr` (for example German), `Ctr
 | `functionBookmarks.detection.source` | `rules` | `rules`, `languageServer` or `both` |
 | `functionBookmarks.detection.rules` | `[]` | Your own rules; the same `id` overrides a built-in rule |
 | `functionBookmarks.detection.disabledRules` | `["html-id"]` | Built-in rule IDs to turn off |
-| `functionBookmarks.detection.templateFiles` | `["**/templates/**"]` | Where the Django / HTML rules apply |
-| `functionBookmarks.django.templateDirs` | `[]` | Extra template folders (folders named `templates` are found automatically) |
+| `functionBookmarks.detection.templateFiles` | `["**/templates/**"]` | Where the template rules apply |
 
 **Whole project**
 

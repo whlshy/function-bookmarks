@@ -1,7 +1,9 @@
+import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { findByPath, findInnermost } from '../detection/engine';
 import { DetectedSymbol } from '../detection/types';
+import { BranchState } from '../git/branch';
 import { BranchChange, BranchService } from '../git/branchService';
 import { renamePath, updateBookmarksInFile } from '../storage/marks';
 import { Located, MarkStore } from '../storage/store';
@@ -285,12 +287,25 @@ export class ExternalChangeWatcher implements vscode.Disposable {
       while (this.pending.size) {
         const batch = [...this.pending.values()];
         this.pending.clear();
-        for (const uri of batch) {
-          try {
-            await this.sync(uri);
-          } catch {
-            // 讀不到（沒有權限等）就略過，下次再試
-          }
+        // 同一個批次內每個資料夾只讀一次 git 分支，避免 50 個書籤檔重複讀 50 次 .git/HEAD
+        const branchCache = new Map<string, Promise<BranchState | undefined>>();
+        const deferSave = batch.length > 1;
+        let next = 0;
+        const workers = Math.min(8, batch.length);
+        await Promise.all(
+          Array.from({ length: workers }, async () => {
+            while (next < batch.length) {
+              const uri = batch[next++];
+              try {
+                await this.sync(uri, branchCache, deferSave);
+              } catch {
+                // 讀不到（沒有權限等）就略過，下次再試
+              }
+            }
+          }),
+        );
+        if (deferSave) {
+          await this.store.flush();
         }
       }
     })().finally(() => {
@@ -301,7 +316,9 @@ export class ExternalChangeWatcher implements vscode.Disposable {
 
   private async readDisk(uri: vscode.Uri): Promise<string | undefined> {
     try {
-      return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+      return uri.scheme === 'file'
+        ? await fs.readFile(uri.fsPath, 'utf8')
+        : new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
     } catch {
       return undefined;
     }
@@ -321,8 +338,18 @@ export class ExternalChangeWatcher implements vscode.Disposable {
   }
 
   /** 讀目前分支；git 正在改檔時回傳 'busy'（等太久就不再等）。 */
-  private async branchFor(uri: vscode.Uri, loc: Located): Promise<{ id?: string; name?: string } | 'busy'> {
-    const br = await this.branches.read(loc.folder);
+  private async branchFor(
+    uri: vscode.Uri,
+    loc: Located,
+    branchCache?: Map<string, Promise<BranchState | undefined>>,
+  ): Promise<{ id?: string; name?: string } | 'busy'> {
+    const fkey = uriKey(loc.folder.uri);
+    let p = branchCache?.get(fkey);
+    if (!p) {
+      p = this.branches.read(loc.folder);
+      branchCache?.set(fkey, p);
+    }
+    const br = await p;
     const key = uriKey(uri);
     if (br?.busy && (this.busyRetries.get(key) ?? 0) < MAX_BUSY_RETRIES) {
       this.retryLater(uri);
@@ -333,7 +360,11 @@ export class ExternalChangeWatcher implements vscode.Disposable {
   }
 
   /** 比對記住的內容與目前內容（開著的用編輯器內容，否則讀磁碟），不同就換算書籤。 */
-  private async sync(uri: vscode.Uri): Promise<void> {
+  private async sync(
+    uri: vscode.Uri,
+    branchCache?: Map<string, Promise<BranchState | undefined>>,
+    deferSave = false,
+  ): Promise<void> {
     if (!this.has(uri)) {
       return;
     }
@@ -369,30 +400,40 @@ export class ExternalChangeWatcher implements vscode.Disposable {
       this.reloadWaits.delete(key);
     } else {
       try {
-        text = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+        text =
+          uri.scheme === 'file'
+            ? await fs.readFile(uri.fsPath, 'utf8')
+            : new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
       } catch (err) {
         if (isNotFound(err)) {
-          await this.missing(uri);
+          await this.missing(uri, branchCache);
           return;
         }
         throw err;
       }
       languageId = languageForPath(uri.path);
     }
-    await this.apply(uri, text, languageId, fromDisk);
+    await this.apply(uri, text, languageId, fromDisk, branchCache, deferSave);
     if (doc && !fromDisk) {
       this.checkConflicts(doc);
     }
   }
 
   /** 用記住的內容換算書籤到 `text`，之後記住 `text`。 */
-  private async apply(uri: vscode.Uri, text: string, languageId: string | undefined, fromDisk = false): Promise<void> {
+  private async apply(
+    uri: vscode.Uri,
+    text: string,
+    languageId: string | undefined,
+    fromDisk = false,
+    branchCache?: Map<string, Promise<BranchState | undefined>>,
+    deferSave = false,
+  ): Promise<void> {
     const key = uriKey(uri);
     const loc = this.store.locate(uri);
     if (!loc) {
       return;
     }
-    const br = await this.branchFor(uri, loc);
+    const br = await this.branchFor(uri, loc, branchCache);
     if (br === 'busy') {
       return;
     }
@@ -446,7 +487,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     this.pendingReload.delete(key);
     this.remember(uri, hashes, br.id);
     this.trackConflictLost(key, lines, results);
-    await this.write(loc, results, lines, symbols);
+    await this.write(loc, results, lines, symbols, deferSave);
   }
 
   /**
@@ -480,13 +521,13 @@ export class ExternalChangeWatcher implements vscode.Disposable {
   }
 
   /** 書籤所在的檔案不見了：改名就跟過去；切換分支造成的標成不在此分支；否則標成需確認。 */
-  private async missing(uri: vscode.Uri): Promise<void> {
+  private async missing(uri: vscode.Uri, branchCache?: Map<string, Promise<BranchState | undefined>>): Promise<void> {
     const key = uriKey(uri);
     const loc = this.store.locate(uri);
     if (!loc) {
       return;
     }
-    const br = await this.branchFor(uri, loc);
+    const br = await this.branchFor(uri, loc, branchCache);
     if (br === 'busy') {
       return;
     }
@@ -637,33 +678,42 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     this.persistSoon();
   }
 
-  private async write(loc: Located, results: BranchRelocateResult[], lines: string[], symbols: DetectedSymbol[]): Promise<void> {
+  private async write(
+    loc: Located,
+    results: BranchRelocateResult[],
+    lines: string[],
+    symbols: DetectedSymbol[],
+    deferSave = false,
+  ): Promise<void> {
     const byId = new Map(results.map((r) => [r.id, r]));
-    await this.store.update(loc.folder, (d) =>
-      updateBookmarksInFile(d, loc.rel, (b) => {
-        const r = byId.get(b.id);
-        if (!r) {
-          return b;
-        }
-        const next: LineBookmark = { ...b };
-        if (r.positions) {
-          next.positions = r.positions;
-        }
-        if (!this.store.isVisible(loc.folder, b)) {
-          // 只屬於別的分支：位置與 anchor 對應的是那個分支的內容，不動
+    await this.store.update(
+      loc.folder,
+      (d) =>
+        updateBookmarksInFile(d, loc.rel, (b) => {
+          const r = byId.get(b.id);
+          if (!r) {
+            return b;
+          }
+          const next: LineBookmark = { ...b };
+          if (r.positions) {
+            next.positions = r.positions;
+          }
+          if (!this.store.isVisible(loc.folder, b)) {
+            // 只屬於別的分支：位置與 anchor 對應的是那個分支的內容，不動
+            return next;
+          }
+          next.line = r.line;
+          if (r.status) {
+            // 保留原本的 anchor，之後內容回來（衝突解決、切回分支）還能找回
+            next.status = r.status;
+          } else {
+            delete next.status;
+            const sym = findInnermost(symbols, r.line);
+            next.anchor = makeAnchor(lines, r.line, sym?.path, sym?.startLine);
+          }
           return next;
-        }
-        next.line = r.line;
-        if (r.status) {
-          // 保留原本的 anchor，之後內容回來（衝突解決、切回分支）還能找回
-          next.status = r.status;
-        } else {
-          delete next.status;
-          const sym = findInnermost(symbols, r.line);
-          next.anchor = makeAnchor(lines, r.line, sym?.path, sym?.startLine);
-        }
-        return next;
-      }),
+        }),
+      deferSave ? { deferSave: true } : undefined,
     );
   }
 
@@ -691,13 +741,17 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     try {
       const doc = openDocumentFor(uri);
       const same = doc && doc.getText() === text ? doc : undefined;
-      const file = await this.service.getForSource({
-        uri,
-        languageId,
-        text,
-        version: same ? `v${same.version}` : `ext:${++this.versionSeq}`,
-        document: same,
-      });
+      const file = await this.service.getForSource(
+        {
+          uri,
+          languageId,
+          text,
+          version: same ? `v${same.version}` : `ext:${++this.versionSeq}`,
+          document: same,
+        },
+        // 沒在編輯器開啟的檔案背景換算時，不強制開啟文件觸發語言伺服器冷啟動
+        { skipLsp: !same },
+      );
       return file.symbols;
     } catch {
       return [];

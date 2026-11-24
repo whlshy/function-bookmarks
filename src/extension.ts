@@ -30,6 +30,7 @@ import { collectProjectSymbols, searchFunctions, searchMarks } from './views/sea
 import { BookmarkGrouping, BookmarkNode, COMMANDS, FilterMode, FunctionTreeProvider, SymbolNode, TreeNode } from './views/tree';
 import { sameUri } from './util/uris';
 import { BookmarkSearchBox } from './views/searchBox';
+import { StartupLog, StartupTiming } from './util/startupLog';
 
 const VIEW_ID = 'functionBookmarks.tree';
 const STATE_FILTER = 'filterMode';
@@ -71,15 +72,23 @@ export interface ExtensionApi {
   collectProjectSymbols(): ReturnType<typeof collectProjectSymbols>;
   /** 內建 Markdown 預覽會呼叫：加上 Mermaid 繪圖。 */
   extendMarkdownIt(md: unknown): unknown;
+  /** 啟動各階段計時紀錄（毫秒）。 */
+  startupTimings: StartupTiming[];
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<ExtensionApi> {
+  const startup = new StartupLog();
+  context.subscriptions.push(startup);
   const service = new SymbolService();
   const store = new MarkStore(context);
-  await store.init();
   const branches = new BranchService();
   store.branchOf = (folder) => branches.name(folder);
-  await branches.refresh();
+  // 平行讀取書籤檔與 git 分支，互不等待
+  await Promise.all([
+    startup.measure('store.init', () => store.init()),
+    startup.measure('branches.refresh', () => branches.refresh()),
+  ]);
+  const setupStart = performance.now();
   const files = new FileEvents();
   const favorites = new FavoritesModel(store, service, files);
   const project = new ProjectFiles(files);
@@ -95,7 +104,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
   const reconciler = new ReconcileWatcher(store, service);
   const gutter = new FavoriteGutter(context.extensionUri, service, store);
   const hover = new BookmarkHoverProvider(service, store);
-  const extras = new BookmarkExtras(store, service, favorites, bookmarks, (fav) => commands.openFavorite(fav));
+  const extras = new BookmarkExtras(
+    store,
+    service,
+    favorites,
+    bookmarks,
+    (fav) => commands.openFavorite(fav),
+    () => gutter.update(),
+  );
   const statusBar = new BookmarkStatusBar(store, favorites, gutter);
   const ruleTester = new RuleTester(service);
   const setIconsHidden = async (hide: boolean) => {
@@ -176,7 +192,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     updateBranchLabel();
   };
   updateSourceContext();
-  const shareDeps = { store, favorites, branches };
+  const shareDeps = { store, favorites, branches, service };
   const entryArg = (node?: TreeNode) => bookmarks.entryOf(isBookmarkNode(node) ? node : undefined);
   const sourceArg = (arg?: unknown) =>
     typeof arg === 'string' ? arg : (arg as { type?: string; by?: string; key?: string } | undefined)?.by === 'source' ? (arg as { key: string }).key : undefined;
@@ -187,7 +203,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     await vscode.commands.executeCommand('setContext', 'functionBookmarks.hideNotOnBranch', hide);
     provider.fire();
   };
-  await setHideAway(context.workspaceState.get<boolean>(STATE_HIDE_AWAY, false));
+  const initialHideAway = context.workspaceState.get<boolean>(STATE_HIDE_AWAY, false);
+  provider.hideNotOnBranch = initialHideAway;
+  void vscode.commands.executeCommand('setContext', 'functionBookmarks.hideNotOnBranch', initialHideAway);
 
   const applyViewState = async (filter: FilterMode, bmGroup: BookmarkGrouping = provider.bookmarkGrouping) => {
     provider.filterMode = filter;
@@ -198,12 +216,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     await vscode.commands.executeCommand('setContext', 'functionBookmarks.bookmarkGrouping', bmGroup);
     provider.fire();
   };
-  // 0.1.x 以前的「只顯示收藏」併入「只顯示書籤」
+  // 0.1.x 以前的「只顯示收藏」併入「只顯示書籤」；啟動時只讀不回寫 workspaceState，也不串行等待 setContext
   const savedFilter = context.workspaceState.get<string>(STATE_FILTER, 'all');
-  await applyViewState(
-    savedFilter === 'all' ? 'all' : 'bookmarks',
-    context.workspaceState.get<BookmarkGrouping>(STATE_BM_GROUP, 'file'),
-  );
+  const initialFilter: FilterMode = savedFilter === 'all' ? 'all' : 'bookmarks';
+  const initialGroup = context.workspaceState.get<BookmarkGrouping>(STATE_BM_GROUP, 'file');
+  provider.filterMode = initialFilter;
+  provider.bookmarkGrouping = initialGroup;
+  void vscode.commands.executeCommand('setContext', 'functionBookmarks.filterMode', initialFilter);
+  void vscode.commands.executeCommand('setContext', 'functionBookmarks.bookmarkGrouping', initialGroup);
 
 
   const reportErrors = (errors: RuleError[]) => {
@@ -338,19 +358,45 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
       const n = node ?? treeView.selection[0];
       return isBookmarkNode(n) ? bookmarks.rename(n) : commands.rename(n);
     }),
-    reg('functionBookmarks.editNote', (node?: TreeNode | vscode.Uri) => {
+    reg('functionBookmarks.editNote', async (node?: unknown) => {
+      // 行號右鍵選單（{ lineNumber, uri }）：針對右鍵那一行（而非游標所在行）編輯備註；沒書籤就先依 Ctrl+Alt+B 規則建立
+      const at = lineArg(node);
+      if (at) {
+        const hit = await bookmarks.ensureAtLine(at);
+        if (!hit) {
+          return undefined;
+        }
+        if (hit.kind === 'line') {
+          return bookmarks.editNote({ type: 'bookmark', entry: hit.entry });
+        }
+        const symNode: SymbolNode = { type: 'symbol', scope: 'current', uri: hit.uri, symbol: hit.symbol, parent: provider.sections.currentFile, children: [], id: '' };
+        return commands.editNote(symNode);
+      }
       // 從編輯器右鍵呼叫（參數是檔案 Uri）：游標所在行有書籤就編輯書籤的備註，否則編輯函式的備註
       if (node instanceof vscode.Uri) {
         return bookmarks.entryOf(undefined) ? bookmarks.editNote() : commands.editNote(undefined);
       }
-      const n = node ?? treeView.selection[0];
+      if (node !== undefined) {
+        return isBookmarkNode(node) ? bookmarks.editNote(node) : commands.editNote(node as TreeNode);
+      }
+      // 命令選擇區／無參數呼叫：游標所在行有看得到的行號書籤時優先編輯它的備註，否則改看側邊欄選取或游標所在函式
+      if (bookmarks.entryOf(undefined)) {
+        return bookmarks.editNote();
+      }
+      const n = treeView.visible ? treeView.selection[0] : undefined;
       return isBookmarkNode(n) ? bookmarks.editNote(n) : commands.editNote(n);
     }),
     reg(PREVIEW_NOTE_COMMAND, (arg?: unknown) => {
       if (arg instanceof vscode.Uri) {
         return bookmarks.entryOf(undefined) ? bookmarks.previewNote() : commands.previewNote(undefined);
       }
-      const n = arg ?? treeView.selection[0];
+      if (arg !== undefined) {
+        return isBookmarkNode(arg) || isBookmarkLinkArg(arg) ? bookmarks.previewNote(arg) : commands.previewNote(arg as TreeNode);
+      }
+      if (bookmarks.entryOf(undefined)) {
+        return bookmarks.previewNote();
+      }
+      const n = treeView.visible ? treeView.selection[0] : undefined;
       return isBookmarkNode(n) || isBookmarkLinkArg(n) ? bookmarks.previewNote(n) : commands.previewNote(n as TreeNode);
     }),
     // 函式名稱提示中的連結：加入／移除書籤、重新命名、編輯備註
@@ -432,6 +478,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
       return n === undefined ? extras.setNumber(undefined) : extras.toggleNumber(n, confirmed);
     }),
     reg('functionBookmarks.goToNumberedBookmark', (arg?: unknown) => extras.goToNumber(numberArg(arg))),
+    reg('functionBookmarks.tourNext', () => extras.tour(1)),
+    reg('functionBookmarks.tourPrevious', () => extras.tour(-1)),
     reg('functionBookmarks.setBookmarkColor', (node?: unknown, value?: string | null) =>
       extras.setColor(extrasArg(node), value),
     ),
@@ -444,7 +492,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     reg('functionBookmarks.stopTestingDetectionRules', () => ruleTester.stop()),
     reg('functionBookmarks.nextBookmark', () => bookmarks.go(1)),
     reg('functionBookmarks.previousBookmark', () => bookmarks.go(-1)),
-    reg('functionBookmarks.searchBookmarks', () => searchMarks(store, favorites)),
+    reg('functionBookmarks.searchBookmarks', () =>
+      searchMarks(store, favorites, {
+        hideNotOnBranch: provider.hideNotOnBranch,
+        openFavorite: (fav) => commands.openFavorite(fav),
+      }),
+    ),
     reg('functionBookmarks.showBookmarksOnly', () => applyViewState('bookmarks')),
     reg('functionBookmarks.groupBookmarksByTag', () => applyViewState(provider.filterMode, 'tag')),
     reg('functionBookmarks.groupBookmarksByFile', () => applyViewState(provider.filterMode, 'file')),
@@ -504,10 +557,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     { dispose: () => [refreshTimer, cursorTimer].forEach((t) => t && clearTimeout(t)) },
   );
 
-  await favorites.refresh();
-  await refreshNow();
-  // 啟動時檢查書籤所在的檔案在上次關閉後有沒有被改過（不阻擋啟動）
-  void external.init();
+  startup.record('registerAndState', performance.now() - setupStart);
+  startup.record('activate.total', startup.elapsed());
+  // 書籤清單已在 store.init() 後立即可用；函式書籤驗證、目前檔案偵測與外部變動檢查改在背景執行，不阻擋啟動
+  void startup.measure('favorites.background', () => favorites.refresh());
+  void startup.measure('refreshNow.background', () => refreshNow());
+  void startup.measure('external.init', () => external.init());
   return {
     provider,
     store,
@@ -531,6 +586,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     extendMarkdownIt: (md: unknown) =>
       // 已經裝了 Markdown Preview Mermaid Support 就交給它，避免重複繪圖
       vscode.extensions.getExtension('bierner.markdown-mermaid') ? md : mermaidPlugin(md),
+    startupTimings: startup.timings,
   };
 }
 

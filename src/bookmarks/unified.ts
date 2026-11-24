@@ -19,8 +19,9 @@ export function allBookmarkItems(store: MarkStore, favorites: FavoritesModel): B
     items.push({ kind: 'line', folder: e.folder, uri: e.uri, file: e.bookmark.file, line: e.bookmark.line, entry: e });
   }
   for (const fav of favorites.all) {
-    // 函式找不到時沒有行號，排序時放在同檔案的最後
-    items.push({ kind: 'symbol', folder: fav.folder, uri: fav.uri, file: fav.mark.file, line: fav.symbol?.nameLine, fav });
+    // 函式找不到時沒有行號，排序時放在同檔案的最後；背景尚未解析完前先用上次記住的行號
+    const line = fav.symbol?.nameLine ?? (fav.status === 'ok' ? fav.mark.line : undefined);
+    items.push({ kind: 'symbol', folder: fav.folder, uri: fav.uri, file: fav.mark.file, line, fav });
   }
   return items;
 }
@@ -40,7 +41,8 @@ export function shownBookmarkItems(
   }
   if (store.favoritesShown) {
     for (const fav of favorites.all) {
-      items.push({ kind: 'symbol', folder: fav.folder, uri: fav.uri, file: fav.mark.file, line: fav.symbol?.nameLine, fav });
+      const line = fav.symbol?.nameLine ?? (fav.status === 'ok' ? fav.mark.line : undefined);
+      items.push({ kind: 'symbol', folder: fav.folder, uri: fav.uri, file: fav.mark.file, line, fav });
     }
   }
   return items;

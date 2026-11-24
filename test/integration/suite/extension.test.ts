@@ -5,6 +5,10 @@ import type { ExtensionApi } from '../../../src/extension';
 import { addBookmark, emptyStore, setAlias, setFavorite, setNote, setTags } from '../../../src/storage/marks';
 import { makeAnchor, newBookmarkId } from '../../../src/bookmarks/model';
 import { BookmarkSearchBox } from '../../../src/views/searchBox';
+import { tagsPrompt } from '../../../src/bookmarks/commands';
+import { NoteEditor, saveShortcut } from '../../../src/views/noteEditor';
+import { LSP_KIND } from '../../../src/symbols/symbolService';
+import { buildSearchMarkItems, filterSearchMarkItems } from '../../../src/views/search';
 import { searchFields } from '../../../src/views/tree';
 import type { BmGroupNode, BookmarkNode, DirNode, FavoriteNode, FileNode, SymbolNode, TreeNode } from '../../../src/views/tree';
 
@@ -2958,6 +2962,577 @@ describe('Function Bookmarks（整合測試）', () => {
       for (const id of ['clearSearch', 'focusSearch', 'searchToList', 'searchClearAndClose']) {
         assert.ok(all.includes(`functionBookmarks.${id}`), id);
       }
+    });
+  });
+
+  describe('啟動效能與計時紀錄', () => {
+    it('啟動完成後記錄各階段耗時，且啟動不卡在背景掃描', async () => {
+      const phases = api.startupTimings.map((t) => t.phase);
+      assert.ok(phases.includes('store.init'), '有記錄 store.init');
+      assert.ok(phases.includes('branches.refresh'), '有記錄 branches.refresh');
+      assert.ok(phases.includes('activate.total'), '有記錄 activate.total');
+      // 驗證新增函式書籤後，不必等 favorites.refresh() 就能立即在清單看得到
+      await api.store.update(folder(), (d) =>
+        setFavorite(d, { file: 'app/views.py', path: 'index', kind: 'function' }, true, 1),
+      );
+      assert.strictEqual(api.favorites.all.length, 1, '寫入 store 後立即可見函式書籤');
+      await api.favorites.whenReady();
+      assert.strictEqual(api.favorites.all[0].status, 'ok');
+    });
+  });
+
+  describe('快速搜尋書籤（searchMarks 補強）', () => {
+    it('說明列帶出備註第一行，並能搜尋備註全文（含第二行）與標示需確認／不在此分支', async () => {
+      await api.store.update(folder(), (d) => {
+        let next = addBookmark(d, {
+          id: newBookmarkId(),
+          file: 'app/views.py',
+          line: 0,
+          label: '入口點',
+          note: '第一行摘要說明\n第二行關鍵字_UNIQUE_NOTE_BODY',
+          status: 'lost',
+        });
+        next = addBookmark(next, {
+          id: newBookmarkId(),
+          file: 'app/views.py',
+          line: 2,
+          label: '別的分支書籤',
+          status: 'notOnBranch',
+        });
+        next = setFavorite(next, { file: 'app/views.py', path: 'index', kind: 'function' }, true, 0);
+        next = setNote(next, { file: 'app/views.py', path: 'index', kind: 'function' }, '函式備註首行\n函式備註次行_FN_BODY', 0);
+        return next;
+      });
+      await api.favorites.refresh();
+
+      // 預設不隱藏不在此分支
+      const all = buildSearchMarkItems(api.store, api.favorites, { hideNotOnBranch: false });
+      assert.strictEqual(all.length, 3);
+      const lostItem = all.find((i) => i.label.includes('入口點'));
+      const awayItem = all.find((i) => i.label.includes('別的分支書籤'));
+      const fnItem = all.find((i) => i.label.includes('index'));
+      assert.ok(lostItem && lostItem.label.startsWith('$(warning) '), '需確認顯示警告圖示');
+      assert.ok(lostItem.description?.includes('needs checking'), '需確認標示文字');
+      assert.ok(lostItem.detail?.includes('第一行摘要說明'), '說明列帶出備註第一行');
+      assert.ok(!lostItem.detail?.includes('UNIQUE_NOTE_BODY'), '說明列只帶第一行');
+      assert.ok(awayItem && awayItem.label.startsWith('$(git-branch) '), '不在此分支顯示分支圖示');
+      assert.ok(awayItem.description?.includes('not on this branch'), '不在此分支標示文字');
+      assert.ok(fnItem && fnItem.detail?.includes('函式備註首行'), '函式書籤說明列帶出備註第一行');
+
+      // 透過 filter.ts 可搜到備註第二行內容
+      assert.strictEqual(filterSearchMarkItems(all, 'UNIQUE_NOTE_BODY').length, 1);
+      assert.strictEqual(filterSearchMarkItems(all, 'FN_BODY').length, 1);
+
+      // 跟隨「隱藏不在此分支」設定
+      const hidden = buildSearchMarkItems(api.store, api.favorites, { hideNotOnBranch: true });
+      assert.strictEqual(hidden.length, 2);
+      assert.ok(!hidden.some((i) => i.label.includes('別的分支書籤')));
+    });
+  });
+
+  describe('標籤編輯提示與 autoNumber 一致', () => {
+    it('行號書籤與函式書籤共用所有書籤的標籤提示清單', async () => {
+      await api.store.update(folder(), (d) => {
+        let next = addBookmark(d, { id: newBookmarkId(), file: 'app/views.py', line: 0, tags: ['lineTag', 'shared'] });
+        next = setFavorite(next, { file: 'app/views.py', path: 'index', kind: 'function' }, true, 0);
+        next = setTags(next, { file: 'app/views.py', path: 'index', kind: 'function' }, ['fnTag', 'shared']);
+        return next;
+      });
+      assert.deepStrictEqual(api.store.allTags(), ['fnTag', 'lineTag', 'shared']);
+      const prompt = tagsPrompt(api.store);
+      assert.ok(prompt.includes('#fnTag') && prompt.includes('#lineTag') && prompt.includes('#shared'), prompt);
+    });
+
+    it('函式加標籤時順便新增書籤會套用 autoNumber 設定', async () => {
+      const cfg = vscode.workspace.getConfiguration('functionBookmarks');
+      await cfg.update('bookmarks.autoNumber', true, vscode.ConfigurationTarget.Workspace);
+      try {
+        await open(workspaceFile('app', 'views.py'), api);
+        const indexNode = findNode(api.provider.currentSymbolNodes, 'index')!;
+        // 還沒加入書籤，直接加標籤 → 順便加入函式書籤並自動編號 1
+        await api.commands.editTags(indexNode, '#core');
+        const mark = api.store.get(workspaceFile('app', 'views.py'), indexNode.symbol);
+        assert.strictEqual(mark?.favorite, true);
+        assert.deepStrictEqual(mark?.tags, ['core']);
+        assert.strictEqual(mark?.number, 1, '應套用 autoNumber 自動配 1 號');
+
+        // 已經是書籤再改標籤：不重新配號（仍維持 1 號）
+        await api.commands.editTags(indexNode, '#core #auth');
+        const updated = api.store.get(workspaceFile('app', 'views.py'), indexNode.symbol);
+        assert.strictEqual(updated?.number, 1);
+      } finally {
+        await cfg.update('bookmarks.autoNumber', undefined, vscode.ConfigurationTarget.Workspace);
+      }
+    });
+  });
+
+  describe('小細節（清理 notes、存檔快捷鍵提示、storage 切換、LSP 種類）', () => {
+    it('NoteEditor 啟動時一併清除異常關閉殘留的 notes/ 與 previews/ 暫存檔', async () => {
+      const base = workspaceFile('.tmp-note-cleanup-test');
+      const staleNote = vscode.Uri.joinPath(base, 'notes', 'stale.md');
+      const stalePreview = vscode.Uri.joinPath(base, 'previews', 'stale.md');
+      try {
+        await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(base, 'notes'));
+        await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(base, 'previews'));
+        await vscode.workspace.fs.writeFile(staleNote, new TextEncoder().encode('leftover'));
+        await vscode.workspace.fs.writeFile(stalePreview, new TextEncoder().encode('leftover'));
+        const editor = new NoteEditor(base);
+        try {
+          await editor.cleanup;
+          const noteExists = await vscode.workspace.fs.stat(staleNote).then(() => true, () => false);
+          const prevExists = await vscode.workspace.fs.stat(stalePreview).then(() => true, () => false);
+          assert.strictEqual(noteExists, false, '殘留的 notes 暫存檔已清除');
+          assert.strictEqual(prevExists, false, '殘留的 previews 暫存檔已清除');
+        } finally {
+          editor.dispose();
+        }
+      } finally {
+        await vscode.workspace.fs.delete(base, { recursive: true }).then(undefined, () => undefined);
+      }
+    });
+
+    it('saveShortcut 依平台顯示 Cmd+S 或 Ctrl+S', () => {
+      assert.strictEqual(saveShortcut('darwin'), 'Cmd+S');
+      assert.strictEqual(saveShortcut('win32'), 'Ctrl+S');
+      assert.strictEqual(saveShortcut('linux'), 'Ctrl+S');
+    });
+
+    it('LSP 後備涵蓋 Interface／Struct／Enum／Module／Namespace／Package', () => {
+      assert.strictEqual(LSP_KIND[vscode.SymbolKind.Interface], 'class');
+      assert.strictEqual(LSP_KIND[vscode.SymbolKind.Struct], 'class');
+      assert.strictEqual(LSP_KIND[vscode.SymbolKind.Enum], 'class');
+      assert.strictEqual(LSP_KIND[vscode.SymbolKind.Module], 'block');
+      assert.strictEqual(LSP_KIND[vscode.SymbolKind.Namespace], 'block');
+      assert.strictEqual(LSP_KIND[vscode.SymbolKind.Package], 'block');
+    });
+
+    it('切換 functionBookmarks.storage 偵測來源資料、不悄悄覆蓋目標，並支援複製與合併', async () => {
+      const cfg = vscode.workspace.getConfiguration('functionBookmarks');
+      api.store.suppressStoragePrompt = true;
+      api.store.lastStorageSwitch = undefined;
+      try {
+        // 先在 file 模式建立一筆書籤
+        await api.store.update(folder(), (d) =>
+          addBookmark(d, { id: 'from-file', file: 'app/views.py', line: 1, label: '來自檔案' }),
+        );
+        // 切到 workspaceState（此時 workspaceState 是空的）
+        await cfg.update('storage', 'workspaceState', vscode.ConfigurationTarget.Workspace);
+        const sw1 = await waitFor(() => api.store.lastStorageSwitch, (v) => v?.to === 'workspaceState');
+        assert.ok(sw1, '觸發 storage 切換偵測');
+        assert.strictEqual(sw1.from, 'file');
+        assert.strictEqual(sw1.targetHadData, false);
+        assert.strictEqual(api.store.allBookmarks().length, 0, '尚未選擇複製前不主動覆蓋目標');
+
+        // 執行複製並加上 workspaceState 專屬書籤
+        await api.store.migrateStorageData(sw1.prevData, 'copy');
+        assert.deepStrictEqual(api.store.allBookmarks().map((e) => e.bookmark.id), ['from-file']);
+        await api.store.update(folder(), (d) =>
+          addBookmark(d, { id: 'from-ws', file: 'app/views.py', line: 3, label: '來自工作區狀態' }),
+        );
+
+        // 再切回 file（此時 file 端已經有 from-file）→ 絕不悄悄覆蓋，可選擇合併
+        api.store.lastStorageSwitch = undefined;
+        await cfg.update('storage', 'file', vscode.ConfigurationTarget.Workspace);
+        const sw2 = await waitFor(() => api.store.lastStorageSwitch, (v) => v?.to === 'file');
+        assert.ok(sw2, '切回 file 時觸發偵測');
+        assert.strictEqual(sw2.targetHadData, true, '偵測到目標端已有資料');
+        assert.deepStrictEqual(api.store.allBookmarks().map((e) => e.bookmark.id), ['from-file'], '不悄悄覆蓋目標端');
+
+        await api.store.migrateStorageData(sw2.prevData, 'merge');
+        assert.deepStrictEqual(api.store.allBookmarks().map((e) => e.bookmark.id).sort(), ['from-file', 'from-ws'], '合併保留兩邊');
+      } finally {
+        // 清空 workspaceState 殘留資料並恢復設定
+        await cfg.update('storage', 'workspaceState', vscode.ConfigurationTarget.Workspace);
+        await waitFor(() => vscode.workspace.getConfiguration('functionBookmarks').get('storage'), (v) => v === 'workspaceState');
+        await api.store.update(folder(), () => emptyStore());
+        await cfg.update('storage', undefined, vscode.ConfigurationTarget.Workspace);
+        await waitFor(() => vscode.workspace.getConfiguration('functionBookmarks').get('storage'), (v) => v === 'file');
+        api.store.lastStorageSwitch = undefined;
+        api.store.suppressStoragePrompt = false;
+      }
+    });
+  });
+
+  describe('備註存檔是否關閉分頁（notes.closeOnSave）', () => {
+    it('closeOnSave 設為 false 時存檔只寫回備註不關分頁，可連續存檔，關閉後才清暫存檔', async () => {
+      const cfg = vscode.workspace.getConfiguration('functionBookmarks');
+      await cfg.update('notes.closeOnSave', false, vscode.ConfigurationTarget.Workspace);
+      try {
+        await open(workspaceFile('app', 'views.py'), api);
+        const indexNode = findNode(api.provider.currentSymbolNodes, 'index')!;
+        await api.commands.setFavorite(indexNode, true);
+        await api.commands.editNote(indexNode);
+        const noteEditor = vscode.window.activeTextEditor!;
+        assert.ok(api.notes.isNoteDocument(noteEditor.document.uri), '已開啟備註編輯分頁');
+
+        // 第一次編輯並存檔
+        await noteEditor.edit((eb) => eb.insert(new vscode.Position(0, 0), '第一版備註'));
+        await noteEditor.document.save();
+        await waitFor(() => api.store.get(workspaceFile('app', 'views.py'), indexNode.symbol)?.note, (v) => v === '第一版備註');
+        assert.strictEqual(api.store.get(workspaceFile('app', 'views.py'), indexNode.symbol)?.note, '第一版備註');
+        assert.strictEqual(api.notes.isNoteDocument(noteEditor.document.uri), true, '不應關閉分頁或結束 session');
+        assert.strictEqual(noteEditor.document.isClosed, false);
+
+        // 第二次編輯並存檔仍會寫回
+        await noteEditor.edit((eb) => eb.insert(new vscode.Position(0, 5), '\n第二版補充'));
+        await noteEditor.document.save();
+        await waitFor(
+          () => api.store.get(workspaceFile('app', 'views.py'), indexNode.symbol)?.note,
+          (v) => v === '第一版備註\n第二版補充',
+        );
+        assert.strictEqual(api.store.get(workspaceFile('app', 'views.py'), indexNode.symbol)?.note, '第一版備註\n第二版補充');
+        assert.strictEqual(api.notes.isNoteDocument(noteEditor.document.uri), true);
+
+        // 手動關閉分頁後清掉 session 與暫存檔
+        const noteUri = noteEditor.document.uri;
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await waitFor(() => api.notes.isNoteDocument(noteUri), (v) => !v);
+        assert.strictEqual(api.notes.isNoteDocument(noteUri), false);
+      } finally {
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await cfg.update('notes.closeOnSave', undefined, vscode.ConfigurationTarget.Workspace);
+      }
+    });
+  });
+
+  describe('依編號導覽與匯出導讀文件', () => {
+    it('tourNext／tourPrevious 依 1→9 循環跳轉（跨檔案），更新狀態列並處理無編號與有備註', async () => {
+      const allCmds = await vscode.commands.getCommands(true);
+      assert.ok(allCmds.includes('functionBookmarks.tourNext'));
+      assert.ok(allCmds.includes('functionBookmarks.tourPrevious'));
+
+      // 沒有編號書籤時回傳 undefined
+      const none = await vscode.commands.executeCommand('functionBookmarks.tourNext');
+      assert.strictEqual(none, undefined);
+
+      // 建立 2 號（函式書籤，含備註，views.py）與 5 號（行號書籤，docs/guide.md）
+      await api.store.update(folder(), (d) => {
+        let next = setFavorite(d, { file: 'app/views.py', path: 'index', kind: 'function' }, true, 0);
+        next = setNote(next, { file: 'app/views.py', path: 'index', kind: 'function' }, '導覽備註內容', 0);
+        next = { ...next, symbols: next.symbols.map((m) => ({ ...m, number: 2 })) };
+        next = addBookmark(next, { id: newBookmarkId(), file: 'docs/guide.md', line: 2, label: '第二站', number: 5 });
+        return next;
+      });
+      await api.favorites.refresh();
+
+      const step1 = await vscode.commands.executeCommand<{ number: number; index: number; total: number; hasNote: boolean; uri: vscode.Uri }>('functionBookmarks.tourNext');
+      assert.strictEqual(step1?.number, 2);
+      assert.strictEqual(step1?.index, 1);
+      assert.strictEqual(step1?.total, 2);
+      assert.strictEqual(step1?.hasNote, true);
+      assert.ok(api.extras.lastTourStatus?.includes('1/2'));
+
+      const step2 = await vscode.commands.executeCommand<{ number: number; index: number; total: number; hasNote: boolean; uri: vscode.Uri }>('functionBookmarks.tourNext');
+      assert.strictEqual(step2?.number, 5);
+      assert.strictEqual(step2?.index, 2);
+      assert.strictEqual(step2?.hasNote, false);
+      assert.ok(step2?.uri.path.endsWith('docs/guide.md'));
+      assert.ok(api.extras.lastTourStatus?.includes('2/2'));
+
+      // 循環回第一個
+      const wrap = await vscode.commands.executeCommand<{ number: number; index: number }>('functionBookmarks.tourNext');
+      assert.strictEqual(wrap?.number, 2);
+      assert.strictEqual(wrap?.index, 1);
+
+      // 往回跳到最後一個
+      const prev = await vscode.commands.executeCommand<{ number: number; index: number }>('functionBookmarks.tourPrevious');
+      assert.strictEqual(prev?.number, 5);
+      assert.strictEqual(prev?.index, 2);
+    });
+
+    it('匯出導讀文件（Markdown）：編號在前、函式取本體（超 30 行截斷）、行號取前後 3 行、不含程式碼省略片段', async () => {
+      const longFile = workspaceFile('tmp_long_guide.py');
+      const longLines = ['def very_long_fn():', ...Array.from({ length: 35 }, (_, i) => `    v${i} = ${i}`), '    return v0', ''];
+      await vscode.workspace.fs.writeFile(longFile, new TextEncoder().encode(longLines.join('\n')));
+      try {
+        await api.store.update(folder(), (d) => {
+          let next = setFavorite(d, { file: 'tmp_long_guide.py', path: 'very_long_fn', kind: 'function' }, true, 0);
+          next = setNote(next, { file: 'tmp_long_guide.py', path: 'very_long_fn', kind: 'function' }, '超長函式備註', 0);
+          next = { ...next, symbols: next.symbols.map((m) => ({ ...m, number: 1 })) };
+          next = addBookmark(next, {
+            id: newBookmarkId(),
+            file: 'app/views.py',
+            line: 5,
+            label: '重點行',
+            note: '行號備註原文',
+            number: 3,
+          });
+          next = addBookmark(next, {
+            id: newBookmarkId(),
+            file: 'app/views.py',
+            line: 1,
+            label: '未編號書籤',
+          });
+          return next;
+        });
+        await api.favorites.refresh();
+
+        const outUri = workspaceFile('.tmp-guide-out.md');
+        const withCode = await vscode.commands.executeCommand<{ count: number; text: string }>('functionBookmarks.exportBookmarks', {
+          folder: folder(),
+          scope: { kind: 'all' },
+          format: 'guide',
+          includeCode: true,
+          target: outUri,
+        });
+        assert.strictEqual(withCode?.count, 3);
+        const text = withCode!.text;
+        assert.ok(text.indexOf('## 1. very_long_fn') < text.indexOf('## 3. 重點行'), '有編號的依 1→3 排最前');
+        assert.ok(text.indexOf('## 3. 重點行') < text.indexOf('## 未編號書籤'), '無編號接在後面');
+        assert.ok(text.includes('```python\ndef very_long_fn():'), '函式書籤取函式本體');
+        assert.ok(text.includes('more line(s) omitted'), '超過 30 行截斷並註明');
+        assert.ok(text.includes('超長函式備註'), '保留函式備註原文');
+        assert.ok(text.includes('行號備註原文'), '保留行號備註原文');
+
+        // 不含程式碼內容時省略程式碼區塊
+        const noCode = await vscode.commands.executeCommand<{ count: number; text: string }>('functionBookmarks.exportBookmarks', {
+          folder: folder(),
+          scope: { kind: 'all' },
+          format: 'guide',
+          includeCode: false,
+          target: outUri,
+        });
+        assert.strictEqual(noCode?.count, 3);
+        assert.ok(!noCode!.text.includes('```'), '不含程式碼內容應省略程式碼片段');
+        assert.ok(noCode!.text.includes('超長函式備註'), '仍保留備註原文');
+        await vscode.workspace.fs.delete(outUri).then(undefined, () => undefined);
+      } finally {
+        await vscode.workspace.fs.delete(longFile).then(undefined, () => undefined);
+      }
+    });
+  });
+
+  describe('行號右鍵與各入口編輯備註（卡 d24b180b）', () => {
+    const fsp = require('fs/promises') as typeof import('fs/promises');
+    const fileL = () => workspaceFile('app', 'tmp_line_note.py');
+    const relL = 'app/tmp_line_note.py';
+    const LINES = [
+      'def first_fn():',
+      '    a = 1',
+      '    return a',
+      '',
+      'top_val = 42',
+      '',
+      'def second_fn():',
+      '    b = 2',
+      '    return b',
+      '',
+    ];
+    const firstKey = { file: relL, path: 'first_fn', kind: 'function' as const };
+    const secondKey = { file: relL, path: 'second_fn', kind: 'function' as const };
+    const foreignSource = (author: string) => ({ author, importId: 'i-ln', originalId: newBookmarkId(), importedAt: '2026-01-01T00:00:00.000Z' });
+
+    async function openAt(line: number): Promise<vscode.TextEditor> {
+      const editor = await open(fileL(), api);
+      editor.selection = new vscode.Selection(line, 0, line, 0);
+      await api.external.idle();
+      return editor;
+    }
+
+    /** 在目前已開啟的備註編輯分頁填入文字、存檔，並等分頁與預覽關閉。 */
+    async function writeAndSaveNote(text: string): Promise<string> {
+      const noteEditor = await waitFor(
+        () => vscode.window.activeTextEditor,
+        (ed) => !!ed && api.notes.isNoteDocument(ed.document.uri),
+      );
+      assert.ok(noteEditor && api.notes.isNoteDocument(noteEditor.document.uri), '應開啟備註編輯分頁');
+      const prevText = noteEditor.document.getText();
+      const fullRange = new vscode.Range(0, 0, noteEditor.document.lineCount, 0);
+      await noteEditor.edit((eb) => eb.replace(fullRange, text));
+      const noteUri = noteEditor.document.uri;
+      await noteEditor.document.save();
+      await waitFor(() => api.notes.isNoteDocument(noteUri), (open) => !open);
+      await waitFor(previewTabCount, (n) => n === 0);
+      return prevText;
+    }
+
+    before(async () => {
+      await fsp.writeFile(fileL().fsPath, LINES.join('\n'));
+    });
+
+    afterEach(async () => {
+      api.store.setHiddenSources([]);
+      await vscode.workspace.getConfiguration('functionBookmarks').update('bookmarks.autoNumber', undefined, vscode.ConfigurationTarget.Workspace);
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    });
+
+    after(async () => {
+      api.store.setHiddenSources([]);
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      await fsp.rm(fileL().fsPath, { force: true });
+    });
+
+    it('package.json：行號右鍵選單在既有四項之後加入「編輯備註」；側邊欄預覽備註不重複比對書籤', () => {
+      const pkg = findExtension()!.packageJSON as {
+        contributes: { menus: Record<string, { command: string; group?: string; when?: string }[]> };
+      };
+      const lineMenu = pkg.contributes.menus['editor/lineNumber/context'];
+      assert.deepStrictEqual(
+        lineMenu.map((m) => [m.command, m.group]),
+        [
+          ['functionBookmarks.toggleBookmark', 'functionBookmarks@1'],
+          ['functionBookmarks.addLabeledBookmark', 'functionBookmarks@2'],
+          ['functionBookmarks.setBookmarkNumber', 'functionBookmarks@3'],
+          ['functionBookmarks.setBookmarkColor', 'functionBookmarks@4'],
+          ['functionBookmarks.editNote', 'functionBookmarks@5'],
+        ],
+      );
+      const previewRules = pkg.contributes.menus['view/item/context'].filter((m) => m.command === 'functionBookmarks.previewNote');
+      const forBookmark = previewRules.filter((r) => r.when?.includes('fbBookmark'));
+      const forSymbol = previewRules.filter((r) => !r.when?.includes('fbBookmark'));
+      assert.strictEqual(forBookmark.length, 1);
+      assert.strictEqual(forSymbol.length, 1);
+      assert.ok(forSymbol[0].when?.includes('^fbSymbol'), `不應重複比對 fbBookmark：${forSymbol[0].when}`);
+    });
+
+    it('行號右鍵（已有行號書籤，且游標在不同行）：編輯右鍵那一行的書籤備註，不動游標行', async () => {
+      await api.store.update(folder(), (d) =>
+        addBookmark(d, { id: 'bm-line-7', file: relL, line: 7, label: '目標行', note: '原本備註', anchor: makeAnchor(LINES, 7, 'second_fn', 6) }),
+      );
+      await openAt(1); // 游標停在第 1 行（first_fn 裡面），右鍵第 8 行（1-based = line 7）
+      await vscode.commands.executeCommand('functionBookmarks.editNote', { lineNumber: 8, uri: fileL() });
+      const prev = await writeAndSaveNote('修改後的行號備註');
+      assert.strictEqual(prev, '原本備註');
+      assert.strictEqual(api.store.bookmarksFor(fileL()).find((b) => b.id === 'bm-line-7')?.note, '修改後的行號備註');
+      assert.strictEqual(api.store.bookmarksFor(fileL()).length, 1, '不應在游標行多建書籤');
+      assert.strictEqual(api.store.get(fileL(), firstKey), undefined, '不應動到游標所在的函式');
+    });
+
+    it('行號右鍵（函式名稱行已有函式書籤，且游標在不同行）：編輯該函式書籤的備註', async () => {
+      await api.store.update(folder(), (d) => setNote(setFavorite(d, secondKey, true, 6), secondKey, '舊函式備註', 6));
+      await api.favorites.refresh();
+      await openAt(4); // 游標在第 4 行，右鍵第 7 行（1-based = line 6，second_fn）
+      await vscode.commands.executeCommand('functionBookmarks.editNote', { lineNumber: 7, uri: fileL() });
+      const prev = await writeAndSaveNote('新函式備註');
+      assert.strictEqual(prev, '舊函式備註');
+      assert.strictEqual(api.store.get(fileL(), secondKey)?.note, '新函式備註');
+      assert.strictEqual(api.store.bookmarksFor(fileL()).length, 0, '不應另外建立行號書籤');
+    });
+
+    it('行號右鍵（沒書籤的一般行，游標在不同行）：先建行號書籤並套用 autoNumber，再開備註編輯', async () => {
+      await vscode.workspace.getConfiguration('functionBookmarks').update('bookmarks.autoNumber', true, vscode.ConfigurationTarget.Workspace);
+      await openAt(0); // 游標在第 0 行，右鍵第 5 行（1-based = line 4，top_val = 42）
+      await vscode.commands.executeCommand('functionBookmarks.editNote', { lineNumber: 5, uri: fileL() });
+      await writeAndSaveNote('新建行號書籤備註');
+      const bms = api.store.bookmarksFor(fileL());
+      assert.strictEqual(bms.length, 1);
+      assert.strictEqual(bms[0].line, 4);
+      assert.strictEqual(bms[0].number, 1, '應套用 autoNumber 自動配號');
+      assert.strictEqual(bms[0].note, '新建行號書籤備註');
+      assert.strictEqual(api.store.get(fileL(), firstKey), undefined);
+    });
+
+    it('行號右鍵（沒書籤的函式名稱行，游標在不同行）：先建函式書籤並套用 autoNumber，再開備註編輯', async () => {
+      await vscode.workspace.getConfiguration('functionBookmarks').update('bookmarks.autoNumber', true, vscode.ConfigurationTarget.Workspace);
+      await openAt(4); // 游標在第 4 行，右鍵第 7 行（1-based = line 6，second_fn）
+      await vscode.commands.executeCommand('functionBookmarks.editNote', { lineNumber: 7, uri: fileL() });
+      await writeAndSaveNote('新建函式書籤備註');
+      const mark = api.store.get(fileL(), secondKey);
+      assert.strictEqual(mark?.favorite, true, '函式名稱行應建立函式書籤');
+      assert.strictEqual(mark?.number, 1, '應套用 autoNumber 自動配號');
+      assert.strictEqual(mark?.note, '新建函式書籤備註');
+      assert.strictEqual(api.store.bookmarksFor(fileL()).length, 0, '不應建行號書籤');
+    });
+
+    it('行號右鍵（同一行同時有行號書籤與函式書籤）：優先編輯行號書籤，不動函式書籤', async () => {
+      await api.store.update(folder(), (d) => {
+        let next = setNote(setFavorite(d, firstKey, true, 0), firstKey, '函式原備註', 0);
+        return addBookmark(next, { id: 'bm-overlap', file: relL, line: 0, label: '同行行號書籤', anchor: makeAnchor(LINES, 0, 'first_fn', 0) });
+      });
+      await api.favorites.refresh();
+      await openAt(4);
+      await vscode.commands.executeCommand('functionBookmarks.editNote', { lineNumber: 1, uri: fileL() });
+      await writeAndSaveNote('同行行號新備註');
+      assert.strictEqual(api.store.bookmarksFor(fileL()).find((b) => b.id === 'bm-overlap')?.note, '同行行號新備註');
+      assert.strictEqual(api.store.get(fileL(), firstKey)?.note, '函式原備註');
+    });
+
+    it('行號右鍵：不在此分支與被來源篩選隱藏的書籤不算，不會被誤改', async () => {
+      await api.store.update(folder(), (d) => {
+        let next = addBookmark(d, {
+          id: 'bm-away',
+          file: relL,
+          line: 4,
+          note: '他分支原備註',
+          status: 'notOnBranch',
+          anchor: makeAnchor(['other_0', 'other_1', 'other_2', 'other_3', 'other_4'], 4),
+        });
+        next = addBookmark(next, {
+          id: 'bm-bob',
+          file: relL,
+          line: 7,
+          note: 'bob原備註',
+          source: foreignSource('bob'),
+          anchor: makeAnchor(LINES, 7, 'second_fn', 6),
+        });
+        return addBookmark(next, {
+          id: 'bm-mine-hidden',
+          file: relL,
+          line: 1,
+          note: '自己原備註',
+          anchor: makeAnchor(LINES, 1, 'first_fn', 0),
+        });
+      });
+      await openAt(0);
+
+      // 1. 不在此分支的書籤（line 4）：改建新書籤並編輯新書籤的備註，原書籤不動
+      await vscode.commands.executeCommand('functionBookmarks.editNote', { lineNumber: 5, uri: fileL() });
+      await writeAndSaveNote('本分支新備註');
+      const at4 = api.store.bookmarksFor(fileL()).filter((b) => b.line === 4);
+      assert.strictEqual(at4.length, 2);
+      assert.strictEqual(at4.find((b) => b.id === 'bm-away')?.note, '他分支原備註', '不在此分支的書籤不應被改');
+      assert.strictEqual(at4.find((b) => b.id !== 'bm-away')?.note, '本分支新備註');
+
+      // 2. 被來源篩選隱藏的別人書籤（bob，line 7）：改建自己的書籤並編輯，bob 的不動
+      api.store.setHiddenSources(['bob']);
+      await vscode.commands.executeCommand('functionBookmarks.editNote', { lineNumber: 8, uri: fileL() });
+      await writeAndSaveNote('自己的新備註');
+      const at7 = api.store.bookmarksFor(fileL()).filter((b) => b.line === 7);
+      assert.strictEqual(at7.length, 2);
+      assert.strictEqual(at7.find((b) => b.id === 'bm-bob')?.note, 'bob原備註', '被隱藏的 bob 書籤不應被改');
+      assert.strictEqual(at7.find((b) => b.id !== 'bm-bob')?.note, '自己的新備註');
+
+      // 3. 「我的」被來源篩選隱藏，且該行已有自己的書籤（line 1）：不開備註編輯、不重複新增、只提示
+      api.store.setHiddenSources(['']);
+      const noticesBefore = api.bookmarks.mineHiddenNotices;
+      await vscode.commands.executeCommand('functionBookmarks.editNote', { lineNumber: 2, uri: fileL() });
+      assert.strictEqual(api.bookmarks.mineHiddenNotices, noticesBefore + 1, '應提示「我的」目前被隱藏');
+      assert.strictEqual(api.notes.isNoteDocument(vscode.window.activeTextEditor!.document.uri), false, '不應開啟被隱藏書籤的備註分頁');
+      const at1 = api.store.bookmarksFor(fileL()).filter((b) => b.line === 1);
+      assert.strictEqual(at1.length, 1, '不應重複新增');
+      assert.strictEqual(at1[0].note, '自己原備註', '被隱藏的書籤不應被改');
+    });
+
+    it('其他入口（編輯器內文右鍵、側邊欄右鍵、命令選擇區）：行號書籤的編輯備註與預覽都正常', async () => {
+      await api.store.update(folder(), (d) =>
+        addBookmark(d, { id: 'bm-entries', file: relL, line: 4, label: '頂層行號書籤', anchor: makeAnchor(LINES, 4) }),
+      );
+      await openAt(4);
+
+      // 1. 編輯器內文右鍵（傳入檔案 Uri）
+      await vscode.commands.executeCommand('functionBookmarks.editNote', fileL());
+      await writeAndSaveNote('編輯器右鍵寫入');
+      assert.strictEqual(api.store.bookmarksFor(fileL())[0]?.note, '編輯器右鍵寫入');
+
+      // 2. 側邊欄書籤右鍵（傳入 BookmarkNode）
+      const groups = (await api.provider.getChildren(api.provider.sections.bookmarks)) as BmGroupNode[];
+      const group = groups.find((g) => g.rel === relL)!;
+      const bmNode = (await api.provider.getChildren(group))[0] as BookmarkNode;
+      await vscode.commands.executeCommand('functionBookmarks.editNote', bmNode);
+      const fromSidebar = await writeAndSaveNote('側邊欄右鍵寫入');
+      assert.strictEqual(fromSidebar, '編輯器右鍵寫入');
+      assert.strictEqual(api.store.bookmarksFor(fileL())[0]?.note, '側邊欄右鍵寫入');
+
+      // 3. 命令選擇區（無參數呼叫）：游標在頂層行號書籤上也能編輯與預覽
+      await openAt(4);
+      await vscode.commands.executeCommand('functionBookmarks.editNote');
+      const fromPalette = await writeAndSaveNote('命令選擇區寫入');
+      assert.strictEqual(fromPalette, '側邊欄右鍵寫入');
+      assert.strictEqual(api.store.bookmarksFor(fileL())[0]?.note, '命令選擇區寫入');
+
+      await openAt(4);
+      await vscode.commands.executeCommand('functionBookmarks.previewNote');
+      assert.strictEqual(await waitFor(previewTabCount, (n) => n === 1), 1, '命令選擇區預覽行號書籤備註應開啟預覽分頁');
     });
   });
 

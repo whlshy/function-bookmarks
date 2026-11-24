@@ -7,9 +7,13 @@ import {
   decodeHashes,
   encodeHashes,
   existingCounts,
+  extractFunctionSnippet,
+  extractLineSnippet,
   normalizeRemote,
   parseExport,
+  sortGuideEntries,
   toCsv,
+  toGuideMarkdown,
   toMarkdown,
 } from '../../src/share/format';
 
@@ -123,6 +127,56 @@ describe('匯出成 Markdown／CSV', () => {
     assert.ok(csv.startsWith('﻿File,Line,Name,Kind,Tags,Note,Code,Source\r\n'));
     assert.ok(csv.includes('app/views.py,12,a|b,line,#auth,"第一行\n第二行","x = ""1"", y",alex.chen\r\n'));
     assert.ok(csv.includes('app/views.py,20,get,function,,,,\r\n'));
+  });
+
+  it('導讀文件（Markdown）：依編號排序、函式超 30 行截斷、行號取前後 3 行、不含程式碼時省略片段', () => {
+    const lines = Array.from({ length: 45 }, (_, i) => `line_${i + 1}`);
+    const fnFull = extractFunctionSnippet(lines, 0, 9);
+    assert.strictEqual(fnFull?.omittedLines, 0);
+    assert.strictEqual(fnFull?.code.split('\n').length, 10);
+
+    const fnCut = extractFunctionSnippet(lines, 0, 39);
+    assert.strictEqual(fnCut?.omittedLines, 10);
+    assert.strictEqual(fnCut?.code.split('\n').length, 30);
+
+    const lineCtx = extractLineSnippet(lines, 1);
+    assert.deepStrictEqual(lineCtx?.code.split('\n'), ['line_1', 'line_2', 'line_3', 'line_4', 'line_5']);
+
+    const ordered = sortGuideEntries([
+      { file: 'b.py', line: 10 },
+      { number: 3, file: 'z.py', line: 1 },
+      { file: 'a.py', line: 2 },
+      { number: 1, file: 'm.py', line: 5 },
+    ]);
+    assert.deepStrictEqual(
+      ordered.map((x) => `${x.number ?? '-'}:${x.file}:${x.line}`),
+      ['1:m.py:5', '3:z.py:1', '-:a.py:2', '-:b.py:10'],
+    );
+
+    const md = toGuideMarkdown(
+      [
+        { file: 'b.py', line: 2, name: '無編號項目', tags: [], note: '一般備註' },
+        {
+          number: 2,
+          file: 'a.py',
+          line: 10,
+          name: '第二步',
+          tags: ['core'],
+          language: 'python',
+          snippet: { code: 'def big():\n    return "```"', omittedLines: 5 },
+          note: '- 要點一\n- 要點二',
+        },
+        { number: 1, file: 'z.py', line: 1, name: '第一步', tags: [] },
+      ],
+      { title: 'Demo — Walkthrough', omittedLabel: (n) => `… (${n} more line(s) omitted)` },
+    );
+    assert.ok(md.indexOf('## 1. 第一步') < md.indexOf('## 2. 第二步'));
+    assert.ok(md.indexOf('## 2. 第二步') < md.indexOf('## 無編號項目'));
+    assert.ok(md.includes('`a.py:10` · #core'));
+    assert.ok(md.includes('````python\ndef big():\n    return "```"\n````'), '程式碼含三個反引號時自動升級圍欄');
+    assert.ok(md.includes('*… (5 more line(s) omitted)*'));
+    assert.ok(md.includes('- 要點一\n- 要點二'));
+    assert.ok(!md.slice(md.indexOf('## 無編號項目')).includes('```'), '沒有 snippet 時不輸出程式碼區塊');
   });
 });
 

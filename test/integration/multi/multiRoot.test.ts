@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import type { ExtensionApi } from '../../../src/extension';
 import { emptyStore } from '../../../src/storage/marks';
+import { buildSearchMarkItems, filterSearchMarkItems } from '../../../src/views/search';
 import type { BmGroupNode } from '../../../src/views/tree';
 
 /**
@@ -185,5 +186,39 @@ describe('多資料夾工作區（整合測試）', () => {
     api.statusBar.update();
     assert.strictEqual(api.statusBar.text, '$(bookmark) 2');
     assert.ok(api.statusBar.tooltip?.includes('3'));
+  });
+
+  it('快速搜尋書籤：多資料夾工作區顯示資料夾名稱，並可用資料夾名稱搜尋', async () => {
+    await at(views(), 5);
+    await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+    await at(util(), 4);
+    await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+    const items = buildSearchMarkItems(api.store, api.favorites, { hideNotOnBranch: false });
+    assert.strictEqual(items.length, 2);
+    const inF1 = items.find((i) => i.detail?.includes('app/views.py'));
+    const inF2 = items.find((i) => i.detail?.includes('lib/util.py'));
+    assert.ok(inF1?.detail?.includes(f1().name), `應顯示資料夾名稱 ${f1().name}，實際：${inF1?.detail}`);
+    assert.ok(inF2?.detail?.includes(f2().name), `應顯示資料夾名稱 ${f2().name}，實際：${inF2?.detail}`);
+    // 可直接以資料夾名稱篩選
+    const onlyF2 = filterSearchMarkItems(items, f2().name);
+    assert.strictEqual(onlyF2.length, 1);
+    assert.ok(onlyF2[0].detail?.includes('lib/util.py'));
+  });
+
+  it('依編號導覽會跨資料夾依 1→9 循環跳轉', async () => {
+    await at(views(), 5);
+    await vscode.commands.executeCommand('functionBookmarks.toggleNumberedBookmark', { number: 1 });
+    await at(util(), 4);
+    await vscode.commands.executeCommand('functionBookmarks.toggleNumberedBookmark', { number: 2 });
+    await at(views(), 0);
+    const s1 = await vscode.commands.executeCommand<{ number: number; uri: vscode.Uri }>('functionBookmarks.tourNext');
+    assert.strictEqual(s1?.number, 1);
+    assert.strictEqual(s1?.uri.toString(), views().toString());
+    const s2 = await vscode.commands.executeCommand<{ number: number; uri: vscode.Uri }>('functionBookmarks.tourNext');
+    assert.strictEqual(s2?.number, 2);
+    assert.strictEqual(s2?.uri.toString(), util().toString());
+    const s3 = await vscode.commands.executeCommand<{ number: number; uri: vscode.Uri }>('functionBookmarks.tourNext');
+    assert.strictEqual(s3?.number, 1);
+    assert.strictEqual(s3?.uri.toString(), views().toString());
   });
 });

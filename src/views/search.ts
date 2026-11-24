@@ -2,11 +2,13 @@ import * as vscode from 'vscode';
 import { DetectedSymbol } from '../detection/types';
 import { bookmarkTitle, revealLine } from '../bookmarks/commands';
 import { circled } from '../bookmarks/decor';
+import { isEmptyQuery, matchesQuery, parseQuery, SearchFields } from '../bookmarks/filter';
+import { BookmarkItem, compareItems, shownBookmarkItems } from '../bookmarks/unified';
 import { MarkStore } from '../storage/store';
-import { FavoritesModel } from '../symbols/favorites';
+import { FavoritesModel, ResolvedFavorite } from '../symbols/favorites';
 import { ProjectFiles } from '../symbols/projectFiles';
 import { SymbolService } from '../symbols/symbolService';
-import { COMMANDS, ICONS } from './tree';
+import { COMMANDS, ICONS, searchFields } from './tree';
 
 export interface SearchEntry {
   uri: vscode.Uri;
@@ -106,52 +108,141 @@ export async function searchFunctions(project: ProjectFiles, service: SymbolServ
   qp.busy = false;
 }
 
-interface MarkItem extends vscode.QuickPickItem {
+export interface MarkQuickPickItem extends vscode.QuickPickItem {
   uri: vscode.Uri;
   line: number;
+  fav?: ResolvedFavorite;
+  fields: SearchFields;
+}
+
+export interface SearchMarksOptions {
+  /** 是否隱藏「不在此分支」的書籤（跟隨側邊欄設定）。 */
+  hideNotOnBranch?: boolean;
+  /** 選中函式書籤時的開啟函式（未提供時退回 revealLine）。 */
+  openFavorite?: (fav: ResolvedFavorite) => Promise<void>;
+}
+
+function firstNoteLine(note: string | undefined): string | undefined {
+  return note?.split(/\r?\n/).find((l) => l.trim())?.trim();
+}
+
+/** 建立「快速搜尋書籤」的項目清單（供 UI 與測試共用）。 */
+export function buildSearchMarkItems(
+  store: MarkStore,
+  favorites: FavoritesModel,
+  options: Pick<SearchMarksOptions, 'hideNotOnBranch'> = {},
+): MarkQuickPickItem[] {
+  const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
+  const raw = shownBookmarkItems(store, favorites, { includeNotOnBranch: !options.hideNotOnBranch }).sort(
+    (a, b) => (multiRoot ? a.folder.name.localeCompare(b.folder.name) : 0) || compareItems(a, b),
+  );
+  return raw.map((item) => toMarkQuickPickItem(item, multiRoot));
+}
+
+function toMarkQuickPickItem(item: BookmarkItem, multiRoot: boolean): MarkQuickPickItem {
+  const fields: SearchFields = {
+    ...searchFields(item),
+    folder: multiRoot ? item.folder.name : undefined,
+  };
+  if (item.kind === 'line') {
+    const e = item.entry;
+    const b = e.bookmark;
+    const lost = b.status === 'lost';
+    const away = b.status === 'notOnBranch';
+    const icon = lost ? '$(warning)' : away ? '$(git-branch)' : '$(bookmark)';
+    const desc = [
+      lost ? vscode.l10n.t('needs checking') : undefined,
+      away ? vscode.l10n.t('not on this branch') : undefined,
+      b.source ? `@${b.source.author}` : undefined,
+      b.tags?.map((t) => `#${t}`).join(' '),
+      b.anchor?.symbolPath ?? b.symbol?.path,
+    ]
+      .filter(Boolean)
+      .join('  ');
+    const where = `${multiRoot ? `${e.folder.name} · ` : ''}${b.file}:${b.line + 1}`;
+    const code = b.label && b.anchor?.text ? b.anchor.text.slice(0, 80) : undefined;
+    const noteLine = firstNoteLine(b.note)?.slice(0, 80);
+    return {
+      label: `${icon} ${b.number ? `${circled(b.number)} ` : ''}${bookmarkTitle(b)}`,
+      description: desc,
+      detail: [where, code, noteLine].filter(Boolean).join('  ·  '),
+      uri: e.uri,
+      line: b.line,
+      fields,
+      alwaysShow: true,
+    };
+  }
+  const f = item.fav;
+  const line = f.symbol?.nameLine ?? f.mark.line ?? 0;
+  const name = f.mark.path.split('.').pop() ?? f.mark.path;
+  const missing = f.status !== 'ok';
+  const icon = missing ? '$(warning)' : `$(${ICONS[f.mark.kind] ?? 'symbol-function'})`;
+  const statusText = f.status === 'missing' ? vscode.l10n.t('function not found') : f.status === 'noFile' ? vscode.l10n.t('file not found') : undefined;
+  const desc = [
+    statusText,
+    f.mark.tags?.map((t) => `#${t}`).join(' '),
+    f.mark.alias || f.mark.path !== name ? f.mark.path : undefined,
+  ]
+    .filter(Boolean)
+    .join('  ');
+  const where = `${multiRoot ? `${f.folder.name} · ` : ''}${f.mark.file}:${line + 1}`;
+  const noteLine = firstNoteLine(f.mark.note)?.slice(0, 80);
+  return {
+    label: `${icon} ${f.mark.number ? `${circled(f.mark.number)} ` : ''}${f.mark.alias ?? name}`,
+    description: desc,
+    detail: [where, noteLine].filter(Boolean).join('  ·  '),
+    uri: f.uri,
+    line,
+    fav: f,
+    fields,
+    alwaysShow: true,
+  };
+}
+
+/** 共用側邊欄的 filter.ts 比對規則（含完整多行備註、#標籤、@來源、資料夾名稱）。 */
+export function filterSearchMarkItems(items: MarkQuickPickItem[], query: string): MarkQuickPickItem[] {
+  const parsed = parseQuery(query);
+  return isEmptyQuery(parsed) ? items : items.filter((i) => matchesQuery(parsed, i.fields));
 }
 
 /**
  * 「快速搜尋書籤」：書籤與收藏放在同一個清單，
- * 可用名稱、標籤、檔名、所在函式、該行內容搜尋。
+ * 可用名稱、標籤、檔名、所在函式、該行內容、備註（含 #標籤、@來源）搜尋。
  */
-export async function searchMarks(store: MarkStore, favorites: FavoritesModel): Promise<void> {
-  const items: MarkItem[] = [];
-  for (const e of store.shownBookmarks().sort((a, b) => a.bookmark.file.localeCompare(b.bookmark.file) || a.bookmark.line - b.bookmark.line)) {
-    const b = e.bookmark;
-    const desc = [b.tags?.map((t) => `#${t}`).join(' '), b.anchor?.symbolPath].filter(Boolean).join('  ');
-    const text = b.label && b.anchor?.text ? `  ·  ${b.anchor.text.slice(0, 80)}` : '';
-    items.push({
-      label: `$(bookmark) ${b.number ? `${circled(b.number)} ` : ''}${bookmarkTitle(b)}`,
-      description: desc,
-      detail: `${b.file}:${b.line + 1}${text}`,
-      uri: e.uri,
-      line: b.line,
-    });
-  }
-  for (const f of store.favoritesShown ? favorites.all : []) {
-    const line = f.symbol?.nameLine ?? f.mark.line ?? 0;
-    const name = f.mark.path.split('.').pop() ?? f.mark.path;
-    items.push({
-      label: `$(symbol-function) ${f.mark.number ? `${circled(f.mark.number)} ` : ''}${f.mark.alias ?? name}`,
-      description: [f.mark.tags?.map((t) => `#${t}`).join(' '), f.mark.alias || f.mark.path !== name ? f.mark.path : '']
-        .filter(Boolean)
-        .join('  '),
-      detail: `${f.mark.file}:${line + 1}`,
-      uri: f.uri,
-      line,
-    });
-  }
-  if (items.length === 0) {
+export async function searchMarks(
+  store: MarkStore,
+  favorites: FavoritesModel,
+  options: SearchMarksOptions = {},
+): Promise<void> {
+  const allItems = buildSearchMarkItems(store, favorites, options);
+  if (allItems.length === 0) {
     void vscode.window.showInformationMessage(vscode.l10n.t('No bookmarks yet.'));
     return;
   }
-  const pick = await vscode.window.showQuickPick(items, {
-    placeHolder: vscode.l10n.t('Search bookmarks (name, tag, file, function or line)'),
-    matchOnDescription: true,
-    matchOnDetail: true,
+  const qp = vscode.window.createQuickPick<MarkQuickPickItem>();
+  qp.placeholder = vscode.l10n.t('Search bookmarks (name, tag, file, function, line or note)');
+  qp.items = allItems;
+  // 過濾交給 filterSearchMarkItems（使用 filter.ts），確保多行備註全文與 #tag / @source 都能搜到
+  qp.onDidChangeValue((value) => {
+    qp.items = filterSearchMarkItems(allItems, value);
+  });
+  const pick = await new Promise<MarkQuickPickItem | undefined>((resolve) => {
+    let accepted: MarkQuickPickItem | undefined;
+    qp.onDidAccept(() => {
+      accepted = qp.selectedItems[0];
+      qp.hide();
+    });
+    qp.onDidHide(() => {
+      qp.dispose();
+      resolve(accepted);
+    });
+    qp.show();
   });
   if (pick) {
-    await revealLine(pick.uri, pick.line);
+    if (pick.fav && options.openFavorite) {
+      await options.openFavorite(pick.fav);
+    } else {
+      await revealLine(pick.uri, pick.line);
+    }
   }
 }

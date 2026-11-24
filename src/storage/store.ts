@@ -1,12 +1,13 @@
+import * as fs from 'fs/promises';
 import * as vscode from 'vscode';
 import { normalizeUri, sameUri, uriKey } from '../util/uris';
 import { relativeUnder } from '../util/paths';
-import { SECTION, storageMode } from '../config';
+import { SECTION, StorageMode, storageMode } from '../config';
 import { DetectedSymbol } from '../detection/types';
 import { BOOKMARKS_FILE } from './gitExclude';
 import { ensureBookmarksFileExcluded } from './gitExcludeFs';
 import { LineBookmark, visibleOnBranch } from '../bookmarks/model';
-import { emptyStore, favorites, findMark, MarkKey, parseStore, renamePath, serializeStore, StoreData, SymbolMark } from './marks';
+import { emptyStore, favorites, findMark, hasStoreData, MarkKey, mergeStoreData, parseStore, renamePath, serializeStore, StoreData, SymbolMark } from './marks';
 
 export interface Located {
   folder: vscode.WorkspaceFolder;
@@ -51,20 +52,99 @@ export class MarkStore implements vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChange = this.changed.event;
   private disposables: vscode.Disposable[] = [];
+  private mode: StorageMode = storageMode();
+  /** 給測試用：最近一次切換儲存模式時準備搬移的資訊（來源有資料時才記錄）。 */
+  lastStorageSwitch?: { from: StorageMode; to: StorageMode; targetHadData: boolean; prevData: Map<string, StoreData> };
+  /** 給測試用：停用互動通知避免測試中殘留提示。 */
+  suppressStoragePrompt = false;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
   async init(): Promise<void> {
+    this.mode = storageMode();
     await this.reloadAll();
     this.disposables.push(
       vscode.workspace.onDidChangeWorkspaceFolders(() => void this.reloadAll()),
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration(`${SECTION}.storage`)) {
-          void this.reloadAll();
+          void this.onStorageModeChanged();
         }
       }),
       vscode.workspace.onDidRenameFiles((e) => void this.onRename(e)),
     );
+  }
+
+  /** 切換 storage（file ↔ workspaceState）時載入新目標並提示是否搬移書籤，絕不悄悄覆蓋目標端既有資料。 */
+  private async onStorageModeChanged(): Promise<void> {
+    const nextMode = storageMode();
+    if (nextMode === this.mode) {
+      return;
+    }
+    const prevMode = this.mode;
+    await this.flush();
+    const prevData = new Map(this.data);
+    this.mode = nextMode;
+    await this.reloadAll();
+    if (![...prevData.values()].some((d) => hasStoreData(d))) {
+      return;
+    }
+    const targetHadData = [...this.data.values()].some((d) => hasStoreData(d));
+    this.lastStorageSwitch = { from: prevMode, to: nextMode, targetHadData, prevData };
+    if (!this.suppressStoragePrompt) {
+      void this.promptStorageMigration(prevMode, nextMode, prevData, targetHadData);
+    }
+  }
+
+  /** 把切換前的書籤資料複製、合併或取代到目前的儲存端（供互動提示與測試使用）。 */
+  async migrateStorageData(prevData: Map<string, StoreData>, action: 'copy' | 'merge' | 'replace'): Promise<void> {
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      const src = prevData.get(uriKey(folder.uri));
+      if (!hasStoreData(src)) {
+        continue;
+      }
+      await this.update(folder, (cur) => (action === 'merge' ? mergeStoreData(cur, src!) : src!));
+    }
+  }
+
+  private storageLabel(mode: StorageMode): string {
+    return mode === 'file' ? BOOKMARKS_FILE : vscode.l10n.t('VS Code workspace storage');
+  }
+
+  private async promptStorageMigration(
+    from: StorageMode,
+    to: StorageMode,
+    prevData: Map<string, StoreData>,
+    targetHadData: boolean,
+  ): Promise<void> {
+    const fromLabel = this.storageLabel(from);
+    const toLabel = this.storageLabel(to);
+    if (!targetHadData) {
+      const copy = vscode.l10n.t('Copy bookmarks');
+      const keep = vscode.l10n.t('Keep empty');
+      const pick = await vscode.window.showInformationMessage(
+        vscode.l10n.t('Storage changed to {0}. Copy your bookmarks from {1}?', toLabel, fromLabel),
+        copy,
+        keep,
+      );
+      if (pick === copy) {
+        await this.migrateStorageData(prevData, 'copy');
+      }
+      return;
+    }
+    const merge = vscode.l10n.t('Merge');
+    const replace = vscode.l10n.t('Replace');
+    const keep = vscode.l10n.t('Keep existing');
+    const pick = await vscode.window.showInformationMessage(
+      vscode.l10n.t('Storage changed to {0}, which already has bookmarks. What would you like to do with bookmarks from {1}?', toLabel, fromLabel),
+      merge,
+      replace,
+      keep,
+    );
+    if (pick === merge) {
+      await this.migrateStorageData(prevData, 'merge');
+    } else if (pick === replace) {
+      await this.migrateStorageData(prevData, 'replace');
+    }
   }
 
   dispose(): void {
@@ -178,6 +258,22 @@ export class MarkStore implements vscode.Disposable {
       }
     }
     return [...out].sort((a, b) => a.localeCompare(b));
+  }
+
+  /** 所有書籤（行號書籤與函式書籤）使用過的標籤，去重並排序。 */
+  allTags(): string[] {
+    const out = new Set<string>();
+    for (const e of this.allBookmarks()) {
+      for (const t of e.bookmark.tags ?? []) {
+        out.add(t);
+      }
+    }
+    for (const f of this.allFavorites()) {
+      for (const t of f.mark.tags ?? []) {
+        out.add(t);
+      }
+    }
+    return [...out].sort();
   }
 
   /** 所有資料夾的標籤顏色（同一個標籤在不同資料夾設了不同顏色時，以第一個資料夾為準）。 */
@@ -343,7 +439,7 @@ export class MarkStore implements vscode.Disposable {
     this.data.clear();
     this.broken.clear();
     for (const folder of vscode.workspace.workspaceFolders ?? []) {
-      await this.load(folder);
+      await this.load(folder, true);
       if (storageMode() === 'file') {
         const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, BOOKMARKS_FILE));
         const reload = () => void this.load(folder).then((changed) => changed && this.changed.fire());
@@ -356,8 +452,8 @@ export class MarkStore implements vscode.Disposable {
     this.changed.fire();
   }
 
-  /** 讀取資料；回傳是否有變化。自己剛寫入的內容不重複載入。 */
-  private async load(folder: vscode.WorkspaceFolder): Promise<boolean> {
+  /** 讀取資料；回傳是否有變化。非強制載入時，自己剛寫入的內容不重複載入。 */
+  private async load(folder: vscode.WorkspaceFolder, force = false): Promise<boolean> {
     const key = uriKey(folder.uri);
     if (storageMode() === 'workspaceState') {
       const raw = this.context.workspaceState.get<string>(STATE_KEY + key);
@@ -365,15 +461,20 @@ export class MarkStore implements vscode.Disposable {
       return true;
     }
     let text: string | undefined;
+    const file = this.fileUri(folder);
     try {
-      text = new TextDecoder().decode(await vscode.workspace.fs.readFile(this.fileUri(folder)));
+      // 本機檔案直接用 fs 讀取，避免啟動時走 VS Code FS IPC 排隊
+      text =
+        file.scheme === 'file'
+          ? await fs.readFile(file.fsPath, 'utf8')
+          : new TextDecoder().decode(await vscode.workspace.fs.readFile(file));
     } catch {
       text = undefined;
     }
-    if (this.saving.get(key) || this.pendingSaves.has(key)) {
+    if (!force && (this.saving.get(key) || this.pendingSaves.has(key))) {
       return false;
     }
-    if (text !== undefined && this.recentWrites.get(key)?.includes(text)) {
+    if (!force && text !== undefined && this.recentWrites.get(key)?.includes(text)) {
       return false;
     }
     if (text === undefined || text.trim() === '') {

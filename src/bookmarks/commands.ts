@@ -255,11 +255,67 @@ export class BookmarkCommands {
     this.noticeMineHidden();
   }
 
+  /**
+   * 確保指定行有可編輯的書籤（供行號右鍵「編輯備註」使用）：
+   * 1. 先找這一行畫面上看得到的書籤：行號書籤優先，其次是名稱在這一行的函式書籤（與行號右鍵其他四個指令一致）。
+   * 2. 這一行沒有看得到的書籤時：若「我的」被來源篩選隱藏且這一行已有自己的書籤，不重複新增也不誤改，只提示可以顯示。
+   * 3. 否則依 Ctrl+Alt+B 規則先建立書籤（函式名稱那一行建函式書籤，其他行建行號書籤，並套用 autoNumber）。
+   */
+  async ensureAtLine(
+    target: { uri: vscode.Uri; line: number },
+  ): Promise<{ kind: 'line'; entry: BookmarkEntry } | { kind: 'symbol'; uri: vscode.Uri; symbol: DetectedSymbol } | undefined> {
+    const doc = await vscode.workspace.openTextDocument(target.uri);
+    const loc = this.store.locate(doc.uri);
+    if (!loc) {
+      void vscode.window.showWarningMessage(vscode.l10n.t('Only files inside a workspace folder can be bookmarked.'));
+      return undefined;
+    }
+    const line = target.line;
+    if (line < 0 || line >= doc.lineCount) {
+      return undefined;
+    }
+    const existingLine = this.store.shownBookmarksFor(doc.uri).find((b) => b.line === line);
+    if (existingLine) {
+      return { kind: 'line', entry: { folder: loc.folder, uri: doc.uri, bookmark: existingLine } };
+    }
+    const sym = await this.symbolAtNameLine(doc, line);
+    const symKey: MarkKey | undefined = sym ? { file: loc.rel, path: sym.path, kind: sym.kind } : undefined;
+    if (sym && symKey && this.store.favoritesShown && this.store.get(doc.uri, symKey)?.favorite) {
+      return { kind: 'symbol', uri: doc.uri, symbol: sym };
+    }
+    // 「我的」被來源篩選隱藏且這一行已有自己的書籤：看不到的書籤不算也不誤改，只提示可以顯示
+    if (this.hiddenMineAt(doc.uri, [line]).length > 0 || (symKey && !this.store.favoritesShown && this.store.get(doc.uri, symKey)?.favorite)) {
+      this.noticeMineHidden();
+      return undefined;
+    }
+    const numbers = autoNumbers(this.store, 1);
+    if (sym && symKey) {
+      const n = numbers[0];
+      const ok = await this.store.update(loc.folder, (d) => {
+        const next = setFavorite(d, symKey, true, line);
+        return n ? setSymbolExtras(next, symKey, { number: n }) : next;
+      });
+      if (!ok) {
+        return undefined;
+      }
+      this.noticeMineHidden();
+      return { kind: 'symbol', uri: doc.uri, symbol: sym };
+    }
+    const bm = withNumber(await this.newBookmark(doc, loc.rel, line), numbers);
+    const ok = await this.store.update(loc.folder, (d) => addBookmark(d, bm));
+    if (!ok) {
+      return undefined;
+    }
+    this.noticeMineHidden();
+    return { kind: 'line', entry: { folder: loc.folder, uri: doc.uri, bookmark: bm } };
+  }
+
   /** 從樹狀節點，或（沒有節點時）從游標所在行取得書籤。 */
   entryOf(node?: unknown): BookmarkEntry | undefined {
     const n = node as BookmarkNodeLike | undefined;
     if (n?.type === 'bookmark') {
-      return n.entry;
+      const fresh = this.store.bookmarksFor(n.entry.uri, { includeHidden: true }).find((b) => b.id === n.entry.bookmark.id);
+      return fresh ? { folder: n.entry.folder, uri: n.entry.uri, bookmark: fresh } : n.entry;
     }
     if (isBookmarkLinkArg(node)) {
       const uri = vscode.Uri.parse(node.uri);
@@ -305,15 +361,12 @@ export class BookmarkCommands {
     if (!e) {
       return this.noBookmark();
     }
-    const all = [...new Set(this.store.allBookmarks().flatMap((x) => x.bookmark.tags ?? []))].sort();
     const current = (e.bookmark.tags ?? []).map((t) => `#${t}`).join(' ');
     const input =
       value ??
       (await vscode.window.showInputBox({
         title: vscode.l10n.t('Tags'),
-        prompt: all.length
-          ? vscode.l10n.t('Separate with spaces or commas. Existing: {0}', all.map((t) => `#${t}`).join(' '))
-          : vscode.l10n.t('Separate with spaces or commas, e.g. #auth #todo'),
+        prompt: tagsPrompt(this.store),
         value: current ? `${current} ` : '',
       }));
     if (input === undefined) {
@@ -523,6 +576,14 @@ export class BookmarkCommands {
     const subtitle = `${vscode.workspace.asRelativePath(e.uri, false)}:${b.line + 1}${b.tags?.length ? ` · ${b.tags.map((t) => `#${t}`).join(' ')}` : ''}`;
     await this.notes.preview(bookmarkTitle(b), subtitle, b.note ?? '');
   }
+}
+
+/** 編輯標籤時的輸入提示：列出所有書籤（行號＋函式）已使用過的標籤。 */
+export function tagsPrompt(store: MarkStore): string {
+  const all = store.allTags();
+  return all.length
+    ? vscode.l10n.t('Separate with spaces or commas. Existing: {0}', all.map((t) => `#${t}`).join(' '))
+    : vscode.l10n.t('Separate with spaces or commas, e.g. #auth #todo');
 }
 
 /** 設定 `bookmarks.autoNumber` 開啟時，新書籤依序取得的空號（最多 count 個）。 */

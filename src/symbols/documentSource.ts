@@ -1,3 +1,4 @@
+import * as fs from 'fs/promises';
 import * as vscode from 'vscode';
 import { uriKey } from '../util/uris';
 import { languageForPath } from '../util/paths';
@@ -31,6 +32,11 @@ export async function loadSource(uri: vscode.Uri): Promise<SourceDoc | undefined
   const lang = languageForPath(uri.path);
   if (lang) {
     try {
+      if (uri.scheme === 'file') {
+        // 本機檔案直接讀磁碟，避開 VS Code FS IPC 排隊（啟動掃描多個書籤檔時差距明顯）
+        const [stat, text] = await Promise.all([fs.stat(uri.fsPath), fs.readFile(uri.fsPath, 'utf8')]);
+        return { uri, languageId: lang, text, version: `m${Math.trunc(stat.mtimeMs)}:${stat.size}` };
+      }
       const stat = await vscode.workspace.fs.stat(uri);
       const bytes = await vscode.workspace.fs.readFile(uri);
       return { uri, languageId: lang, text: new TextDecoder().decode(bytes), version: `m${stat.mtime}:${stat.size}` };

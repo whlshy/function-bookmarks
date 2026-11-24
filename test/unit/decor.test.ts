@@ -1,4 +1,6 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as path from 'path';
 import { circled, effectiveColor, gutterSvg, LOST_HEX, nextFreeNumber, paletteColor, PALETTE, svgDataUri } from '../../src/bookmarks/decor';
 import { LineBookmark } from '../../src/bookmarks/model';
 import {
@@ -110,5 +112,18 @@ describe('M7：書籤外觀（顏色、號碼、圖示）', () => {
     const cleared = setTagColor(d, 'todo', undefined);
     assert.strictEqual(cleared.tagColors, undefined);
     assert.ok(!serializeStore(cleared).includes('tagColors'));
+  });
+
+  it('package.json：18 個數字書籤快捷鍵都補齊 macOS 設定（cmd+alt+1~9 / cmd+alt+shift+1~9）', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../../../package.json'), 'utf8'));
+    const keys = pkg.contributes.keybindings as { command: string; key: string; mac?: string; args?: { number?: number } }[];
+    for (let n = 1; n <= 9; n++) {
+      const go = keys.find((k) => k.command === 'functionBookmarks.goToNumberedBookmark' && k.args?.number === n);
+      const set = keys.find((k) => k.command === 'functionBookmarks.toggleNumberedBookmark' && k.args?.number === n);
+      assert.strictEqual(go?.key, `ctrl+alt+${n}`);
+      assert.strictEqual(go?.mac, `cmd+alt+${n}`);
+      assert.strictEqual(set?.key, `ctrl+alt+shift+${n}`);
+      assert.strictEqual(set?.mac, `cmd+alt+shift+${n}`);
+    }
   });
 });

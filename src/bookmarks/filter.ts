@@ -21,6 +21,8 @@ export interface SearchFields {
   author: string;
   /** 相對路徑。 */
   file: string;
+  /** 多資料夾工作區時的資料夾名稱（單資料夾時省略）。 */
+  folder?: string;
   /** 所在函式（或函式書籤本身）的名稱路徑。 */
   func?: string;
   /** 那一行的程式碼。 */
@@ -67,6 +69,7 @@ export function matchesQuery(q: BookmarkQuery, f: SearchFields): boolean {
       f.names.some((n) => has(n, t)) ||
       f.tags.some((tag) => has(tag, t)) ||
       has(f.file, t) ||
+      has(f.folder, t) ||
       has(f.func, t) ||
       has(f.line, t) ||
       has(f.note, t),

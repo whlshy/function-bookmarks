@@ -284,3 +284,114 @@ export function toCsv(rows: ExportRow[], labels: { file: string; line: string; n
   }
   return '\uFEFF' + out.join('\r\n') + '\r\n';
 }
+
+/** 導讀文件：函式本體最多擷取的行數，超過時截斷並註明。 */
+export const GUIDE_MAX_FUNCTION_LINES = 30;
+/** 導讀文件：行號書籤前後各擷取的行數。 */
+export const GUIDE_LINE_CONTEXT = 3;
+
+export interface GuideSnippet {
+  code: string;
+  /** 超過上限時截斷掉的行數；未截斷時為 0。 */
+  omittedLines: number;
+}
+
+export interface GuideEntry {
+  number?: number;
+  name: string;
+  file: string;
+  /** 1 起算。 */
+  line: number;
+  tags: string[];
+  note?: string;
+  source?: string;
+  language?: string;
+  snippet?: GuideSnippet;
+}
+
+/** 導讀文件排序：有編號的依 1→9 排最前，其餘依檔案、行號接在後面。 */
+export function sortGuideEntries<T extends { number?: number; file: string; line: number }>(list: T[]): T[] {
+  return [...list].sort((a, b) => {
+    const na = a.number ?? Number.MAX_SAFE_INTEGER;
+    const nb = b.number ?? Number.MAX_SAFE_INTEGER;
+    return na - nb || a.file.localeCompare(b.file) || a.line - b.line;
+  });
+}
+
+/** 擷取函式本體程式碼片段（0 起算起訖行，含頭尾），超過 maxLines 行時截斷。 */
+export function extractFunctionSnippet(
+  lines: string[],
+  startLine: number,
+  endLine: number,
+  maxLines = GUIDE_MAX_FUNCTION_LINES,
+): GuideSnippet | undefined {
+  if (!lines.length || startLine < 0 || startLine >= lines.length) {
+    return undefined;
+  }
+  const from = Math.max(0, startLine);
+  const to = Math.min(lines.length - 1, Math.max(from, endLine));
+  const total = to - from + 1;
+  if (total <= maxLines) {
+    return { code: lines.slice(from, to + 1).join('\n'), omittedLines: 0 };
+  }
+  return { code: lines.slice(from, from + maxLines).join('\n'), omittedLines: total - maxLines };
+}
+
+/** 擷取行號書籤前後各 context 行的程式碼片段（0 起算行號）。 */
+export function extractLineSnippet(
+  lines: string[],
+  line: number,
+  context = GUIDE_LINE_CONTEXT,
+): GuideSnippet | undefined {
+  if (!lines.length || line < 0 || line >= lines.length) {
+    return undefined;
+  }
+  const from = Math.max(0, line - context);
+  const to = Math.min(lines.length - 1, line + context);
+  return { code: lines.slice(from, to + 1).join('\n'), omittedLines: 0 };
+}
+
+/** 選用不會與程式碼內容衝突的反引號圍欄長度（至少 3 個 `）。 */
+function codeFence(code: string): string {
+  let maxRun = 0;
+  for (const m of code.matchAll(/`+/g)) {
+    if (m[0].length > maxRun) {
+      maxRun = m[0].length;
+    }
+  }
+  return '`'.repeat(Math.max(3, maxRun + 1));
+}
+
+/** 輸出「導讀文件（Markdown）」：依編號與位置順序，含標題、路徑:行號、程式碼片段與備註原文。 */
+export function toGuideMarkdown(
+  entries: GuideEntry[],
+  options: { title: string; omittedLabel: (count: number) => string },
+): string {
+  const ordered = sortGuideEntries(entries);
+  const sections: string[] = [`# ${options.title}`];
+  for (const e of ordered) {
+    const parts: string[] = [];
+    parts.push(`## ${e.number !== undefined ? `${e.number}. ` : ''}${e.name}`);
+    const meta = [
+      `\`${e.file}:${e.line}\``,
+      e.tags.length ? e.tags.map((t) => `#${t}`).join(' ') : undefined,
+      e.source ? `@${e.source}` : undefined,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    parts.push(meta);
+    if (e.snippet && e.snippet.code.length > 0) {
+      const fence = codeFence(e.snippet.code);
+      const lang = e.language ?? '';
+      parts.push(`${fence}${lang}\n${e.snippet.code}\n${fence}`);
+      if (e.snippet.omittedLines > 0) {
+        parts.push(`*${options.omittedLabel(e.snippet.omittedLines)}*`);
+      }
+    }
+    if (e.note) {
+      parts.push(e.note);
+    }
+    sections.push(parts.join('\n\n'));
+  }
+  return sections.join('\n\n') + '\n';
+}
