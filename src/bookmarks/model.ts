@@ -122,6 +122,10 @@ export function shiftLine(line: number, change: LineChange): ShiftResult {
     if (pureInsert && change.startChar === 0 && change.text.endsWith('\n')) {
       return { line: line + inserted, deleted: false };
     }
+    // 整行刪除（例如 Ctrl+Shift+K，範圍從該行第 0 欄到下一行以上且替換為空字串）：視為刪除這一行
+    if (change.startChar === 0 && change.endLine > change.startLine && change.text === '') {
+      return { line, deleted: true };
+    }
     return { line, deleted: false };
   }
   // startLine < line <= endLine：這一行整行在刪除範圍內

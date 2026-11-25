@@ -66,7 +66,9 @@ export class BookmarkSearchBox implements vscode.Disposable {
     input.value = this.value;
     input.valueSelection = [this.value.length, this.value.length];
     input.placeholder = vscode.l10n.t('Search bookmarks (#tag, @source)');
-    input.prompt = vscode.l10n.t('Enter: open the first match · ↓: go to the list · Esc: clear the search');
+    // VS Code 會在 prompt 尾端自動加上 "(Press 'Enter' to confirm or 'Escape' to cancel)"，
+    // 這裡只說明確認、↓ 與取消各自做的事，避免重複與語意矛盾
+    input.prompt = vscode.l10n.t('Confirm opens the first match · ↓ focuses the list · Cancel clears the search');
     input.onDidChangeValue((v) => {
       if (this.timer) {
         clearTimeout(this.timer);

@@ -36,6 +36,9 @@ export async function collectProjectSymbols(
     while (next < files.length && !token?.isCancellationRequested) {
       const f = files[next++];
       const result = await service.getForUri(f.uri).catch(() => undefined);
+      if (token?.isCancellationRequested) {
+        return;
+      }
       const walk = (list: DetectedSymbol[]) => {
         for (const s of list) {
           if (s.kind !== 'reference') {
@@ -46,14 +49,16 @@ export async function collectProjectSymbols(
         }
       };
       walk(result?.symbols ?? []);
-      if (onBatch && Date.now() - lastReport > 150) {
+      if (onBatch && !token?.isCancellationRequested && Date.now() - lastReport > 150) {
         lastReport = Date.now();
         onBatch(out);
       }
     }
   };
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-  onBatch?.(out);
+  if (!token?.isCancellationRequested) {
+    onBatch?.(out);
+  }
   return out;
 }
 
@@ -86,8 +91,13 @@ export async function searchFunctions(project: ProjectFiles, service: SymbolServ
   qp.matchOnDetail = true;
   qp.busy = true;
   const cts = new vscode.CancellationTokenSource();
+  let disposed = false;
+  let scanDone = false;
   qp.onDidHide(() => {
-    cts.cancel();
+    disposed = true;
+    if (!scanDone) {
+      cts.cancel();
+    }
     qp.dispose();
   });
   qp.onDidAccept(() => {
@@ -102,10 +112,26 @@ export async function searchFunctions(project: ProjectFiles, service: SymbolServ
   qp.show();
   // 收藏的排前面，其餘依檔案順序
   const order = (list: SearchEntry[]) => [...list].sort((a, b) => Number(b.favorite) - Number(a.favorite)).map(toItem);
-  await collectProjectSymbols(project, service, store, (entries) => {
-    qp.items = order(entries);
-  }, cts.token);
-  qp.busy = false;
+  try {
+    await collectProjectSymbols(
+      project,
+      service,
+      store,
+      (entries) => {
+        if (disposed || cts.token.isCancellationRequested) {
+          return;
+        }
+        qp.items = order(entries);
+      },
+      cts.token,
+    );
+    if (!disposed && !cts.token.isCancellationRequested) {
+      qp.busy = false;
+    }
+  } finally {
+    scanDone = true;
+    cts.dispose();
+  }
 }
 
 export interface MarkQuickPickItem extends vscode.QuickPickItem {

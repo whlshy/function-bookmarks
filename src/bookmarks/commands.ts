@@ -62,7 +62,7 @@ export class BookmarkCommands {
   ) {}
 
   /** 名稱剛好在這一行的符號（函式、類別、block…），有的話 Ctrl+Alt+B 建立函式書籤。 */
-  private async symbolAtNameLine(doc: vscode.TextDocument, line: number): Promise<DetectedSymbol | undefined> {
+  async symbolAtNameLine(doc: vscode.TextDocument, line: number): Promise<DetectedSymbol | undefined> {
     let hit: DetectedSymbol | undefined;
     const walk = (list: DetectedSymbol[]) => {
       for (const s of list) {
@@ -74,6 +74,16 @@ export class BookmarkCommands {
     };
     walk((await this.service.getSymbols(doc)).symbols);
     return hit;
+  }
+
+  /** 準備一筆新的行號書籤（含 anchor 與所在函式），尚未寫入 store。 */
+  async prepareBookmark(doc: vscode.TextDocument, rel: string, line: number, label?: string): Promise<LineBookmark> {
+    return this.newBookmark(doc, rel, line, label);
+  }
+
+  /** 若「我的」目前被來源篩選隱藏，跳出提示讓使用者可一鍵顯示。 */
+  notifyIfMineHidden(): void {
+    this.noticeMineHidden();
   }
 
   private async newBookmark(doc: vscode.TextDocument, rel: string, line: number, label?: string): Promise<LineBookmark> {

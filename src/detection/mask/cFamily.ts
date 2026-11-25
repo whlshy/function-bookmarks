@@ -19,8 +19,8 @@ export interface CFamilyOptions {
   backtick?: boolean;
   /** C# 逐字字串 @"…"（"" 為跳脫），以及 $@"…"、@$"…"。 */
   verbatim?: boolean;
-  /** 三個雙引號的文字區塊（Java text block、C# raw string、Kotlin、Swift）。 */
-  tripleQuote?: boolean;
+  /** 三個雙引號的文字區塊：'escape' 支援反斜線跳脫（Java）；'raw' 不跳脫（Kotlin）；'rawMulti' 支援三個以上連續引號（C# raw string）。 */
+  tripleQuote?: 'escape' | 'raw' | 'rawMulti';
   /** PHP heredoc／nowdoc：<<<EOT … EOT。 */
   heredoc?: boolean;
 }
@@ -29,9 +29,9 @@ export const C_FAMILY: Partial<Record<Syntax, CFamilyOptions>> = {
   cpp: { quote: 'char', cppRaw: true },
   rust: { quote: 'rust', nestedBlock: true, multilineString: true, rustRaw: true },
   go: { quote: 'char', backtick: true },
-  java: { quote: 'char', nestedBlock: false, tripleQuote: true },
-  kotlin: { quote: 'char', nestedBlock: true, tripleQuote: true },
-  csharp: { quote: 'char', verbatim: true, tripleQuote: true },
+  java: { quote: 'char', nestedBlock: false, tripleQuote: 'escape' },
+  kotlin: { quote: 'char', nestedBlock: true, tripleQuote: 'raw' },
+  csharp: { quote: 'char', verbatim: true, tripleQuote: 'rawMulti' },
   php: { quote: 'string', hashComment: true, multilineString: true, heredoc: true },
   // Protocol Buffers：// 與 /* */ 註解，'…' 與 "…" 字串都不跨行
   proto: { quote: 'char' },
@@ -143,9 +143,34 @@ export function maskCFamilyInto(text: string, out: string[], start: number, o: C
       }
     }
     if (o.tripleQuote && ch === '"' && next === '"' && text[i + 2] === '"') {
-      const close = text.indexOf('"""', i + 3);
-      blank(out, text, i + 3, close === -1 ? n : close);
-      i = close === -1 ? n : close + 3;
+      if (o.tripleQuote === 'escape') {
+        let j = i + 3;
+        let close = -1;
+        while (j < n) {
+          if (text[j] === '\\') {
+            j += escapeStep(text, j);
+            continue;
+          }
+          if (text.startsWith('"""', j)) {
+            close = j;
+            break;
+          }
+          j++;
+        }
+        blank(out, text, i + 3, close === -1 ? n : close);
+        i = close === -1 ? n : close + 3;
+        continue;
+      }
+      let qCount = 3;
+      if (o.tripleQuote === 'rawMulti') {
+        while (text[i + qCount] === '"') {
+          qCount++;
+        }
+      }
+      const closer = '"'.repeat(qCount);
+      const close = text.indexOf(closer, i + qCount);
+      blank(out, text, i + qCount, close === -1 ? n : close);
+      i = close === -1 ? n : close + qCount;
       continue;
     }
     if (o.heredoc && ch === '<' && text.startsWith('<<<', i)) {

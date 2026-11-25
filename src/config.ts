@@ -3,11 +3,14 @@ import { BUILTIN_RULES, PROJECT_EXTENSIONS, TEMPLATE_FILES_PLACEHOLDER } from '.
 import { mergeRules } from './detection/engine';
 import { DetectionRule } from './detection/types';
 import { matchesAny } from './util/paths';
+import { parseStorageOverride, resolveStorageMode, StorageMode, WorkspaceStorageChoice } from './storage/storageMode';
 
 export const SECTION = 'functionBookmarks';
+/** 存在 workspaceState 的鍵名：這個工作區個別選擇的存放模式（未設表示跟隨設定）。 */
+export const WORKSPACE_STORAGE_KEY = 'storageMode';
 
 export type DetectionSource = 'rules' | 'languageServer' | 'both';
-export type StorageMode = 'file' | 'workspaceState';
+export type { StorageMode, WorkspaceStorageChoice };
 
 export interface Settings {
   source: DetectionSource;
@@ -57,8 +60,20 @@ export function readSettings(scope?: vscode.ConfigurationScope): Settings {
   };
 }
 
-export function storageMode(): StorageMode {
-  return vscode.workspace.getConfiguration(SECTION).get<StorageMode>('storage', 'file');
+/** 讀取設定（functionBookmarks.storage）的值，作為沒有個別選擇時的預設。 */
+export function settingStorageMode(): StorageMode {
+  return vscode.workspace.getConfiguration(SECTION).get<StorageMode>('storage', 'file') === 'workspaceState' ? 'workspaceState' : 'file';
+}
+
+/** 讀取這個工作區個別選擇的存放模式；未設定代表跟隨設定。 */
+export function workspaceStorageOverride(workspaceState: vscode.Memento): StorageMode | undefined {
+  return parseStorageOverride(workspaceState.get(WORKSPACE_STORAGE_KEY));
+}
+
+/** 取得目前生效的存放模式：這個工作區的個別選擇優先，否則使用設定。 */
+export function storageMode(workspaceState?: vscode.Memento): StorageMode {
+  const override = workspaceState ? workspaceStorageOverride(workspaceState) : undefined;
+  return resolveStorageMode(override, settingStorageMode());
 }
 
 export function projectGlobs(scope?: vscode.ConfigurationScope): { include: string; exclude: string[] } {

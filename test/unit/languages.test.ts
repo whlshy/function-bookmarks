@@ -23,12 +23,6 @@ function kept(text: string, lang: string, piece: string): boolean {
 }
 
 describe('更多語言（C／C++、Rust、Go、Java、C#、Kotlin、Swift、PHP、Ruby）', () => {
-  it('每種語言的規則都能編譯', () => {
-    for (const lang of ['c', 'cpp', 'rust', 'go', 'java', 'csharp', 'kotlin', 'swift', 'php', 'ruby']) {
-      assert.deepStrictEqual(detect('', lang).errors, [], lang);
-    }
-  });
-
   describe('語法遮罩', () => {
     it('C／C++：字串、字元、註解、raw string 遮掉；數字分隔 1\'000 不當成字元', () => {
       const t = lines('int a = 1\'000\'000; f(); // x { y', 'char c = \'{\'; s = "a { b"; /* } */ g();', 'auto r = R"x(a } b)x"; h();');

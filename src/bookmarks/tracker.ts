@@ -10,6 +10,57 @@ export function onLineDeleteSetting(scope?: vscode.ConfigurationScope): OnLineDe
   return vscode.workspace.getConfiguration(SECTION, scope).get<OnLineDelete>('bookmarks.onLineDelete', 'moveToNext');
 }
 
+export interface LineChangeBatch {
+  changes: LineChange[];
+  lineCount: number;
+}
+
+/** 依序把一或多批編輯器內變更套用到該檔案的行號書籤（一般編輯與乾淨檔案第一次編輯重播共用）。 */
+export async function applyLineChangeBatches(
+  store: MarkStore,
+  doc: vscode.TextDocument,
+  batches: LineChangeBatch[],
+): Promise<void> {
+  if (!batches.length) {
+    return;
+  }
+  const loc = store.locate(doc.uri);
+  if (!loc || store.bookmarksFor(doc.uri).length === 0) {
+    return;
+  }
+  const mode = onLineDeleteSetting(doc.uri);
+  await store.update(
+    loc.folder,
+    (d) =>
+      updateBookmarksInFile(d, loc.rel, (b) => {
+        // 只屬於別的分支（目前隱藏）的書籤不跟著這個分支的編輯移動
+        if (!store.isVisible(loc.folder, b)) {
+          return b;
+        }
+        // 不在此分支：行號只是在這個分支上的大概位置（切回原分支時由分支快照換算），
+        // 跟著平移，但刪到那一行時不刪除、也不改狀態
+        const away = b.status === 'notOnBranch';
+        let cur = b;
+        for (const batch of batches) {
+          const last = Math.max(0, batch.lineCount - 1);
+          const r = applyChanges(cur, batch.changes, away ? 'moveToNext' : mode);
+          if (!r) {
+            return undefined;
+          }
+          const next = { ...cur, line: Math.min(r.line, last) };
+          if (r.status) {
+            next.status = r.status;
+          } else {
+            delete next.status;
+          }
+          cur = next;
+        }
+        return cur;
+      }),
+    { deferSave: true },
+  );
+}
+
 
 /**
  * 方式 A：在編輯器裡打字、貼上、刪行時即時平移書籤；存檔時更新 anchor（該行內容、前後行、所在函式）。
@@ -56,33 +107,7 @@ export class BookmarkTracker implements vscode.Disposable {
     if (isWholeDocumentReplace(changes, e.document.lineCount) || this.handledByDiff?.(e, changes)) {
       return;
     }
-    const mode = onLineDeleteSetting(e.document.uri);
-    const last = Math.max(0, e.document.lineCount - 1);
-    await this.store.update(
-      loc.folder,
-      (d) =>
-        updateBookmarksInFile(d, loc.rel, (b) => {
-          // 只屬於別的分支（目前隱藏）的書籤不跟著這個分支的編輯移動
-          if (!this.store.isVisible(loc.folder, b)) {
-            return b;
-          }
-          // 不在此分支：行號只是在這個分支上的大概位置（切回原分支時由分支快照換算），
-          // 跟著平移，但刪到那一行時不刪除、也不改狀態
-          const away = b.status === 'notOnBranch';
-          const r = applyChanges(b, changes, away ? 'moveToNext' : mode);
-          if (!r) {
-            return undefined;
-          }
-          const next = { ...b, line: Math.min(r.line, last) };
-          if (r.status) {
-            next.status = r.status;
-          } else {
-            delete next.status;
-          }
-          return next;
-        }),
-      { deferSave: true },
-    );
+    await applyLineChangeBatches(this.store, e.document, [{ changes, lineCount: e.document.lineCount }]);
   }
 
   /** 存檔時更新書籤的 anchor，之後的 git 換算與後備定位會用到。 */

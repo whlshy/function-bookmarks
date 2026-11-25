@@ -63,7 +63,11 @@ export class FavoritesModel implements vscode.Disposable {
       files.onDidChange(onFs),
       files.onDidCreate(onFs),
       files.onDidDelete(onFs),
-      store.onDidChange(() => {
+      store.onDidChange((e) => {
+        // 只有行號書籤變了（打字造成的行號平移、新增行號書籤等）：函式書籤不受影響，不必重新確認
+        if (e && !e.symbolsChanged) {
+          return;
+        }
         this.seedFromStore();
         this.changed.fire();
         if (!this.updatingStore) {

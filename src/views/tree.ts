@@ -18,6 +18,7 @@ import { basenamePosix } from '../util/paths';
 import { circled, effectiveColor, paletteColor } from '../bookmarks/decor';
 import { BookmarkQuery, highlightRanges, isEmptyQuery, matchesQuery, parseQuery, SearchFields } from '../bookmarks/filter';
 import { compareByTitle, FileBookmarkSort, lineBookmarkTitle, symbolBookmarkTitle } from '../bookmarks/sort';
+import { toggleBookmarkKey } from '../util/shortcuts';
 
 export type SectionId = 'bookmarks' | 'currentFile' | 'project';
 export type FilterMode = 'all' | 'bookmarks';
@@ -72,6 +73,7 @@ export interface BmGroupNode {
   by: BookmarkGrouping;
   uri?: vscode.Uri;
   rel?: string;
+  folder?: vscode.WorkspaceFolder;
   items: BookmarkItem[];
   parent: SectionNode;
 }
@@ -118,6 +120,9 @@ const EXPANSION_KEY = 'treeExpansion';
 const MAX_EXPANSION = 3000;
 const FILE_SORT_KEY = 'bookmarkFileSort';
 const MAX_FILE_SORT = 2000;
+/** 書籤總數超過此門檻，或分組數達 AUTO_COLLAPSE_GROUPS 時，非搜尋狀態預設收合各分組，避免把「目前檔案」擠到最下面。 */
+export const AUTO_COLLAPSE_BOOKMARKS = 30;
+export const AUTO_COLLAPSE_GROUPS = 6;
 
 export const COMMANDS = {
   revealLine: 'functionBookmarks.revealLine',
@@ -160,6 +165,12 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   /** 「整個專案」中各檔案最上層的函式數量；0 表示沒有函式，不顯示展開鈕。 */
   private fileCounts = new Map<string, number>();
   private projectEmpty = false;
+  private projectEmptyKnown = false;
+  private projectCheckSeq = 0;
+  private projectCheckPromise: Promise<void> | undefined;
+  /** 最近一次列出書籤分組時的總書籤數與分組數，用來判斷是否預設收合分組。 */
+  private lastBookmarkTotalCount = 0;
+  private lastBookmarkGroupCount = 0;
 
   constructor(
     private readonly service: SymbolService,
@@ -168,6 +179,7 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     private readonly project: ProjectFiles,
     private readonly resolver: TemplateResolver,
     private readonly memento?: vscode.Memento,
+    private readonly isIgnoredEditor?: (uri: vscode.Uri) => boolean,
   ) {
     this.expansion = { ...(memento?.get<Record<string, boolean>>(EXPANSION_KEY) ?? {}) };
     this.fileSort = {};
@@ -180,12 +192,40 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
       }
     }
     this.disposables.push(
-      project.onDidChange(() => this.fileCounts.clear()),
+      project.onDidChange(() => {
+        this.fileCounts.clear();
+        this.projectEmptyKnown = false;
+        this.scheduleProjectEmptyCheck();
+      }),
       vscode.workspace.onDidSaveTextDocument((d) => this.fileCounts.delete(uriKey(d.uri))),
       favorites.onDidChange(() => this.fire()),
       store.onDidChange(() => this.fire()),
       project.onDidChange(() => this.fire()),
     );
+  }
+
+  /** 背景輕量檢查專案是否沒有任何符合 include 的檔案，避免空專案的「整個專案」先顯示展開箭頭。 */
+  scheduleProjectEmptyCheck(): Promise<void> {
+    const seq = ++this.projectCheckSeq;
+    const job = (async () => {
+      const has = await this.project.hasAny().catch(() => true);
+      if (seq !== this.projectCheckSeq) {
+        return;
+      }
+      const empty = !has;
+      this.projectEmptyKnown = true;
+      if (empty !== this.projectEmpty) {
+        this.projectEmpty = empty;
+        this.changed.fire(this.sections.project);
+      }
+    })();
+    this.projectCheckPromise = job;
+    return job;
+  }
+
+  /** 給測試用：等背景的空專案檢查完成。 */
+  async whenProjectChecked(): Promise<void> {
+    await this.projectCheckPromise;
   }
 
   dispose(): void {
@@ -296,6 +336,10 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   }
 
   private async doRefresh(editor: vscode.TextEditor | undefined, seq: number): Promise<boolean> {
+    // 編輯備註分頁時不要把「目前檔案」換成暫存備註檔或清空成「沒有開啟的檔案」，沿用原本的程式碼檔案
+    if (editor && this.isIgnoredEditor?.(editor.document.uri)) {
+      editor = undefined;
+    }
     if (!editor && this.current && openDocumentFor(this.current.uri)) {
       // 焦點暫時移到終端機、設定頁等非文字編輯器：檔案還開著就維持顯示，不清空也不重建
       const doc = openDocumentFor(this.current.uri)!;
@@ -421,6 +465,7 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     const folders = vscode.workspace.workspaceFolders ?? [];
     const lists = await Promise.all(folders.map((f) => this.project.list(f)));
     const empty = lists.every((l) => l.rels.length === 0);
+    this.projectEmptyKnown = true;
     if (empty !== this.projectEmpty) {
       this.projectEmpty = empty;
       setTimeout(() => this.fire(), 0);
@@ -545,10 +590,12 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
           add(tag, e, {});
         }
       } else {
-        add(uriKey(e.uri), e, { uri: e.uri, rel: e.file });
+        add(uriKey(e.uri), e, { uri: e.uri, rel: e.file, folder: e.folder });
       }
     }
     const list = [...groups.values()];
+    this.lastBookmarkTotalCount = all.length;
+    this.lastBookmarkGroupCount = list.length;
     if (this.bookmarkGrouping === 'source') {
       // 自己的排第一，其他依名稱
       return list.sort((a, b) => (a.key === '' ? -1 : b.key === '' ? 1 : a.key.localeCompare(b.key)));
@@ -561,7 +608,22 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
         g.items.sort(compareBookmarkItemsByTitle);
       }
     }
-    return list.sort((a, b) => (a.rel ?? '').localeCompare(b.rel ?? ''));
+    const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
+    return list.sort(
+      (a, b) =>
+        (multiRoot ? (a.folder?.name ?? '').localeCompare(b.folder?.name ?? '') : 0) ||
+        (a.rel ?? '').localeCompare(b.rel ?? ''),
+    );
+  }
+
+  /** 書籤數量或分組很多時（且非搜尋狀態），分組預設收合；使用者手動展開的分組仍由 expansion 記錄保留。 */
+  private defaultGroupCollapsibleState(): vscode.TreeItemCollapsibleState {
+    if (this.searching) {
+      return vscode.TreeItemCollapsibleState.Expanded;
+    }
+    return this.lastBookmarkTotalCount > AUTO_COLLAPSE_BOOKMARKS || this.lastBookmarkGroupCount >= AUTO_COLLAPSE_GROUPS
+      ? vscode.TreeItemCollapsibleState.Collapsed
+      : vscode.TreeItemCollapsibleState.Expanded;
   }
 
   private favLabel(fav: ResolvedFavorite): string {
@@ -625,10 +687,11 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   }
 
   private bmGroupItem(element: BmGroupNode): vscode.TreeItem {
+    const defaultState = this.defaultGroupCollapsibleState();
     if (element.by === 'source') {
       const item = new vscode.TreeItem(
         this.highlighted(element.key || vscode.l10n.t('Mine'), element.key ? this.parsedQuery.authors : []),
-        vscode.TreeItemCollapsibleState.Expanded,
+        defaultState,
       );
       item.id = this.groupId(`bmSource:${element.key}`);
       item.iconPath = new vscode.ThemeIcon(element.key ? 'person' : 'account', element.key ? new vscode.ThemeColor(FOREIGN_COLOR) : undefined);
@@ -639,7 +702,7 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     if (element.by === 'tag') {
       const item = new vscode.TreeItem(
         element.key ? this.highlighted(`#${element.key}`, this.parsedQuery.tags) : vscode.l10n.t('No tag'),
-        vscode.TreeItemCollapsibleState.Expanded,
+        defaultState,
       );
       item.id = this.groupId(`bmTag:${element.key}`);
       const tc = paletteColor(this.store.tagColors().get(element.key));
@@ -650,13 +713,15 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     }
     const rel = element.rel ?? '';
     const byTitle = this.fileSortOf(element.key) === 'title';
-    const item = new vscode.TreeItem(this.highlighted(basenamePosix(rel)), vscode.TreeItemCollapsibleState.Expanded);
+    const item = new vscode.TreeItem(this.highlighted(basenamePosix(rel)), defaultState);
     item.id = this.groupId(`bmFile:${element.key}`);
     item.resourceUri = element.uri;
     item.iconPath = vscode.ThemeIcon.File;
     const dir = path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel);
-    item.description = [dir, byTitle ? vscode.l10n.t('by title') : ''].filter(Boolean).join(' · ');
-    item.tooltip = rel;
+    const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
+    const folderName = multiRoot ? element.folder?.name : undefined;
+    item.description = [folderName, dir, byTitle ? vscode.l10n.t('by title') : ''].filter(Boolean).join(' · ');
+    item.tooltip = folderName ? `${folderName} · ${rel}` : rel;
     item.contextValue = byTitle ? 'fbBmFile:byTitle' : 'fbBmFile';
     return item;
   }
@@ -757,16 +822,24 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
       const item = new vscode.TreeItem(vscode.l10n.t('Bookmarks'), vscode.TreeItemCollapsibleState.Expanded);
       item.id = 'section:bookmarks';
       item.iconPath = new vscode.ThemeIcon(this.searching ? 'search' : 'bookmark');
-      item.description = this.searching
-        ? vscode.l10n.t('{0} of {1} match', distinctCount(this.matchedItems()), count)
-        : count
-          ? String(count)
-          : vscode.l10n.t('Ctrl+Alt+B, or ☆ on a function');
+      if (this.searching) {
+        item.description = vscode.l10n.t('{0} of {1} match', distinctCount(this.matchedItems()), count);
+      } else if (count) {
+        item.description = String(count);
+      } else {
+        const key = toggleBookmarkKey();
+        item.description = vscode.l10n.t('{0} or ☆', key);
+        item.tooltip = vscode.l10n.t('Press {0} in an editor, or click ☆ on a function to add a bookmark.', key);
+      }
       item.contextValue = 'fbSection.bookmarks';
       return item;
     }
     if (element.section === 'project') {
-      const none = this.projectEmpty || (vscode.workspace.workspaceFolders ?? []).length === 0;
+      const hasFolders = (vscode.workspace.workspaceFolders ?? []).length > 0;
+      if (hasFolders && !this.projectEmptyKnown) {
+        void this.scheduleProjectEmptyCheck();
+      }
+      const none = this.projectEmpty || !hasFolders;
       const item = new vscode.TreeItem(
         vscode.l10n.t('Whole project'),
         none ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Collapsed,

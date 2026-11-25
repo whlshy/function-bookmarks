@@ -34,6 +34,49 @@ export function hashLines(text: string): number[] {
   return splitLines(text).map(hashLine);
 }
 
+/** 一次編輯：舊文件中從 startLine 到 endLine（含）被換成 text。 */
+export interface LineHashEdit {
+  startLine: number;
+  endLine: number;
+  text: string;
+}
+
+/**
+ * 依編輯內容局部更新每行雜湊（只重算被改到的行），避免每打一個字就把整份檔案重新雜湊。
+ * `edits` 是同一次變動事件的所有編輯（座標都相對於編輯前的文件、互不重疊）；`lineAt` 讀取編輯後文件的某一行。
+ * 遇到無法確定的情況（同一行有多處編輯、行數對不上）回傳 undefined，呼叫端改用整份重算。
+ */
+export function updateLineHashes(
+  old: readonly number[],
+  edits: readonly LineHashEdit[],
+  newLineCount: number,
+  lineAt: (line: number) => string,
+): number[] | undefined {
+  const sorted = [...edits].sort((a, b) => a.startLine - b.startLine);
+  const out: number[] = [];
+  let oldPos = 0;
+  let delta = 0;
+  for (const e of sorted) {
+    if (e.startLine < oldPos || e.endLine < e.startLine || e.endLine >= old.length) {
+      return undefined;
+    }
+    const added = splitLines(e.text).length;
+    for (let i = oldPos; i < e.startLine; i++) {
+      out.push(old[i]);
+    }
+    const newStart = e.startLine + delta;
+    for (let i = 0; i < added; i++) {
+      out.push(hashLine(lineAt(newStart + i)));
+    }
+    oldPos = e.endLine + 1;
+    delta += added - (e.endLine - e.startLine + 1);
+  }
+  for (let i = oldPos; i < old.length; i++) {
+    out.push(old[i]);
+  }
+  return out.length === newLineCount ? out : undefined;
+}
+
 /** 差異太大時不再細算，整段視為被取代（交給後備定位）。 */
 const MAX_EDIT_DISTANCE = 4000;
 

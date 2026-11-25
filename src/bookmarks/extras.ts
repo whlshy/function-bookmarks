@@ -1,12 +1,13 @@
 import * as vscode from 'vscode';
 import { DetectedSymbol } from '../detection/types';
-import { clearNumber, MarkKey, setSymbolExtras, setTagColor, updateBookmark } from '../storage/marks';
+import { addBookmark, clearNumber, MarkKey, setFavorite, setSymbolExtras, setTagColor, updateBookmark } from '../storage/marks';
 import { MarkStore, NumberedEntry } from '../storage/store';
 import { FavoritesModel } from '../symbols/favorites';
 import { SymbolService } from '../symbols/symbolService';
-import { BookmarkCommands, bookmarkTitle, revealLine } from './commands';
+import { autoNumbers, BookmarkCommands, bookmarkTitle, revealLine } from './commands';
 import { circled, nextFreeNumber, PALETTE, paletteColor } from './decor';
 import { itemTags, allBookmarkItems } from './unified';
+import { goToNumberKeys, setNumberKey, setNumberKeys } from '../util/shortcuts';
 
 /** 號碼、顏色要套用的對象：行號書籤或函式書籤。 */
 export type ExtrasTarget =
@@ -47,8 +48,15 @@ function entryWhere(e: NumberedEntry): string {
   return e.kind === 'line' ? `${e.bookmark.file}:${e.bookmark.line + 1}` : `${e.mark.file} › ${e.mark.path}`;
 }
 
-function sameTarget(e: NumberedEntry, t: ExtrasTarget): boolean {
-  if (e.folder !== t.folder) {
+/** 尚未建立的書籤目標：等使用者在 QuickPick／確認框確定後才一次建立並套用號碼或顏色。 */
+type PendingTarget =
+  | { pending: true; kind: 'line'; folder: vscode.WorkspaceFolder; uri: vscode.Uri; rel: string; doc: vscode.TextDocument; line: number; title: string; number?: undefined; color?: undefined }
+  | { pending: true; kind: 'symbol'; folder: vscode.WorkspaceFolder; uri: vscode.Uri; key: MarkKey; line: number; title: string; number?: undefined; color?: undefined };
+
+type ResolvedTarget = (ExtrasTarget & { pending?: false }) | PendingTarget;
+
+function sameTarget(e: NumberedEntry, t: ResolvedTarget): boolean {
+  if (t.pending || e.folder !== t.folder) {
     return false;
   }
   return e.kind === 'line'
@@ -65,11 +73,6 @@ export interface TourStepResult {
   uri: vscode.Uri;
   line: number;
   hasNote: boolean;
-}
-
-/** 設定數字書籤的快捷鍵文字（依平台）。 */
-function setNumberKeys(): string {
-  return process.platform === 'darwin' ? 'Cmd+Alt+Shift+1–9' : 'Ctrl+Alt+Shift+1–9';
 }
 
 /**
@@ -178,19 +181,148 @@ export class BookmarkExtras {
     return hit ? this.symbolTarget(doc.uri, hit) : undefined;
   }
 
-  /** 寫入號碼（null 為拿掉）；同一個號碼在其他書籤上的會一併拿掉。 */
-  private async writeNumber(t: ExtrasTarget, n: number | null): Promise<void> {
-    if (n !== null) {
-      const except = t.kind === 'line' ? { bookmarkId: t.id } : { key: t.key };
+  /** 依節點或游標解析出既有或尚未建立的目標（不先寫入 store，取消時不留殘留書籤）。 */
+  private async resolveForWrite(node?: unknown): Promise<{ target: ResolvedTarget; hiddenMine?: boolean } | { outsideWorkspace: true } | undefined> {
+    const n = node as NodeLike | undefined;
+    if (n?.type === 'bookmark' && n.entry) {
+      const b = this.store.bookmarksFor(n.entry.uri, { includeHidden: true }).find((x) => x.id === n.entry!.bookmark.id);
+      return b
+        ? { target: { kind: 'line', folder: n.entry.folder, uri: n.entry.uri, id: b.id, title: bookmarkTitle(b), number: b.number, color: b.color } }
+        : undefined;
+    }
+    if (n?.type === 'favorite' && n.fav) {
+      const t = this.symbolTarget(n.fav.uri, n.fav.mark);
+      return t ? { target: t } : undefined;
+    }
+    if (n?.type === 'symbol' && n.uri && n.symbol) {
+      const loc = this.store.locate(n.uri);
+      if (!loc) {
+        void vscode.window.showWarningMessage(vscode.l10n.t('Only files inside a workspace folder can be bookmarked.'));
+        return { outsideWorkspace: true };
+      }
+      const key: MarkKey = { file: loc.rel, path: n.symbol.path, kind: n.symbol.kind };
+      const existing = this.symbolTarget(n.uri, key);
+      if (existing) {
+        return { target: existing };
+      }
+      const mark = this.store.get(n.uri, key);
+      return {
+        target: {
+          pending: true,
+          kind: 'symbol',
+          folder: loc.folder,
+          uri: n.uri,
+          key,
+          line: n.symbol.nameLine,
+          title: mark?.alias ?? n.symbol.name,
+        },
+      };
+    }
+    const at =
+      n?.type === 'line' && n.uri && typeof (n as { line?: unknown }).line === 'number'
+        ? { uri: n.uri, line: (n as { line: number }).line }
+        : undefined;
+    const editor = vscode.window.activeTextEditor;
+    const doc = at ? await vscode.workspace.openTextDocument(at.uri) : editor?.document;
+    if (!doc) {
+      return undefined;
+    }
+    const line = at?.line ?? editor!.selection.active.line;
+    if (line < 0 || line >= doc.lineCount) {
+      return undefined;
+    }
+    const found = await this.atLine(doc, line);
+    if (found) {
+      return { target: found };
+    }
+    const loc = this.store.locate(doc.uri);
+    if (!loc) {
+      void vscode.window.showWarningMessage(vscode.l10n.t('Only files inside a workspace folder can be bookmarked.'));
+      return { outsideWorkspace: true };
+    }
+    // 「我的」被來源篩選隱藏且這一行已有自己的書籤：操作原本那筆，不重複建立
+    const hidden = await this.atLine(doc, line, true);
+    if (hidden) {
+      return { target: hidden, hiddenMine: true };
+    }
+    const sym = await this.bookmarks.symbolAtNameLine(doc, line);
+    if (sym) {
+      const key: MarkKey = { file: loc.rel, path: sym.path, kind: sym.kind };
+      const mark = this.store.get(doc.uri, key);
+      return {
+        target: {
+          pending: true,
+          kind: 'symbol',
+          folder: loc.folder,
+          uri: doc.uri,
+          key,
+          line: sym.nameLine,
+          title: mark?.alias ?? sym.name,
+        },
+      };
+    }
+    const lineText = doc.lineAt(line).text.trim();
+    return {
+      target: {
+        pending: true,
+        kind: 'line',
+        folder: loc.folder,
+        uri: doc.uri,
+        rel: loc.rel,
+        doc,
+        line,
+        title: lineText || vscode.l10n.t('Line {0}', line + 1),
+      },
+    };
+  }
+
+  /** 把號碼或顏色寫入目標；目標尚未建立時，在同一個 store.update 裡一次建立並套用。 */
+  private async commitTarget(
+    t: ResolvedTarget,
+    p: { number?: number | null; color?: string | null },
+    options: { applyAutoNumber?: boolean; hiddenMine?: boolean } = {},
+  ): Promise<void> {
+    if (p.number !== undefined && p.number !== null) {
       for (const folder of vscode.workspace.workspaceFolders ?? []) {
         if (folder !== t.folder) {
-          await this.store.update(folder, (d) => clearNumber(d, n));
+          await this.store.update(folder, (d) => clearNumber(d, p.number!));
         }
       }
-      await this.store.update(t.folder, (d) => this.patch(clearNumber(d, n, except), t, { number: n }));
+    }
+    if (!t.pending) {
+      if (p.number !== undefined && p.number !== null) {
+        const except = t.kind === 'line' ? { bookmarkId: t.id } : { key: t.key };
+        await this.store.update(t.folder, (d) => this.patch(clearNumber(d, p.number!, except), t, p));
+      } else {
+        await this.store.update(t.folder, (d) => this.patch(d, t, p));
+      }
+      if (options.hiddenMine) {
+        this.bookmarks.notifyIfMineHidden();
+      }
       return;
     }
-    await this.store.update(t.folder, (d) => this.patch(d, t, { number: null }));
+    // 尚未建立的目標：確定套用時才建立書籤；指定號碼時不另外觸發 autoNumber
+    const num = p.number !== undefined ? (p.number ?? undefined) : options.applyAutoNumber ? autoNumbers(this.store, 1)[0] : undefined;
+    if (t.kind === 'symbol') {
+      await this.store.update(t.folder, (d) => {
+        let next = num ? clearNumber(d, num) : d;
+        next = setFavorite(next, t.key, true, t.line);
+        return setSymbolExtras(next, t.key, {
+          ...(num !== undefined ? { number: num } : {}),
+          ...(p.color !== undefined ? { color: p.color } : {}),
+        });
+      });
+    } else {
+      const bm = await this.bookmarks.prepareBookmark(t.doc, t.rel, t.line);
+      if (num !== undefined) {
+        bm.number = num;
+      }
+      if (p.color) {
+        bm.color = p.color;
+      }
+      await this.store.update(t.folder, (d) => addBookmark(num ? clearNumber(d, num) : d, bm));
+    }
+    this.bookmarks.notifyIfMineHidden();
   }
 
   private patch(d: Parameters<typeof setSymbolExtras>[0], t: ExtrasTarget, p: { number?: number | null; color?: string | null }) {
@@ -213,7 +345,7 @@ export class BookmarkExtras {
   }
 
   /** 號碼已被別的書籤使用時詢問是否改給這個書籤。 */
-  private async confirmTake(n: number, t: ExtrasTarget, confirmed?: boolean): Promise<boolean> {
+  private async confirmTake(n: number, t: ResolvedTarget, confirmed?: boolean): Promise<boolean> {
     const holder = this.store.numbered().get(n);
     if (!holder || sameTarget(holder, t)) {
       return true;
@@ -232,13 +364,17 @@ export class BookmarkExtras {
 
   /**
    * 指定號碼：`value` 為 1～9、'next'（下一個空號）、null（拿掉）；沒有給就跳出選單。
-   * 游標那一行還沒有書籤時會先加入書籤。
+   * 游標那一行還沒有書籤時，等使用者確定選好後才一起建立，取消不留任何變動。
    */
   async setNumber(node?: unknown, value?: number | 'next' | null, confirmed?: boolean): Promise<void> {
-    const t = await this.target(node, true);
-    if (!t) {
+    const resolved = await this.resolveForWrite(node);
+    if (!resolved) {
       return this.noBookmark();
     }
+    if ('outsideWorkspace' in resolved) {
+      return;
+    }
+    const t = resolved.target;
     const used = this.store.numbered();
     let n = value;
     if (n === undefined) {
@@ -254,11 +390,11 @@ export class BookmarkExtras {
           value: i,
         });
       }
-      if (t.number) {
+      if (!t.pending && t.number) {
         items.push({ label: `$(close) ${vscode.l10n.t('Remove number')}`, value: null });
       }
       const pick = await vscode.window.showQuickPick(items, {
-        title: vscode.l10n.t('Number for "{0}" (jump with Ctrl+Alt+1–9)', t.title),
+        title: vscode.l10n.t('Number for "{0}" (jump with {1})', t.title, goToNumberKeys()),
       });
       if (!pick) {
         return;
@@ -266,7 +402,7 @@ export class BookmarkExtras {
       n = pick.value;
     }
     if (n === 'next') {
-      if (t.number) {
+      if (!t.pending && t.number) {
         return;
       }
       n = nextFreeNumber(used.keys()) ?? null;
@@ -275,31 +411,33 @@ export class BookmarkExtras {
         return;
       }
     }
+    if (n === null && t.pending) {
+      return;
+    }
     if (n !== null && !(await this.confirmTake(n, t, confirmed))) {
       return;
     }
-    await this.writeNumber(t, n);
+    await this.commitTarget(t, { number: n }, { hiddenMine: resolved.hiddenMine });
   }
 
-  /** Ctrl+Alt+Shift+1～9：游標那一行設為這個號碼；已經是這個號碼就拿掉。 */
+  /** Ctrl+Alt+Shift+1～9：游標那一行設為這個號碼；已經是這個號碼就拿掉。取消時不建立多餘書籤。 */
   async toggleNumber(n: number, confirmed?: boolean): Promise<void> {
     if (!(n >= 1 && n <= 9)) {
       return;
     }
-    const existed = await this.target(undefined, false);
-    const t = existed ?? (await this.target(undefined, true));
-    if (!t) {
+    const resolved = await this.resolveForWrite(undefined);
+    if (!resolved || 'outsideWorkspace' in resolved) {
       return;
     }
-    // 剛加入的書籤可能已自動給了號碼（設定 autoNumber），不能當成「已經是這個號碼」而拿掉
-    if (existed && t.number === n) {
-      await this.writeNumber(t, null);
+    const t = resolved.target;
+    if (!t.pending && t.number === n) {
+      await this.commitTarget(t, { number: null }, { hiddenMine: resolved.hiddenMine });
       return;
     }
     if (!(await this.confirmTake(n, t, confirmed))) {
       return;
     }
-    await this.writeNumber(t, n);
+    await this.commitTarget(t, { number: n }, { hiddenMine: resolved.hiddenMine });
   }
 
   /** Ctrl+Alt+1～9：跳到這個號碼的書籤；沒有給號碼時列出所有有號碼的書籤。 */
@@ -323,7 +461,7 @@ export class BookmarkExtras {
     }
     const e = used.get(n);
     if (!e) {
-      void vscode.window.showInformationMessage(vscode.l10n.t('No bookmark has number {0}. Press Ctrl+Alt+Shift+{0} on a line to set it.', n));
+      void vscode.window.showInformationMessage(vscode.l10n.t('No bookmark has number {0}. Press {1} on a line to set it.', n, setNumberKey(n)));
       return undefined;
     }
     if (e.kind === 'line') {
@@ -444,12 +582,16 @@ export class BookmarkExtras {
     return items;
   }
 
-  /** 書籤顏色：`value` 為色盤 id，null 為恢復預設（用標籤的顏色）。 */
+  /** 書籤顏色：`value` 為色盤 id，null 為恢復預設（用標籤的顏色）。取消時不建立多餘書籤。 */
   async setColor(node?: unknown, value?: string | null): Promise<void> {
-    const t = await this.target(node, true);
-    if (!t) {
+    const resolved = await this.resolveForWrite(node);
+    if (!resolved) {
       return this.noBookmark();
     }
+    if ('outsideWorkspace' in resolved) {
+      return;
+    }
+    const t = resolved.target;
     let color = value;
     if (color === undefined) {
       const pick = await vscode.window.showQuickPick(this.colorItems(t.color, vscode.l10n.t('Default (tag color)')), {
@@ -463,7 +605,7 @@ export class BookmarkExtras {
     if (color !== null && !paletteColor(color)) {
       return;
     }
-    await this.store.update(t.folder, (d) => this.patch(d, t, { color }));
+    await this.commitTarget(t, { color }, { applyAutoNumber: true, hiddenMine: resolved.hiddenMine });
   }
 
   /** 標籤顏色：沒有顏色的書籤用它第一個有顏色的標籤的顏色。可從依標籤分組的標籤節點呼叫。 */

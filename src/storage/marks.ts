@@ -51,11 +51,47 @@ export function hasStoreData(data: StoreData | undefined): boolean {
 }
 
 /**
- * 合併兩份書籤資料：以 target 為主，補進 source 裡 target 沒有的函式標記、行號書籤與標籤顏色。
- * 若號碼（1～9）衝突，保留 target 的號碼並移除 source 衝突的號碼，避免產生重複號碼。
+ * 去除單份資料內重複的號碼（1～9），並避開 `extraUsedNumbers`（例如多資料夾工作區其他資料夾已佔用的號碼）。
+ * 依序保留先出現的號碼，衝突的號碼會被移除。
  */
-export function mergeStoreData(target: StoreData, source: StoreData): StoreData {
-  const usedNumbers = new Set<number>();
+export function dedupeStoreNumbers(data: StoreData, extraUsedNumbers?: Iterable<number>): StoreData {
+  const used = new Set<number>(extraUsedNumbers ?? []);
+  let changed = false;
+  const symbols = data.symbols.map((m) => {
+    if (!m.favorite || !m.number) {
+      return m;
+    }
+    if (used.has(m.number)) {
+      changed = true;
+      const copy = { ...m };
+      delete copy.number;
+      return copy;
+    }
+    used.add(m.number);
+    return m;
+  });
+  const bookmarks = (data.bookmarks ?? []).map((b) => {
+    if (!b.number) {
+      return b;
+    }
+    if (used.has(b.number)) {
+      changed = true;
+      const copy = { ...b };
+      delete copy.number;
+      return copy;
+    }
+    used.add(b.number);
+    return b;
+  });
+  return changed ? { ...data, symbols, bookmarks } : data;
+}
+
+/**
+ * 合併兩份書籤資料：以 target 為主，補進 source 裡 target 沒有的函式標記、行號書籤與標籤顏色。
+ * 若號碼（1～9）衝突（包含 `extraUsedNumbers` 指定的其他資料夾已佔用號碼），保留既有的並移除 source 衝突的號碼。
+ */
+export function mergeStoreData(target: StoreData, source: StoreData, extraUsedNumbers?: Iterable<number>): StoreData {
+  const usedNumbers = new Set<number>(extraUsedNumbers ?? []);
   for (const m of target.symbols) {
     if (m.favorite && m.number) {
       usedNumbers.add(m.number);
@@ -173,6 +209,72 @@ export function parseStore(text: string): StoreData | undefined {
   const tc = parseTagColors((raw as { tagColors?: unknown }).tagColors);
   if (tc) {
     out.tagColors = tc;
+  }
+  return out;
+}
+
+function sanitizeImportFilePath(file: string): string | undefined {
+  const normalized = file.replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!normalized || normalized.split('/').includes('..')) {
+    return undefined;
+  }
+  return normalized;
+}
+
+/**
+ * 判斷並解析套件自己的書籤檔格式（`.vscode/function-bookmarks.json`），供「匯入書籤」使用。
+ * 比 `parseStore` 嚴格：要求頂層有 `version: 1` 且包含 `symbols` 或 `bookmarks` 陣列，
+ * 避免把任意 JSON（如 `package.json`、`{}` 或 alefragnani 格式）誤認成書籤檔；同時過濾含 `..` 的路徑。
+ */
+export function parseStoreFileImport(text: string): StoreData | undefined {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return undefined;
+  }
+  const o = raw as Record<string, unknown>;
+  if (o.version !== 1 || typeof o.format === 'string') {
+    return undefined;
+  }
+  const hasSymbols = Array.isArray(o.symbols);
+  const hasBookmarks = Array.isArray(o.bookmarks);
+  if (!hasSymbols && !hasBookmarks) {
+    return undefined;
+  }
+  if (o.symbols !== undefined && !hasSymbols) {
+    return undefined;
+  }
+  if (o.bookmarks !== undefined && !hasBookmarks) {
+    return undefined;
+  }
+  if (o.tagColors !== undefined && (!o.tagColors || typeof o.tagColors !== 'object' || Array.isArray(o.tagColors))) {
+    return undefined;
+  }
+  const parsed = parseStore(text);
+  if (!parsed) {
+    return undefined;
+  }
+  const symbols: SymbolMark[] = [];
+  for (const m of parsed.symbols) {
+    const file = sanitizeImportFilePath(m.file);
+    if (file) {
+      symbols.push(file === m.file ? m : { ...m, file });
+    }
+  }
+  const bookmarks: LineBookmark[] = [];
+  for (const b of parsed.bookmarks) {
+    const file = sanitizeImportFilePath(b.file);
+    if (file) {
+      bookmarks.push(file === b.file ? b : { ...b, file });
+    }
+  }
+  const out: StoreData = { version: 1, symbols, bookmarks };
+  if (parsed.tagColors) {
+    out.tagColors = parsed.tagColors;
   }
   return out;
 }

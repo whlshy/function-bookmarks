@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import {
   addBookmark,
+  dedupeStoreNumbers,
   emptyStore,
   favorites,
   findMark,
@@ -126,5 +127,27 @@ describe('收藏與自訂名稱資料', () => {
     assert.deepStrictEqual(merged.bookmarks.map((b) => b.id), ['b1', 'b3'], '同檔同行不重複、不同行補進');
     assert.strictEqual(merged.bookmarks.find((b) => b.id === 'b3')?.number, 3, '不衝突的號碼保留');
     assert.deepStrictEqual(merged.tagColors, { todo: 'blue', auth: 'green' });
+  });
+
+  it('dedupeStoreNumbers 與 mergeStoreData：去除內部重複與跨資料夾衝突號碼（CR-11）', () => {
+    const key2: MarkKey = { file: 'app/views.py', path: 'index', kind: 'function' };
+    let data = setSymbolExtras(setFavorite(emptyStore(), key, true, 1, now), key, { number: 1 });
+    data = setSymbolExtras(setFavorite(data, key2, true, 0, now), key2, { number: 2 });
+    data = addBookmark(data, { id: 'b1', file: 'app/views.py', line: 5, number: 1 }); // 內部與 key 重複
+    data = addBookmark(data, { id: 'b2', file: 'app/views.py', line: 8, number: 3 }); // 與跨資料夾衝突
+    data = addBookmark(data, { id: 'b3', file: 'app/views.py', line: 10, number: 4 }); // 不衝突
+
+    const deduped = dedupeStoreNumbers(data, [3]);
+    assert.strictEqual(findMark(deduped, key)?.number, 1);
+    assert.strictEqual(findMark(deduped, key2)?.number, 2);
+    assert.strictEqual(deduped.bookmarks.find((b) => b.id === 'b1')?.number, undefined, '檔案內部重複的 1 號應清掉');
+    assert.strictEqual(deduped.bookmarks.find((b) => b.id === 'b2')?.number, undefined, '與其他資料夾衝突的 3 號應清掉');
+    assert.strictEqual(deduped.bookmarks.find((b) => b.id === 'b3')?.number, 4, '不衝突的 4 號保留');
+
+    const merged = mergeStoreData(emptyStore(), data, [1, 3]);
+    assert.strictEqual(findMark(merged, key)?.number, undefined, 'merge 避開其他資料夾已佔用的 1 號');
+    assert.strictEqual(findMark(merged, key2)?.number, 2);
+    assert.strictEqual(merged.bookmarks.find((b) => b.id === 'b2')?.number, undefined, 'merge 避開其他資料夾已佔用的 3 號');
+    assert.strictEqual(merged.bookmarks.find((b) => b.id === 'b3')?.number, 4);
   });
 });

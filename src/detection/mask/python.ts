@@ -26,7 +26,21 @@ export function maskPython(text: string): string {
         if (start > 0 && /\w/.test(text[start - 1])) {
           start = i; // 前面是識別字的一部分，不是字串前綴
         }
-        const close = text.indexOf(ch.repeat(3), i + 3);
+        const delim = ch.repeat(3);
+        // Python 三引號字串（含 raw string）裡，反斜線皆會跳脫下一個字元，避免把 \"\"\" 誤當成結尾
+        let j = i + 3;
+        let close = -1;
+        while (j < n) {
+          if (text[j] === '\\') {
+            j += escapeStep(text, j);
+            continue;
+          }
+          if (text.startsWith(delim, j)) {
+            close = j;
+            break;
+          }
+          j++;
+        }
         const stop = close === -1 ? n : close + 3;
         // 開頭的引號有縮排時保留（只有 docstring 的 class／def 本體才不會變成空的）；在第 0 欄才一起遮掉
         const atColumn0 = start === 0 || text[start - 1] === '\n';

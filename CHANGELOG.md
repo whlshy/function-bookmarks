@@ -1,5 +1,62 @@
 # Changelog
 
+## 0.9.0 (2026-11-26) — new shortcuts, storage per workspace, importing a bookmarks file and many fixes
+
+### Keyboard shortcuts have changed
+
+All default shortcuts now start with `Alt+Shift+B` (`Ctrl+Shift+B` on macOS, instead of `Cmd+Alt`), then one more key. The old `Ctrl+Alt` shortcuts clashed with built-in VS Code / Cursor shortcuts and with AltGr characters on some keyboard layouts. If you set your own shortcuts, they are kept.
+
+| Action | Before (Win / Linux) | Now (Win / Linux) | Now (macOS) |
+| --- | --- | --- | --- |
+| Add / remove a bookmark | `Ctrl+Alt+B` | `Alt+Shift+B B` | `Ctrl+Shift+B B` |
+| Add a named bookmark | `Ctrl+Alt+Shift+B` | `Alt+Shift+B Shift+B` | `Ctrl+Shift+B Shift+B` |
+| Rename the bookmark at the cursor | — | `Alt+Shift+B R` | `Ctrl+Shift+B R` |
+| Next / previous bookmark | `Ctrl+Alt+.` / `Ctrl+Alt+,` | `Alt+Shift+B .` / `Alt+Shift+B ,` | `Ctrl+Shift+B .` / `Ctrl+Shift+B ,` |
+| Search bookmarks | `Ctrl+Alt+/` | `Alt+Shift+B /` | `Ctrl+Shift+B /` |
+| Focus bookmark search bar | `Ctrl+Alt+F` | `Alt+Shift+B F` | `Ctrl+Shift+B F` |
+| Go to bookmark 1–9 | `Ctrl+Alt+1`–`9` | `Alt+Shift+B 1`–`9` | `Ctrl+Shift+B 1`–`9` |
+| Set / remove number 1–9 | `Ctrl+Alt+Shift+1`–`9` | `Alt+Shift+B Shift+1`–`9` | `Ctrl+Shift+B Shift+1`–`9` |
+
+Messages and hovers that mention a shortcut now show the one for your platform.
+
+### Side bar and editing
+
+- **Rename Bookmark** (`Alt+Shift+B R`, also in the editor context menu when the cursor is on a bookmark): renames the line bookmark on the cursor line, or the function bookmark there. `F2` in the side bar still renames the selected bookmark; clicking a bookmark in the side bar puts the focus back in the code, so `F2` there renames the code symbol as usual
+- *Edit Tags*, *Rename Bookmark* and *Remove Bookmark* are in the Command Palette and work on the bookmark at the cursor, so everything can be done from the keyboard
+- The side bar title is shorter (*Bookmarks*), so the current branch name is visible next to it
+- In a multi-root workspace, files with the same name show their folder name
+- With more than 30 bookmarks or 6 groups, the bookmark groups start collapsed, so *Current File* and *Whole Project* stay within reach
+- While editing a note, *Current File* keeps showing the code file the note belongs to
+- *Move Bookmark to Cursor* is no longer offered for function bookmarks (they follow their function)
+- The `…` menu of the bookmarks view is in a clearer order
+- Importing a file that is not a bookmarks file now just says it does not match the Function Bookmarks format
+
+### Storage per workspace, and importing a bookmarks file
+
+- **Choose Bookmark Storage for This Workspace**: keep one project's bookmarks in `.vscode/function-bookmarks.json` and another's in the editor's workspace storage. The choice is saved by the editor, not in the project; *Follow setting* goes back to `functionBookmarks.storage`, which is now the default for every workspace without a choice of its own. In the Command Palette and the bookmarks view's `…` menu
+- If the current storage has no bookmarks but the other one does (for example, the *Copy bookmarks?* notification was closed after changing the storage), you are asked again at startup. *Keep empty* stops asking. The check runs in the background and does not slow down startup
+- **Import → From a file** accepts a `.vscode/function-bookmarks.json` file: its bookmarks become your own (bookmarks from other sources in it are kept), merged with or replacing what you have, and relocated against your files. Picking the file the workspace is already using says so instead of showing an error
+- *Choose Bookmark Storage* and the storage prompts mark which place is *current* and which one is *in effect*
+- Changing the storage no longer clears the bookmarks saved for other branches
+- After clearing all your bookmarks, you are no longer asked to copy them back from the other storage
+
+### Fixes
+
+- Cancelling a note and opening it again right away no longer shows a deleted tab and an empty preview
+- Pressing `Esc` while setting a number or color on a line without a bookmark no longer leaves an empty bookmark behind
+- In a file that had just been opened, the first edit that rewrote a bookmarked line could delete the bookmark or mark it as *needs checking*; the bookmark now stays on its line
+- *Export Bookmarks…* from a file row in the side bar exports only that file
+- Saving is queued, so quick changes can no longer overwrite each other, and closing the window waits for pending saves
+- In a multi-root workspace, *Clean Up Records of Deleted Branches* no longer removes another folder's records
+- The bookmarks file is kept out of git (`.git/info/exclude`) in git worktrees and in projects opened from a subfolder of a repository
+- Pressing `Esc` during *Search Functions* no longer leaves the search running in the background
+
+### Faster
+
+- Typing in a file with bookmarks only rechecks the lines you changed
+- Moving bookmarks by line no longer rechecks every function bookmark
+- Files over 2 MB are skipped when looking for renamed files
+
 ## 0.8.3 (2026-11-25) — sort a file's bookmarks by title
 
 - **Sort by title, per file**: when bookmarks are grouped by file, each file row has a sort button (also in its context menu). Click it to list that file's bookmarks by title — natural order, so `item2` comes before `item10`, ignoring case — and click again to go back to line order. Each file remembers its choice after a restart, and a file sorted by title shows *by title* next to its name. Next / Previous Bookmark, tours, search and export keep line order

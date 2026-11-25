@@ -16,7 +16,7 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 
 ### Bookmarks that follow the code
 
-- `Ctrl+Alt+B` (or right-click a line number) — on the line with a function's name it bookmarks the **function**, anywhere else the **line**
+- `Alt+Shift+B B` (or right-click a line number) — on the line with a function's name it bookmarks the **function**, anywhere else the **line**
 - Follows edits, `git pull`, branch switches, merges, stashes, formatters, scripts and AI edits — even for files that are not open
 - A bookmark that cannot be found (or sits inside a merge conflict) is marked *needs checking*; put it back with **Move Bookmark to Cursor**
 - **Branch aware**: each branch remembers its own positions; bookmarks on code that is not on the current branch wait until you switch back; a bookmark can belong to one branch only
@@ -27,11 +27,11 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 ### Organize and jump
 
 - Names, **tags**, multi-line **Markdown notes** (shown on hover)
-- **Numbered bookmarks**: `Ctrl+Alt+Shift+1`–`9` sets a number on the current line, `Ctrl+Alt+1`–`9` jumps to it; step through numbered bookmarks in order with **Tour: Next / Previous Numbered Bookmark**
+- **Numbered bookmarks**: `Alt+Shift+B Shift+1`–`9` sets a number on the current line, `Alt+Shift+B 1`–`9` jumps to it; step through numbered bookmarks in order with **Tour: Next / Previous Numbered Bookmark**
 - **Colors** for bookmarks and tags — the gutter icon and side bar follow
 - The bookmark name shown faintly at the end of the line
-- **Search** from the first row of the side bar (`Ctrl+Alt+F`): the bookmarks are filtered as you type; `#tag` and `@source` narrow it down
-- Next / previous (`Ctrl+Alt+.` / `Ctrl+Alt+,`), quick search (`Ctrl+Alt+/`), group by file, tag or source
+- **Search** from the first row of the side bar (`Alt+Shift+B F`): the bookmarks are filtered as you type; `#tag` and `@source` narrow it down
+- Next / previous (`Alt+Shift+B .` / `Alt+Shift+B ,`), quick search (`Alt+Shift+B /`), group by file, tag or source
 - **Hide bookmark icons temporarily** (to set breakpoints) from the side bar's `…` menu
 - Status bar: bookmarks in the current file; click to search
 
@@ -40,7 +40,7 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 ### Function list
 
 - The functions of the current file in the side bar, a **Whole project** browser, and **Search Functions**
-- **Display names** (`F2`) for bookmarked functions without changing the code; hover to see the original name
+- **Display names** (`Alt+Shift+B R` in the editor, `F2` in the side bar) for bookmarked functions without changing the code; hover to see the original name
 - Event listeners and requests (`.on('click')`, `$.ajax`, `fetch`) are listed too
 - **Your own detection rules** with regular expressions; **Test Detection Rules on This File** shows what each rule finds
 - Works out of the box for most common languages, no language extension needed; others fall back to the language server
@@ -58,16 +58,15 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 
 | Shortcut (Win / Linux) | macOS | Action |
 |---|---|---|
-| `Ctrl+Alt+B` | `Cmd+Alt+B` | Add / remove a bookmark (function or line) |
-| `Ctrl+Alt+Shift+B` | `Cmd+Alt+Shift+B` | Add a named bookmark |
-| `Ctrl+Alt+.` / `Ctrl+Alt+,` | `Cmd+Alt+.` / `Cmd+Alt+,` | Next / previous bookmark |
-| `Ctrl+Alt+/` | `Cmd+Alt+/` | Search bookmarks |
-| `Ctrl+Alt+F` | `Cmd+Alt+Shift+F` | Focus bookmark search bar |
-| `Ctrl+Alt+Shift+1`–`9` | `Cmd+Alt+Shift+1`–`9` | Set / remove number 1–9 on this line |
-| `Ctrl+Alt+1`–`9` | `Cmd+Alt+1`–`9` | Go to bookmark 1–9 |
+| `Alt+Shift+B B` | `Ctrl+Shift+B B` | Add / remove a bookmark (function or line) |
+| `Alt+Shift+B Shift+B` | `Ctrl+Shift+B Shift+B` | Add a named bookmark |
+| `Alt+Shift+B R` | `Ctrl+Shift+B R` | Rename the bookmark at the cursor |
+| `Alt+Shift+B .` / `Alt+Shift+B ,` | `Ctrl+Shift+B .` / `Ctrl+Shift+B ,` | Next / previous bookmark |
+| `Alt+Shift+B /` | `Ctrl+Shift+B /` | Search bookmarks |
+| `Alt+Shift+B F` | `Ctrl+Shift+B F` | Focus bookmark search bar |
+| `Alt+Shift+B Shift+1`–`9` | `Ctrl+Shift+B Shift+1`–`9` | Set / remove number 1–9 on this line |
+| `Alt+Shift+B 1`–`9` | `Ctrl+Shift+B 1`–`9` | Go to bookmark 1–9 |
 | `F2` (side bar) | `F2` (side bar) | Rename bookmark or display name |
-
-On keyboard layouts where `Ctrl+Alt` works as `AltGr` (for example German), `Ctrl+Alt+digit` may type characters; change these shortcuts in *Keyboard Shortcuts* if needed.
 
 ## Settings
 
@@ -108,7 +107,7 @@ On keyboard layouts where `Ctrl+Alt` works as `AltGr` (for example German), `Ctr
 
 | Setting | Default | Description |
 |---|---|---|
-| `functionBookmarks.storage` | `file` | `file` (`.vscode/function-bookmarks.json`, kept out of git through `.git/info/exclude`) or `workspaceState` |
+| `functionBookmarks.storage` | `file` | Default for all workspaces: `file` (`.vscode/function-bookmarks.json`, kept out of git through `.git/info/exclude`) or `workspaceState`. To use a different one for a single workspace, run **Choose Bookmark Storage for This Workspace…** |
 | `functionBookmarks.authorName` | git `user.name` | Your name in exported bookmarks |
 
 ### Example rule
@@ -133,7 +132,7 @@ Each workspace folder keeps its own bookmarks file with relative paths. The exte
 
 ## Privacy
 
-This extension does not collect or send any data. Bookmarks are stored in your workspace (`.vscode/function-bookmarks.json`) or in VS Code's workspace storage.
+This extension does not collect or send any data. Bookmarks are stored in your workspace (`.vscode/function-bookmarks.json`) or in the editor's workspace storage.
 
 ## License
 

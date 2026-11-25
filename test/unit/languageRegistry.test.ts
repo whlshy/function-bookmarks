@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
 import { BUILTIN_RULES, EXT_LANGUAGE, LANGUAGES, PROJECT_EXTENSIONS, syntaxForLanguage } from '../../src/detection/languages';
+import { detect } from './helpers';
 
 describe('語言清單（detection/languages）', () => {
   it('package.json 的「整個專案」預設副檔名和各語言的設定一致', () => {
@@ -25,7 +26,7 @@ describe('語言清單（detection/languages）', () => {
     assert.strictEqual(syntaxForLanguage('plaintext'), 'none');
   });
 
-  it('內建規則 id 不重複，且每條規則的語言都有登記', () => {
+  it('內建規則 id 不重複、每條規則的語言都有登記，且所有語言的規則皆能無錯誤編譯', () => {
     const ids = BUILTIN_RULES.map((r) => r.id);
     assert.strictEqual(new Set(ids).size, ids.length);
     const known = new Set(LANGUAGES.flatMap((l) => Object.keys(l.syntax)));
@@ -33,6 +34,9 @@ describe('語言清單（detection/languages）', () => {
       for (const l of [...r.languages, ...(r.embeddedLanguage ? [r.embeddedLanguage] : [])]) {
         assert.ok(known.has(l), `${r.id}：${l}`);
       }
+    }
+    for (const lang of known) {
+      assert.deepStrictEqual(detect('', lang).errors, [], lang);
     }
   });
 });

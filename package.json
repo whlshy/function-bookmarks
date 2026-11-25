@@ -2,7 +2,7 @@
   "name": "function-bookmarks",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.8.3",
+  "version": "0.9.0",
   "publisher": "whlshy",
   "icon": "media/icon.png",
   "galleryBanner": {
@@ -107,7 +107,7 @@
         "command": "functionBookmarks.toggleFavorite",
         "title": "%command.toggleFavorite%",
         "category": "%command.category%",
-        "icon": "$(star)"
+        "icon": "$(star-empty)"
       },
       {
         "command": "functionBookmarks.renameDisplayName",
@@ -210,6 +210,12 @@
         "icon": "$(cloud-download)"
       },
       {
+        "command": "functionBookmarks.chooseStorage",
+        "title": "%command.chooseStorage%",
+        "category": "%command.category%",
+        "icon": "$(database)"
+      },
+      {
         "command": "functionBookmarks.filterBookmarkSources",
         "title": "%command.filterBookmarkSources%",
         "category": "%command.category%",
@@ -300,6 +306,16 @@
         "title": "%command.clearSearch%",
         "category": "%command.category%",
         "icon": "$(close)"
+      },
+      {
+        "command": "functionBookmarks.searchClearAndClose",
+        "title": "%command.searchClearAndClose%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "functionBookmarks.searchToList",
+        "title": "%command.searchToList%",
+        "category": "%command.category%"
       },
       {
         "command": "functionBookmarks.showBookmarksOnly",
@@ -430,14 +446,29 @@
           "group": "2_bookmarks@1"
         },
         {
+          "command": "functionBookmarks.goToNumberedBookmark",
+          "when": "view == functionBookmarks.tree",
+          "group": "2_bookmarks@2"
+        },
+        {
+          "command": "functionBookmarks.tourNext",
+          "when": "view == functionBookmarks.tree",
+          "group": "2_bookmarks@3"
+        },
+        {
+          "command": "functionBookmarks.tourPrevious",
+          "when": "view == functionBookmarks.tree",
+          "group": "2_bookmarks@4"
+        },
+        {
           "command": "functionBookmarks.groupBookmarksByTag",
           "when": "view == functionBookmarks.tree && functionBookmarks.bookmarkGrouping != tag",
-          "group": "2_bookmarks@2"
+          "group": "2_bookmarks@5"
         },
         {
           "command": "functionBookmarks.groupBookmarksByFile",
           "when": "view == functionBookmarks.tree && functionBookmarks.bookmarkGrouping != file",
-          "group": "2_bookmarks@2"
+          "group": "2_bookmarks@6"
         },
         {
           "command": "functionBookmarks.filterBookmarkSources",
@@ -452,7 +483,7 @@
         {
           "command": "functionBookmarks.groupBookmarksBySource",
           "when": "view == functionBookmarks.tree && functionBookmarks.hasSources && functionBookmarks.bookmarkGrouping != source",
-          "group": "2_bookmarks@2"
+          "group": "2_bookmarks@7"
         },
         {
           "command": "functionBookmarks.exportBookmarks",
@@ -465,14 +496,19 @@
           "group": "4_share@2"
         },
         {
+          "command": "functionBookmarks.chooseStorage",
+          "when": "view == functionBookmarks.tree",
+          "group": "4_storage@1"
+        },
+        {
           "command": "functionBookmarks.hideNotOnBranch",
           "when": "view == functionBookmarks.tree && !functionBookmarks.hideNotOnBranch",
-          "group": "2_bookmarks@3"
+          "group": "2_bookmarks@8"
         },
         {
           "command": "functionBookmarks.showNotOnBranch",
           "when": "view == functionBookmarks.tree && functionBookmarks.hideNotOnBranch",
-          "group": "2_bookmarks@3"
+          "group": "2_bookmarks@8"
         },
         {
           "command": "functionBookmarks.cleanBranchRecords",
@@ -485,34 +521,19 @@
           "group": "3_clear@1"
         },
         {
-          "command": "functionBookmarks.goToNumberedBookmark",
-          "when": "view == functionBookmarks.tree",
-          "group": "2_bookmarks@1"
-        },
-        {
-          "command": "functionBookmarks.tourNext",
-          "when": "view == functionBookmarks.tree",
-          "group": "2_bookmarks@1a"
-        },
-        {
-          "command": "functionBookmarks.tourPrevious",
-          "when": "view == functionBookmarks.tree",
-          "group": "2_bookmarks@1b"
-        },
-        {
           "command": "functionBookmarks.hideBookmarkIcons",
           "when": "view == functionBookmarks.tree && !functionBookmarks.iconsHidden",
-          "group": "2_bookmarks@4"
+          "group": "2_bookmarks@9"
         },
         {
           "command": "functionBookmarks.showBookmarkIcons",
           "when": "view == functionBookmarks.tree && functionBookmarks.iconsHidden",
-          "group": "2_bookmarks@4"
+          "group": "2_bookmarks@9"
         },
         {
           "command": "functionBookmarks.setTagColor",
           "when": "view == functionBookmarks.tree",
-          "group": "2_bookmarks@5"
+          "group": "2_bookmarks@10"
         },
         {
           "command": "functionBookmarks.testDetectionRules",
@@ -538,7 +559,7 @@
         },
         {
           "command": "functionBookmarks.removeFavorite",
-          "when": "view == functionBookmarks.tree && (viewItem =~ /^fbSymbol:fav/ || viewItem =~ /^fbFavorite/)",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbSymbol:fav/",
           "group": "inline@1"
         },
         {
@@ -558,7 +579,7 @@
         },
         {
           "command": "functionBookmarks.removeFavorite",
-          "when": "view == functionBookmarks.tree && (viewItem =~ /^fbSymbol:fav/ || viewItem =~ /^fbFavorite/)",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbSymbol:fav/",
           "group": "1_favorite@1"
         },
         {
@@ -598,12 +619,12 @@
         },
         {
           "command": "functionBookmarks.moveBookmarkToCursor",
-          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark.*:lost/",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark.*:lost/ && viewItem !~ /^fbBookmark:fn/",
           "group": "inline@0"
         },
         {
           "command": "functionBookmarks.moveBookmarkToCursor",
-          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/ && viewItem !~ /^fbBookmark:fn/",
           "group": "1_bookmark@0"
         },
         {
@@ -711,42 +732,42 @@
         {
           "command": "functionBookmarks.toggleBookmark",
           "when": "editorTextFocus",
-          "group": "functionBookmarks@0"
+          "group": "functionBookmarks@1"
         },
         {
           "command": "functionBookmarks.addLabeledBookmark",
           "when": "editorTextFocus",
-          "group": "functionBookmarks@0"
+          "group": "functionBookmarks@2"
         },
         {
           "command": "functionBookmarks.toggleFavorite",
           "when": "editorTextFocus",
-          "group": "functionBookmarks@1"
+          "group": "functionBookmarks@3"
         },
         {
-          "command": "functionBookmarks.renameDisplayName",
-          "when": "editorTextFocus",
-          "group": "functionBookmarks@2"
+          "command": "functionBookmarks.renameBookmark",
+          "when": "editorTextFocus && functionBookmarks.cursorHasBookmark",
+          "group": "functionBookmarks@4"
         },
         {
           "command": "functionBookmarks.editNote",
           "when": "editorTextFocus",
-          "group": "functionBookmarks@3"
+          "group": "functionBookmarks@5"
         },
         {
           "command": "functionBookmarks.previewNote",
           "when": "editorTextFocus",
-          "group": "functionBookmarks@4"
+          "group": "functionBookmarks@6"
         },
         {
           "command": "functionBookmarks.setBookmarkNumber",
           "when": "editorTextFocus",
-          "group": "functionBookmarks@5"
+          "group": "functionBookmarks@7"
         },
         {
           "command": "functionBookmarks.setBookmarkColor",
           "when": "editorTextFocus",
-          "group": "functionBookmarks@6"
+          "group": "functionBookmarks@8"
         }
       ],
       "commandPalette": [
@@ -791,15 +812,7 @@
           "when": "false"
         },
         {
-          "command": "functionBookmarks.renameBookmark",
-          "when": "false"
-        },
-        {
-          "command": "functionBookmarks.editBookmarkTags",
-          "when": "false"
-        },
-        {
-          "command": "functionBookmarks.removeBookmark",
+          "command": "functionBookmarks.renameDisplayName",
           "when": "false"
         },
         {
@@ -829,6 +842,14 @@
         {
           "command": "functionBookmarks.clearSearch",
           "when": "functionBookmarks.searching"
+        },
+        {
+          "command": "functionBookmarks.searchClearAndClose",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.searchToList",
+          "when": "false"
         }
       ],
       "explorer/context": [
@@ -1054,6 +1075,10 @@
                     "type": "string"
                   },
                   "description": "%config.rule.hideChildren%"
+                },
+                "optionalBody": {
+                  "type": "boolean",
+                  "description": "%config.rule.optionalBody%"
                 }
               }
             },
@@ -1168,35 +1193,41 @@
       },
       {
         "command": "functionBookmarks.toggleBookmark",
-        "key": "ctrl+alt+b",
-        "mac": "cmd+alt+b",
+        "key": "alt+shift+b b",
+        "mac": "ctrl+shift+b b",
         "when": "editorTextFocus"
       },
       {
         "command": "functionBookmarks.addLabeledBookmark",
-        "key": "ctrl+alt+shift+b",
-        "mac": "cmd+alt+shift+b",
+        "key": "alt+shift+b shift+b",
+        "mac": "ctrl+shift+b shift+b",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "functionBookmarks.renameBookmark",
+        "key": "alt+shift+b r",
+        "mac": "ctrl+shift+b r",
         "when": "editorTextFocus"
       },
       {
         "command": "functionBookmarks.nextBookmark",
-        "key": "ctrl+alt+.",
-        "mac": "cmd+alt+."
+        "key": "alt+shift+b .",
+        "mac": "ctrl+shift+b ."
       },
       {
         "command": "functionBookmarks.previousBookmark",
-        "key": "ctrl+alt+,",
-        "mac": "cmd+alt+,"
+        "key": "alt+shift+b ,",
+        "mac": "ctrl+shift+b ,"
       },
       {
         "command": "functionBookmarks.searchBookmarks",
-        "key": "ctrl+alt+/",
-        "mac": "cmd+alt+/"
+        "key": "alt+shift+b /",
+        "mac": "ctrl+shift+b /"
       },
       {
         "command": "functionBookmarks.focusSearch",
-        "key": "ctrl+alt+f",
-        "mac": "cmd+alt+shift+f"
+        "key": "alt+shift+b f",
+        "mac": "ctrl+shift+b f"
       },
       {
         "command": "functionBookmarks.searchClearAndClose",
@@ -1210,80 +1241,80 @@
       },
       {
         "command": "functionBookmarks.goToNumberedBookmark",
-        "key": "ctrl+alt+1",
-        "mac": "cmd+alt+1",
+        "key": "alt+shift+b 1",
+        "mac": "ctrl+shift+b 1",
         "args": {
           "number": 1
         }
       },
       {
         "command": "functionBookmarks.goToNumberedBookmark",
-        "key": "ctrl+alt+2",
-        "mac": "cmd+alt+2",
+        "key": "alt+shift+b 2",
+        "mac": "ctrl+shift+b 2",
         "args": {
           "number": 2
         }
       },
       {
         "command": "functionBookmarks.goToNumberedBookmark",
-        "key": "ctrl+alt+3",
-        "mac": "cmd+alt+3",
+        "key": "alt+shift+b 3",
+        "mac": "ctrl+shift+b 3",
         "args": {
           "number": 3
         }
       },
       {
         "command": "functionBookmarks.goToNumberedBookmark",
-        "key": "ctrl+alt+4",
-        "mac": "cmd+alt+4",
+        "key": "alt+shift+b 4",
+        "mac": "ctrl+shift+b 4",
         "args": {
           "number": 4
         }
       },
       {
         "command": "functionBookmarks.goToNumberedBookmark",
-        "key": "ctrl+alt+5",
-        "mac": "cmd+alt+5",
+        "key": "alt+shift+b 5",
+        "mac": "ctrl+shift+b 5",
         "args": {
           "number": 5
         }
       },
       {
         "command": "functionBookmarks.goToNumberedBookmark",
-        "key": "ctrl+alt+6",
-        "mac": "cmd+alt+6",
+        "key": "alt+shift+b 6",
+        "mac": "ctrl+shift+b 6",
         "args": {
           "number": 6
         }
       },
       {
         "command": "functionBookmarks.goToNumberedBookmark",
-        "key": "ctrl+alt+7",
-        "mac": "cmd+alt+7",
+        "key": "alt+shift+b 7",
+        "mac": "ctrl+shift+b 7",
         "args": {
           "number": 7
         }
       },
       {
         "command": "functionBookmarks.goToNumberedBookmark",
-        "key": "ctrl+alt+8",
-        "mac": "cmd+alt+8",
+        "key": "alt+shift+b 8",
+        "mac": "ctrl+shift+b 8",
         "args": {
           "number": 8
         }
       },
       {
         "command": "functionBookmarks.goToNumberedBookmark",
-        "key": "ctrl+alt+9",
-        "mac": "cmd+alt+9",
+        "key": "alt+shift+b 9",
+        "mac": "ctrl+shift+b 9",
         "args": {
           "number": 9
         }
       },
       {
         "command": "functionBookmarks.toggleNumberedBookmark",
-        "key": "ctrl+alt+shift+1",
-        "mac": "cmd+alt+shift+1",
+        "key": "alt+shift+b shift+1",
+        "mac": "ctrl+shift+b shift+1",
         "when": "editorTextFocus",
         "args": {
           "number": 1
@@ -1291,8 +1322,8 @@
       },
       {
         "command": "functionBookmarks.toggleNumberedBookmark",
-        "key": "ctrl+alt+shift+2",
-        "mac": "cmd+alt+shift+2",
+        "key": "alt+shift+b shift+2",
+        "mac": "ctrl+shift+b shift+2",
         "when": "editorTextFocus",
         "args": {
           "number": 2
@@ -1300,8 +1331,8 @@
       },
       {
         "command": "functionBookmarks.toggleNumberedBookmark",
-        "key": "ctrl+alt+shift+3",
-        "mac": "cmd+alt+shift+3",
+        "key": "alt+shift+b shift+3",
+        "mac": "ctrl+shift+b shift+3",
         "when": "editorTextFocus",
         "args": {
           "number": 3
@@ -1309,8 +1340,8 @@
       },
       {
         "command": "functionBookmarks.toggleNumberedBookmark",
-        "key": "ctrl+alt+shift+4",
-        "mac": "cmd+alt+shift+4",
+        "key": "alt+shift+b shift+4",
+        "mac": "ctrl+shift+b shift+4",
         "when": "editorTextFocus",
         "args": {
           "number": 4
@@ -1318,8 +1349,8 @@
       },
       {
         "command": "functionBookmarks.toggleNumberedBookmark",
-        "key": "ctrl+alt+shift+5",
-        "mac": "cmd+alt+shift+5",
+        "key": "alt+shift+b shift+5",
+        "mac": "ctrl+shift+b shift+5",
         "when": "editorTextFocus",
         "args": {
           "number": 5
@@ -1327,8 +1358,8 @@
       },
       {
         "command": "functionBookmarks.toggleNumberedBookmark",
-        "key": "ctrl+alt+shift+6",
-        "mac": "cmd+alt+shift+6",
+        "key": "alt+shift+b shift+6",
+        "mac": "ctrl+shift+b shift+6",
         "when": "editorTextFocus",
         "args": {
           "number": 6
@@ -1336,8 +1367,8 @@
       },
       {
         "command": "functionBookmarks.toggleNumberedBookmark",
-        "key": "ctrl+alt+shift+7",
-        "mac": "cmd+alt+shift+7",
+        "key": "alt+shift+b shift+7",
+        "mac": "ctrl+shift+b shift+7",
         "when": "editorTextFocus",
         "args": {
           "number": 7
@@ -1345,8 +1376,8 @@
       },
       {
         "command": "functionBookmarks.toggleNumberedBookmark",
-        "key": "ctrl+alt+shift+8",
-        "mac": "cmd+alt+shift+8",
+        "key": "alt+shift+b shift+8",
+        "mac": "ctrl+shift+b shift+8",
         "when": "editorTextFocus",
         "args": {
           "number": 8
@@ -1354,8 +1385,8 @@
       },
       {
         "command": "functionBookmarks.toggleNumberedBookmark",
-        "key": "ctrl+alt+shift+9",
-        "mac": "cmd+alt+shift+9",
+        "key": "alt+shift+b shift+9",
+        "mac": "ctrl+shift+b shift+9",
         "when": "editorTextFocus",
         "args": {
           "number": 9

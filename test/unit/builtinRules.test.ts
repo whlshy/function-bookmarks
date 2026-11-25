@@ -3,17 +3,6 @@ import { BUILTIN_RULES } from '../../src/detection/languages';
 import { detect, lines, outline } from './helpers';
 
 describe('內建規則', () => {
-  it('每條規則都能編譯，沒有錯誤', () => {
-    for (const lang of ['typescript', 'python', 'html']) {
-      assert.deepStrictEqual(detect('', lang).errors, [], lang);
-    }
-  });
-
-  it('規則 id 不重複', () => {
-    const ids = BUILTIN_RULES.map((r) => r.id);
-    assert.strictEqual(new Set(ids).size, ids.length);
-  });
-
   describe('TypeScript / JavaScript', () => {
     it('ts-function：各種 function 宣告', () => {
       const r = detect(

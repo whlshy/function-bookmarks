@@ -24,6 +24,9 @@ export class RuleTester implements vscode.Disposable {
   private readonly bodyType: vscode.TextEditorDecorationType;
   private active: vscode.Uri | undefined;
   private hits: RuleHit[] = [];
+  /** 給測試用：目前有畫上規則測試裝飾的檔案 uriKey。 */
+  private decorated = new Set<string>();
+  private seq = 0;
   private timer: NodeJS.Timeout | undefined;
   private disposables: vscode.Disposable[] = [];
 
@@ -78,6 +81,11 @@ export class RuleTester implements vscode.Disposable {
     return this.active;
   }
 
+  /** 給測試用：目前有畫上規則測試裝飾的檔案 uriKey 清單。 */
+  decoratedUris(): string[] {
+    return [...this.decorated];
+  }
+
   /** 開始（或在同一個檔案再執行一次時停止）。`keep` 為 true 時一律開始。 */
   async toggle(keep = false): Promise<RuleHit[] | undefined> {
     const editor = vscode.window.activeTextEditor;
@@ -89,10 +97,20 @@ export class RuleTester implements vscode.Disposable {
       this.stop();
       return undefined;
     }
+    // 切換到另一個檔案前，先把舊檔案（仍開在分割視窗的編輯器）上的測試裝飾清乾淨
+    if (this.active && uriKey(this.active) !== uriKey(editor.document.uri)) {
+      this.clearDecorations();
+    }
     this.active = editor.document.uri;
     await vscode.commands.executeCommand('setContext', 'functionBookmarks.testingRules', true);
     const hits = await this.update();
+    if (!this.active || uriKey(this.active) !== uriKey(editor.document.uri)) {
+      return undefined;
+    }
     const file = await this.service.getSymbols(editor.document);
+    if (!this.active || uriKey(this.active) !== uriKey(editor.document.uri)) {
+      return undefined;
+    }
     const counts = new Map<string, number>();
     for (const h of hits) {
       counts.set(h.ruleId, (counts.get(h.ruleId) ?? 0) + 1);
@@ -125,9 +143,19 @@ export class RuleTester implements vscode.Disposable {
   }
 
   stop(): void {
+    this.seq++;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+    }
     this.active = undefined;
     this.hits = [];
     void vscode.commands.executeCommand('setContext', 'functionBookmarks.testingRules', false);
+    this.clearDecorations();
+  }
+
+  private clearDecorations(): void {
+    this.decorated.clear();
     for (const editor of vscode.window.visibleTextEditors) {
       editor.setDecorations(this.nameType, []);
       editor.setDecorations(this.bodyType, []);
@@ -138,7 +166,10 @@ export class RuleTester implements vscode.Disposable {
     if (this.timer) {
       clearTimeout(this.timer);
     }
-    this.timer = setTimeout(() => void this.update(), delay);
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      void this.update();
+    }, delay);
   }
 
   async update(): Promise<RuleHit[]> {
@@ -146,12 +177,18 @@ export class RuleTester implements vscode.Disposable {
     if (!target) {
       return [];
     }
+    const seq = ++this.seq;
     const editor = vscode.window.visibleTextEditors.find((e) => uriKey(e.document.uri) === uriKey(target));
     if (!editor) {
       return this.hits;
     }
     this.service.invalidate(target);
     const file = await this.service.getSymbols(editor.document);
+    // 非同步期間若已 stop()、切檔或有更新的 update()，直接作廢，避免把舊裝飾畫回編輯器
+    if (seq !== this.seq || !this.active || uriKey(this.active) !== uriKey(target)) {
+      return [];
+    }
+    const lineCount = editor.document.lineCount;
     const rules = new Map(readSettings(target).rules.map((r) => [r.id, r]));
     const names: vscode.DecorationOptions[] = [];
     const bodies: vscode.DecorationOptions[] = [];
@@ -170,13 +207,19 @@ export class RuleTester implements vscode.Disposable {
         } else if (s.ruleId) {
           md.appendMarkdown(`\n\n${vscode.l10n.t('From the language server.')}`);
         }
-        names.push({
-          range: new vscode.Range(s.nameLine, s.nameStartCol, s.nameLine, Math.max(s.nameEndCol, s.nameStartCol)),
-          hoverMessage: md,
-          renderOptions: { after: { contentText: `⟵ ${s.ruleId}` } },
-        });
-        if (s.endLine > s.startLine) {
-          bodies.push({ range: new vscode.Range(s.startLine, 0, s.endLine, 0) });
+        if (lineCount > 0 && s.nameLine >= 0 && s.nameLine < lineCount) {
+          names.push({
+            range: new vscode.Range(s.nameLine, s.nameStartCol, s.nameLine, Math.max(s.nameEndCol, s.nameStartCol)),
+            hoverMessage: md,
+            renderOptions: { after: { contentText: `⟵ ${s.ruleId}` } },
+          });
+        }
+        if (lineCount > 0 && s.endLine > s.startLine && s.startLine < lineCount) {
+          const start = Math.max(0, s.startLine);
+          const end = Math.min(s.endLine, lineCount - 1);
+          if (end > start) {
+            bodies.push({ range: new vscode.Range(start, 0, end, 0) });
+          }
         }
         walk(s.children);
       }
@@ -184,6 +227,7 @@ export class RuleTester implements vscode.Disposable {
     walk(file.symbols);
     editor.setDecorations(this.nameType, names);
     editor.setDecorations(this.bodyType, bodies);
+    this.decorated.add(uriKey(target));
     this.hits = hits;
     return hits;
   }

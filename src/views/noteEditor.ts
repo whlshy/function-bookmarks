@@ -5,6 +5,9 @@ import { MarkKey } from '../storage/marks';
 import { uriKey } from '../util/uris';
 
 interface Session {
+  id: string;
+  uri: vscode.Uri;
+  gen: number;
   apply: (text: string) => Promise<void>;
 }
 
@@ -79,6 +82,9 @@ export function saveShortcut(platform: NodeJS.Platform = process.platform): stri
  */
 export class NoteEditor implements vscode.Disposable {
   private sessions = new Map<string, Session>();
+  /** 依 uriKey 序列化 open() 與 finish()，避免舊的收尾刪掉剛重開的暫存檔。 */
+  private locks = new Map<string, Promise<void>>();
+  private seq = 0;
   private disposables: vscode.Disposable[] = [];
   /** 啟動時背景清理殘留暫存檔；建立新暫存檔前先等清理完成，避免刪到剛建的檔。 */
   readonly cleanup: Promise<void>;
@@ -105,33 +111,145 @@ export class NoteEditor implements vscode.Disposable {
     return this.sessions.has(uriKey(uri));
   }
 
+  private serialize<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.locks.get(key) ?? Promise.resolve();
+    const result = prev.catch(() => undefined).then(fn);
+    const done = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.locks.set(key, done);
+    void done.finally(() => {
+      if (this.locks.get(key) === done) {
+        this.locks.delete(key);
+      }
+    });
+    return result;
+  }
+
+  private hasOpenTab(uri: vscode.Uri): boolean {
+    const key = uriKey(uri);
+    return vscode.window.tabGroups.all
+      .flatMap((g) => g.tabs)
+      .some((t) => t.input instanceof vscode.TabInputText && uriKey(t.input.uri) === key);
+  }
+
+  private findSessionById(targetId: string): [string, Session] | undefined {
+    for (const entry of this.sessions) {
+      if (entry[1].id === targetId) {
+        return entry;
+      }
+    }
+    return undefined;
+  }
+
   async open(target: NoteTarget): Promise<vscode.TextEditor> {
     await this.cleanup;
     const dir = vscode.Uri.joinPath(this.storageUri, 'notes');
-    await vscode.workspace.fs.createDirectory(dir);
     const id = hash(target.id);
-    const uri = vscode.Uri.joinPath(dir, `${vscode.l10n.t('Note')} - ${safeName(target.title)} (${id}).${IS_CURSOR ? 'markdown' : 'md'}`);
-    // 已經開著同一個備註就直接切過去，不覆蓋尚未存檔的內容
-    const existing = vscode.workspace.textDocuments.find((d) => uriKey(d.uri) === uriKey(uri));
-    if (!existing) {
-      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(target.current ?? ''));
-    }
-    this.sessions.set(uriKey(uri), { apply: target.apply });
-    let editor = await vscode.window.showTextDocument(uri, { preview: false });
+    const defaultUri = vscode.Uri.joinPath(
+      dir,
+      `${vscode.l10n.t('Note')} - ${safeName(target.title)} (${id}).${IS_CURSOR ? 'markdown' : 'md'}`,
+    );
+    const defaultKey = uriKey(defaultUri);
+
+    // 若同一個目標（target.id）目前已有開啟中的分頁（即使標題在開啟期間改過），沿用原分頁的鎖與路徑
+    // 不在鎖外修改 sessions 或呼叫 finish，避免並發 open() 彼此清掉剛建立的 session
+    const existingById = this.findSessionById(target.id);
+    const lockKey = existingById && this.hasOpenTab(existingById[1].uri) ? existingById[0] : defaultKey;
+
+    return this.serialize(lockKey, async () => {
+      let uri = defaultUri;
+      let reusingOpenTab = false;
+      const active = this.findSessionById(target.id);
+      if (active && this.hasOpenTab(active[1].uri)) {
+        // 確實還開著同一個備註分頁：直接切過去，不覆蓋尚未存檔的內容
+        active[1].apply = target.apply;
+        uri = active[1].uri;
+        reusingOpenTab = true;
+      } else {
+        if (active) {
+          this.sessions.delete(active[0]);
+          if (active[0] === lockKey) {
+            await this.closeTabs(active[1].uri);
+          } else {
+            // 標題改過使檔名不同：背景清掉舊的暫存檔與預覽分頁
+            void this.finish(active[1].uri);
+          }
+        }
+        await vscode.workspace.fs.createDirectory(dir);
+        const desired = target.current ?? '';
+        await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(desired));
+        const gen = ++this.seq;
+        this.sessions.set(uriKey(uri), { id: target.id, uri, gen, apply: target.apply });
+        let editor: vscode.TextEditor;
+        try {
+          editor = await vscode.window.showTextDocument(uri, { preview: false });
+        } catch (err) {
+          if (this.sessions.get(uriKey(uri))?.gen === gen) {
+            this.sessions.delete(uriKey(uri));
+          }
+          throw err;
+        }
+        // VS Code 可能尚未釋放上次關閉的 TextDocument 緩衝區；若內容或髒狀態不同步，強制自磁碟重載
+        const norm = (s: string) => s.replace(/\r\n/g, '\n');
+        if (editor.document.isDirty || norm(editor.document.getText()) !== norm(desired)) {
+          await vscode.commands.executeCommand('workbench.action.files.revert').then(undefined, () => undefined);
+        }
+        editor = await this.ensurePreviewAndFocus(editor, uri);
+        this.showStatusHint(target.subject);
+        return editor;
+      }
+
+      let editor = await vscode.window.showTextDocument(uri, { preview: false });
+      editor = await this.ensurePreviewAndFocus(editor, uri);
+      if (reusingOpenTab) {
+        this.showStatusHint(target.subject);
+      }
+      return editor;
+    });
+  }
+
+  private async ensurePreviewAndFocus(editor: vscode.TextEditor, uri: vscode.Uri): Promise<vscode.TextEditor> {
     // 右側並排內建預覽（會跟著捲動），之後把焦點還給編輯分頁
     const hasPreview = vscode.window.tabGroups.all.flatMap((g) => g.tabs).some((t) => isMarkdownPreviewTab(t, uri));
     if (!hasPreview) {
       await vscode.commands.executeCommand('markdown.showPreviewToSide', uri).then(undefined, () => undefined);
-      editor = await vscode.window.showTextDocument(editor.document, { viewColumn: editor.viewColumn, preview: false });
+      await this.waitForPreviewTab(uri);
+      return vscode.window.showTextDocument(editor.document, { viewColumn: editor.viewColumn, preview: false });
     }
+    return editor;
+  }
+
+  /** 等待內建 Markdown 預覽分頁出現在 tabGroups（避免 Cursor 預覽非同步打開時晚一步搶走焦點）。 */
+  private waitForPreviewTab(uri: vscode.Uri, timeoutMs = 250): Promise<void> {
+    const has = () => vscode.window.tabGroups.all.flatMap((g) => g.tabs).some((t) => isMarkdownPreviewTab(t, uri));
+    if (has()) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        sub.dispose();
+        resolve();
+      };
+      const timer = setTimeout(done, timeoutMs);
+      const sub = vscode.window.tabGroups.onDidChangeTabs(() => {
+        if (has()) {
+          done();
+        }
+      });
+    });
+  }
+
+  private showStatusHint(subject: string): void {
     const closeOnSave = this.closeOnSave();
     vscode.window.setStatusBarMessage(
       closeOnSave
-        ? vscode.l10n.t('Editing note for {0} — save ({1}) to apply and close; save empty to delete', target.subject, saveShortcut())
-        : vscode.l10n.t('Editing note for {0} — save ({1}) to apply; save empty to delete', target.subject, saveShortcut()),
+        ? vscode.l10n.t('Editing note for {0} — save ({1}) to apply and close; save empty to delete', subject, saveShortcut())
+        : vscode.l10n.t('Editing note for {0} — save ({1}) to apply; save empty to delete', subject, saveShortcut()),
       8000,
     );
-    return editor;
   }
 
   private closeOnSave(): boolean {
@@ -151,23 +269,37 @@ export class NoteEditor implements vscode.Disposable {
   }
 
   private async onSave(doc: vscode.TextDocument): Promise<void> {
-    const session = this.sessions.get(uriKey(doc.uri));
+    const key = uriKey(doc.uri);
+    const session = this.sessions.get(key);
     if (!session) {
       return;
     }
-    await session.apply(doc.getText());
     if (this.closeOnSave()) {
-      this.sessions.delete(uriKey(doc.uri));
-      await this.finish(doc.uri);
+      // 在同一個 serialize 區段完成 apply、關閉分頁與刪檔，避免存檔途中馬上重開時誤關新開的分頁
+      await this.serialize(key, async () => {
+        if (this.sessions.get(key)?.gen !== session.gen) {
+          return;
+        }
+        await session.apply(doc.getText());
+        if (this.sessions.get(key)?.gen !== session.gen) {
+          return;
+        }
+        this.sessions.delete(key);
+        await this.finishUnlocked(doc.uri, key);
+      });
     } else {
-      vscode.window.setStatusBarMessage(vscode.l10n.t('Note saved.'), 2000);
+      await session.apply(doc.getText());
+      if (this.sessions.get(key)?.gen === session.gen) {
+        vscode.window.setStatusBarMessage(vscode.l10n.t('Note saved.'), 2000);
+      }
     }
   }
 
   private async onClose(doc: vscode.TextDocument): Promise<void> {
-    const session = this.sessions.get(uriKey(doc.uri));
-    if (session) {
-      this.sessions.delete(uriKey(doc.uri));
+    const key = uriKey(doc.uri);
+    const session = this.sessions.get(key);
+    if (session && !this.hasOpenTab(doc.uri)) {
+      this.sessions.delete(key);
       await this.finish(doc.uri);
     }
   }
@@ -180,22 +312,29 @@ export class NoteEditor implements vscode.Disposable {
       }
       const uri = tab.input.uri;
       const key = uriKey(uri);
-      if (!this.sessions.has(key)) {
+      if (!this.sessions.has(key) || this.hasOpenTab(uri)) {
         continue;
       }
-      const stillOpen = vscode.window.tabGroups.all
-        .flatMap((g) => g.tabs)
-        .some((t) => t.input instanceof vscode.TabInputText && uriKey(t.input.uri) === key);
-      if (!stillOpen) {
-        this.sessions.delete(key);
-        void this.finish(uri);
-      }
+      this.sessions.delete(key);
+      void this.finish(uri);
     }
   }
 
-  /** 關閉編輯與預覽分頁，刪除暫存檔。 */
-  private async finish(uri: vscode.Uri): Promise<void> {
+  /** 關閉編輯與預覽分頁，刪除暫存檔（與 open() 序列化；若已開出新 session 則中止，絕不刪到新檔）。 */
+  private finish(uri: vscode.Uri): Promise<void> {
+    const key = uriKey(uri);
+    return this.serialize(key, () => this.finishUnlocked(uri, key));
+  }
+
+  /** 已持有該 key 的 serialize 鎖時執行收尾；若期間已開出新 session 則中止。 */
+  private async finishUnlocked(uri: vscode.Uri, key: string): Promise<void> {
+    if (this.sessions.has(key)) {
+      return;
+    }
     await this.closeTabs(uri);
+    if (this.sessions.has(key)) {
+      return;
+    }
     await vscode.workspace.fs.delete(uri).then(undefined, () => undefined);
   }
 

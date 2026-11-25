@@ -1,4 +1,5 @@
 {
   "folders": [{ "path": "workspace" }, { "path": "workspace2" }],
-  "settings": {}
+  "settings": {
+  }
 }

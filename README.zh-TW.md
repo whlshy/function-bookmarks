@@ -16,7 +16,7 @@ Function Bookmarks 會記住每個書籤附近的內容，比對檔案修改前�
 
 ### 跟著程式碼走的書籤
 
-- `Ctrl+Alt+B`（或在行號上按右鍵）：在函式名稱那一行會加入**函式書籤**，其他行則加入**行號書籤**
+- `Alt+Shift+B B`（或在行號上按右鍵）：在函式名稱那一行會加入**函式書籤**，其他行則加入**行號書籤**
 - 編輯、`git pull`、切換分支、合併、stash、格式化工具、腳本、AI 改檔都會跟著移動，沒開著的檔案也一樣
 - 找不到位置的書籤（或落在合併衝突範圍內）會標成「需確認」，可用「把書籤移到游標所在的行」放回去
 - **依分支追蹤**：每個分支記住各自的位置；程式碼不在目前分支時，書籤會等你切回去再出現；書籤也可設成只屬於某個分支
@@ -27,11 +27,11 @@ Function Bookmarks 會記住每個書籤附近的內容，比對檔案修改前�
 ### 整理與跳轉
 
 - 名稱、**標籤**、多行 **Markdown 備註**（滑鼠移上去顯示）
-- **數字書籤**：`Ctrl+Alt+Shift+1`～`9` 替目前這一行設定號碼，`Ctrl+Alt+1`～`9` 直接跳過去；可用「導覽：下一個／上一個編號書籤」依 1～9 順序導覽
+- **數字書籤**：`Alt+Shift+B Shift+1`～`9` 替目前這一行設定號碼，`Alt+Shift+B 1`～`9` 直接跳過去；可用「導覽：下一個／上一個編號書籤」依 1～9 順序導覽
 - 書籤與標籤可以設定**顏色**，行號旁圖示與側邊欄跟著變色
 - 書籤那一行的行尾淡淡顯示書籤名稱
-- 側邊欄第一列就是**搜尋**（`Ctrl+Alt+F`）：打字時書籤即時篩選，`#標籤`、`@來源` 可以縮小範圍
-- 下一個／上一個（`Ctrl+Alt+.`／`Ctrl+Alt+,`）、快速搜尋書籤（`Ctrl+Alt+/`），可依檔案、標籤或來源分組
+- 側邊欄第一列就是**搜尋**（`Alt+Shift+B F`）：打字時書籤即時篩選，`#標籤`、`@來源` 可以縮小範圍
+- 下一個／上一個（`Alt+Shift+B .`／`Alt+Shift+B ,`）、快速搜尋書籤（`Alt+Shift+B /`），可依檔案、標籤或來源分組
 - 側邊欄「…」選單可**暫時隱藏書籤圖示**（方便設中斷點）
 - 狀態列顯示目前檔案的書籤數，點一下搜尋書籤
 
@@ -40,7 +40,7 @@ Function Bookmarks 會記住每個書籤附近的內容，比對檔案修改前�
 ### 函式列表
 
 - 側邊欄列出目前檔案的函式，還有「整個專案」與「搜尋函式」
-- 替已加書籤的函式**自訂顯示名稱**（`F2`），不改程式碼；滑鼠移上去看原本的名稱
+- 替已加書籤的函式**自訂顯示名稱**（編輯器內 `Alt+Shift+B R`，側邊欄 `F2`），不改程式碼；滑鼠移上去看原本的名稱
 - 事件監聽與請求（`.on('click')`、`$.ajax`、`fetch`）也會列出
 - 可用正規表示式**自訂偵測規則**；「在這個檔案測試偵測規則」會標出每條規則抓到什麼
 - 大多數常用語言不必另外安裝語言擴充套件就能使用；其他語言改用語言伺服器
@@ -58,16 +58,15 @@ Function Bookmarks 會記住每個書籤附近的內容，比對檔案修改前�
 
 | 快捷鍵（Win / Linux） | macOS | 功能 |
 |---|---|---|
-| `Ctrl+Alt+B` | `Cmd+Alt+B` | 加入／移除書籤（函式或行） |
-| `Ctrl+Alt+Shift+B` | `Cmd+Alt+Shift+B` | 加入有名稱的書籤 |
-| `Ctrl+Alt+.`／`Ctrl+Alt+,` | `Cmd+Alt+.`／`Cmd+Alt+,` | 下一個／上一個書籤 |
-| `Ctrl+Alt+/` | `Cmd+Alt+/` | 搜尋書籤 |
-| `Ctrl+Alt+F` | `Cmd+Alt+Shift+F` | 移到書籤搜尋列 |
-| `Ctrl+Alt+Shift+1`～`9` | `Cmd+Alt+Shift+1`～`9` | 在這一行設定／移除 1～9 號 |
-| `Ctrl+Alt+1`～`9` | `Cmd+Alt+1`～`9` | 跳到 1～9 號書籤 |
+| `Alt+Shift+B B` | `Ctrl+Shift+B B` | 加入／移除書籤（函式或行） |
+| `Alt+Shift+B Shift+B` | `Ctrl+Shift+B Shift+B` | 加入有名稱的書籤 |
+| `Alt+Shift+B R` | `Ctrl+Shift+B R` | 重新命名游標所在的書籤 |
+| `Alt+Shift+B .`／`Alt+Shift+B ,` | `Ctrl+Shift+B .`／`Ctrl+Shift+B ,` | 下一個／上一個書籤 |
+| `Alt+Shift+B /` | `Ctrl+Shift+B /` | 搜尋書籤 |
+| `Alt+Shift+B F` | `Ctrl+Shift+B F` | 移到書籤搜尋列 |
+| `Alt+Shift+B Shift+1`～`9` | `Ctrl+Shift+B Shift+1`～`9` | 在這一行設定／移除 1～9 號 |
+| `Alt+Shift+B 1`～`9` | `Ctrl+Shift+B 1`～`9` | 跳到 1～9 號書籤 |
 | `F2`（側邊欄） | `F2`（側邊欄） | 重新命名書籤或顯示名稱 |
-
-部分鍵盤配置（例如德文）的 `Ctrl+Alt` 等於 `AltGr`，`Ctrl+Alt+數字` 可能會打出符號，需要時可以在「鍵盤快速鍵」裡改掉。
 
 ## 設定
 
@@ -108,7 +107,7 @@ Function Bookmarks 會記住每個書籤附近的內容，比對檔案修改前�
 
 | 設定 | 預設 | 說明 |
 |---|---|---|
-| `functionBookmarks.storage` | `file` | `file`（`.vscode/function-bookmarks.json`，透過 `.git/info/exclude` 排除於 git 之外）或 `workspaceState` |
+| `functionBookmarks.storage` | `file` | 所有專案的預設：`file`（`.vscode/function-bookmarks.json`，透過 `.git/info/exclude` 排除於 git 之外）或 `workspaceState`。要讓單一專案不同，請執行「**選擇這個專案的書籤存放位置…**」 |
 | `functionBookmarks.authorName` | git `user.name` | 匯出書籤時的名稱 |
 
 ### 自訂規則範例
@@ -133,7 +132,7 @@ Function Bookmarks 會記住每個書籤附近的內容，比對檔案修改前�
 
 ## 隱私
 
-本套件不收集、也不傳送任何資料。書籤存在你的專案（`.vscode/function-bookmarks.json`）或 VS Code 的工作區儲存空間。
+本套件不收集、也不傳送任何資料。書籤存在你的專案（`.vscode/function-bookmarks.json`）或編輯器的工作區儲存空間。
 
 ## 授權
 

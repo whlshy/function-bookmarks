@@ -21,6 +21,8 @@ export class ProjectFiles implements vscode.Disposable {
   private resolved = new Map<string, Set<string>>();
   /** 有符合 include 的檔案新增或刪除、等著重新掃描的工作區資料夾。 */
   private dirty = new Set<string>();
+  /** 曾輕量檢查為空專案；之後新增符合條件的檔案時需觸發更新讓「整個專案」恢復展開箭頭。 */
+  private emptyProbed = false;
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChange = this.changed.event;
   private disposables: vscode.Disposable[] = [];
@@ -72,7 +74,7 @@ export class ProjectFiles implements vscode.Disposable {
     }
     const key = uriKey(folder.uri);
     const rel = relativeUnder(folder.uri.path, uri.path);
-    if (!rel || !this.cache.has(key) || this.dirty.has(key)) {
+    if (!rel || (!this.cache.has(key) && !(this.emptyProbed && !removed)) || this.dirty.has(key)) {
       return;
     }
     const { include, exclude } = projectGlobs(folder.uri);
@@ -133,6 +135,30 @@ export class ProjectFiles implements vscode.Disposable {
 
   async all(): Promise<FolderFiles[]> {
     return Promise.all((vscode.workspace.workspaceFolders ?? []).map((f) => this.list(f)));
+  }
+
+  /** 輕量檢查工作區是否有至少一個符合 include 的檔案（空專案時讓「整個專案」不顯示展開箭頭）。 */
+  async hasAny(): Promise<boolean> {
+    const folders = vscode.workspace.workspaceFolders ?? [];
+    for (const folder of folders) {
+      const key = uriKey(folder.uri);
+      const cached = this.dirty.has(key) ? undefined : this.resolved.get(key);
+      if (cached) {
+        if (cached.size > 0) {
+          return true;
+        }
+        continue;
+      }
+      const { include, exclude } = projectGlobs(folder.uri);
+      const excludeGlob = exclude.length ? `{${exclude.join(',')}}` : undefined;
+      const hit = await vscode.workspace.findFiles(new vscode.RelativePattern(folder, include), excludeGlob, 1);
+      if (hit.length > 0) {
+        this.emptyProbed = false;
+        return true;
+      }
+    }
+    this.emptyProbed = true;
+    return false;
   }
 
   private async scan(folder: vscode.WorkspaceFolder): Promise<FolderFiles> {

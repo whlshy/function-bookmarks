@@ -58,7 +58,7 @@ export async function cleanBranchRecords(
         used.add(e.bookmark.homeBranch);
       }
     }
-    external.rememberedBranches().forEach((n) => used.add(n));
+    external.rememberedBranches(folder).forEach((n) => used.add(n));
     for (const n of used) {
       if (!existing.includes(n)) {
         stale.set(n, [...(stale.get(n) ?? []), folder]);
@@ -73,7 +73,12 @@ export async function cleanBranchRecords(
   }
   let names = picked?.filter((n) => stale.has(n));
   if (!names) {
-    const items = [...stale.keys()].sort().map((n) => ({ label: n, picked: true }));
+    const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
+    const items = [...stale.keys()].sort().map((n) => ({
+      label: n,
+      description: multiRoot ? stale.get(n)!.map((f) => f.name).join(', ') : undefined,
+      picked: true,
+    }));
     const pick = await vscode.window.showQuickPick(items, {
       canPickMany: true,
       title: vscode.l10n.t('Remove records of branches that no longer exist'),
@@ -84,20 +89,30 @@ export async function cleanBranchRecords(
     }
     names = pick.map((p) => p.label);
   }
-  const set = new Set(names);
-  const folders = new Set(names.flatMap((n) => stale.get(n) ?? []));
-  for (const folder of folders) {
+  // 依資料夾分組清理：某分支只在 A 資料夾已刪除、但在 B 資料夾仍存在時，只清理 A 資料夾的紀錄與快照
+  const perFolder = new Map<vscode.WorkspaceFolder, Set<string>>();
+  for (const n of names) {
+    for (const folder of stale.get(n) ?? []) {
+      let s = perFolder.get(folder);
+      if (!s) {
+        s = new Set<string>();
+        perFolder.set(folder, s);
+      }
+      s.add(n);
+    }
+  }
+  for (const [folder, folderNames] of perFolder) {
     await store.update(folder, (d) => ({
       ...d,
       bookmarks: (d.bookmarks ?? []).map((b) => {
-        const hasPos = Object.keys(b.positions ?? {}).some((n) => set.has(n));
-        const home = b.homeBranch !== undefined && set.has(b.homeBranch);
+        const hasPos = Object.keys(b.positions ?? {}).some((n) => folderNames.has(n));
+        const home = b.homeBranch !== undefined && folderNames.has(b.homeBranch);
         if (!hasPos && !home) {
           return b;
         }
         const next = { ...b };
         if (hasPos) {
-          next.positions = Object.fromEntries(Object.entries(b.positions!).filter(([n]) => !set.has(n)));
+          next.positions = Object.fromEntries(Object.entries(b.positions!).filter(([n]) => !folderNames.has(n)));
           if (!Object.keys(next.positions).length) {
             delete next.positions;
           }
@@ -109,7 +124,7 @@ export async function cleanBranchRecords(
         return next;
       }),
     }));
+    external.forgetBranches([...folderNames], folder);
   }
-  external.forgetBranches(names);
   return names;
 }
