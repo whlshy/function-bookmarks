@@ -23,11 +23,24 @@ const key: MarkKey = { file: 'app/views.py', path: 'ArticleView.get', kind: 'met
 const now = new Date('2026-11-19T00:00:00Z');
 
 describe('收藏與自訂名稱資料', () => {
-  it('加入、取消收藏；取消後沒有其他標記就移除', () => {
+  it('加入、取消收藏；取消後沒有其他標記就移除；重新加入視為新的建立時間', () => {
     let d = setFavorite(emptyStore(), key, true, 11, now);
     assert.deepStrictEqual(findMark(d, key), { ...key, favorite: true, addedAt: now.toISOString(), line: 11 });
     d = setFavorite(d, key, false);
     assert.strictEqual(d.symbols.length, 0);
+
+    // 有別名時取消收藏會清掉 addedAt，再重新加入時改寫為新的建立時間
+    const later = new Date('2026-11-27T06:00:00Z');
+    d = setAlias(setFavorite(emptyStore(), key, true, 11, now), key, '文章', 'get');
+    d = setFavorite(d, key, false);
+    assert.strictEqual(findMark(d, key)?.addedAt, undefined);
+    d = setFavorite(d, key, true, 11, later);
+    assert.strictEqual(findMark(d, key)?.addedAt, later.toISOString());
+
+    // 舊資料沒有 addedAt 也能正常讀寫，且重複設為 favorite 不會憑空補寫假時間
+    const legacy = parseStore(JSON.stringify({ version: 1, symbols: [{ ...key, favorite: true, line: 5 }] }))!;
+    assert.strictEqual(findMark(legacy, key)?.addedAt, undefined);
+    assert.strictEqual(findMark(setFavorite(legacy, key, true, 6, later), key)?.addedAt, undefined);
   });
 
   it('自訂名稱：空白或與原名相同視為清除', () => {

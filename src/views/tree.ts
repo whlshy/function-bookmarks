@@ -33,7 +33,7 @@ import {
   TreeNode,
   WsFolderNode,
 } from './treeNodes';
-import { compareBookmarkItemsByTitle, distinctCount, searchFields } from './treeSearch';
+import { compareBookmarkItemsByCreated, compareBookmarkItemsByTitle, distinctCount, searchFields } from './treeSearch';
 
 export * from './treeNodes';
 export { searchFields } from './treeSearch';
@@ -67,7 +67,7 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   private disposables: vscode.Disposable[] = [];
   /** 使用者展開／收合過的節點（以節點 id 記錄），切換檔案、重開編輯器後沿用。 */
   private expansion: Record<string, boolean>;
-  /** 各檔案在「依檔案分組」底下的書籤排序方式（鍵為檔案 uriKey；只記錄非預設的 'title'）。 */
+  /** 各檔案在「依檔案分組」底下的書籤排序方式（鍵為檔案 uriKey；只記錄非預設的 'title' 或 'created'）。 */
   private fileSort: Record<string, FileBookmarkSort>;
   private saveTimer: NodeJS.Timeout | undefined;
   /** 「整個專案」中各檔案最上層的函式數量；0 表示沒有函式，不顯示展開鈕。 */
@@ -103,8 +103,8 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     const savedSort = memento?.get<Record<string, FileBookmarkSort>>(FILE_SORT_KEY);
     if (savedSort) {
       for (const [k, v] of Object.entries(savedSort)) {
-        if (v === 'title') {
-          this.fileSort[k] = 'title';
+        if (v === 'title' || v === 'created') {
+          this.fileSort[k] = v;
         }
       }
     }
@@ -192,8 +192,8 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
       return;
     }
     delete this.fileSort[key];
-    if (sort === 'title') {
-      this.fileSort[key] = 'title';
+    if (sort === 'title' || sort === 'created') {
+      this.fileSort[key] = sort;
       const keys = Object.keys(this.fileSort);
       for (const k of keys.slice(0, Math.max(0, keys.length - MAX_FILE_SORT))) {
         delete this.fileSort[k];
@@ -457,11 +457,19 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     return this.searching ? items.filter((i) => matchesQuery(this.parsedQuery, searchFields(i))) : items;
   }
 
+  private fileComparator(key: string): (a: BookmarkItem, b: BookmarkItem) => number {
+    const sort = this.fileSortOf(key);
+    if (sort === 'title') {
+      return compareBookmarkItemsByTitle;
+    }
+    if (sort === 'created') {
+      return compareBookmarkItemsByCreated;
+    }
+    return compareItems;
+  }
+
   private groupChildren(group: BmGroupNode): (BookmarkNode | FavoriteNode)[] {
-    const items =
-      group.by === 'file'
-        ? [...group.items].sort(this.fileSortOf(group.key) === 'title' ? compareBookmarkItemsByTitle : compareItems)
-        : group.items;
+    const items = group.by === 'file' ? [...group.items].sort(this.fileComparator(group.key)) : group.items;
     return items.map((i) =>
       i.kind === 'line'
         ? ({ type: 'bookmark', entry: i.entry, parent: group } as BookmarkNode)
@@ -508,8 +516,8 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
       return list.sort((a, b) => (a.key === '' ? 1 : b.key === '' ? -1 : a.key.localeCompare(b.key)));
     }
     for (const g of list) {
-      if (this.fileSortOf(g.key) === 'title') {
-        g.items.sort(compareBookmarkItemsByTitle);
+      if (this.fileSortOf(g.key) !== 'line') {
+        g.items.sort(this.fileComparator(g.key));
       }
     }
     const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;

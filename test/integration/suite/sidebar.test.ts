@@ -5,6 +5,7 @@ import type { ExtensionApi } from '../../../src/extension';
 import { makeAnchor, newBookmarkId } from '../../../src/bookmarks/model';
 import { addBookmark, setAlias, setFavorite, setNote, setTags } from '../../../src/storage/marks';
 import { toggleBookmarkKey } from '../../../src/util/shortcuts';
+import { formatLocalDateTime } from '../../../src/util/time';
 import { buildSearchMarkItems, filterSearchMarkItems } from '../../../src/views/search';
 import { BookmarkSearchBox } from '../../../src/views/searchBox';
 import {
@@ -830,6 +831,58 @@ describe('側邊欄：檢視狀態、游標跟隨、搜尋列、快速搜尋與�
       } finally {
         await vscode.workspace.fs.delete(outUri).then(undefined, () => undefined);
       }
+    });
+
+    it('依建立時間排序：先加的排前面、無建立時間排最後、重開保留，側邊欄提示顯示建立時間', async () => {
+      // 先在較後面的行加行號書籤，稍等一下再在較前面的行加函式書籤，另加一筆沒有建立時間的舊資料
+      await openAt(fileA(), 9, api);
+      await api.bookmarks.addLabeled('先加的行書籤');
+      await new Promise((r) => setTimeout(r, 30));
+      await openAt(fileA(), 0, api);
+      await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+      await api.store.update(folder(), (d) =>
+        addBookmark(d, { id: 'legacy-no-time', file: relA, line: 5, label: '無建立時間書籤', anchor: makeAnchor(A_LINES, 5) }),
+      );
+      await api.favorites.refresh();
+
+      // 預設依行號：zeta (0) → 無建立時間書籤 (5) → 先加的行書籤 (9)
+      assert.deepStrictEqual(await childLabels(relA), ['zeta', '無建立時間書籤', '先加的行書籤']);
+
+      // 切到依建立時間排序：先加的行書籤 → zeta → 無建立時間書籤（排最後）
+      const gA = await fileGroup(relA);
+      await vscode.commands.executeCommand('functionBookmarks.sortFileBookmarksByCreated', gA);
+      const gAfter = await fileGroup(relA);
+      const fileItem = api.provider.getTreeItem(gAfter);
+      assert.strictEqual(fileItem.contextValue, 'fbBmFile:byCreated');
+      assert.strictEqual(fileItem.description, 'app · by created time');
+      assert.deepStrictEqual(await childLabels(relA), ['先加的行書籤', 'zeta', '無建立時間書籤']);
+
+      // 側邊欄提示：有建立時間的顯示 Created YYYY-MM-DD HH:mm，沒有建立時間的不顯示
+      const kids = await api.provider.getChildren(gAfter);
+      const lineNode = kids.find((k) => k.type === 'bookmark' && k.entry.bookmark.label === '先加的行書籤') as BookmarkNode;
+      const fnNode = kids.find((k) => k.type === 'favorite') as FavoriteNode;
+      const legacyNode = kids.find((k) => k.type === 'bookmark' && k.entry.bookmark.id === 'legacy-no-time') as BookmarkNode;
+      const lineTip = (api.provider.getTreeItem(lineNode).tooltip as vscode.MarkdownString).value;
+      const fnTip = (api.provider.getTreeItem(fnNode).tooltip as vscode.MarkdownString).value;
+      const legacyTip = (api.provider.getTreeItem(legacyNode).tooltip as vscode.MarkdownString).value;
+      assert.ok(lineTip.includes(`Created ${formatLocalDateTime(lineNode.entry.bookmark.createdAt)}`), lineTip);
+      assert.ok(fnTip.includes(`Created ${formatLocalDateTime(fnNode.fav.mark.addedAt)}`), fnTip);
+      assert.ok(!legacyTip.includes('Created '), `沒有建立時間不應顯示 Created：${legacyTip}`);
+
+      // 重建 provider 後保留依建立時間排序
+      const reopened = api.recreateProvider();
+      try {
+        assert.strictEqual(reopened.fileSortOf(fileA()), 'created');
+        assert.deepStrictEqual(await childLabels(relA, reopened), ['先加的行書籤', 'zeta', '無建立時間書籤']);
+      } finally {
+        reopened.dispose();
+      }
+
+      // 切回依行號排序
+      await vscode.commands.executeCommand('functionBookmarks.sortFileBookmarksByLine', gAfter);
+      assert.strictEqual(api.provider.fileSortOf(fileA()), 'line');
+      assert.strictEqual(api.provider.getTreeItem(await fileGroup(relA)).contextValue, 'fbBmFile');
+      assert.deepStrictEqual(await childLabels(relA), ['zeta', '無建立時間書籤', '先加的行書籤']);
     });
   });
 });

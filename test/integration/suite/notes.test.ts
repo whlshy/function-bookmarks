@@ -49,6 +49,7 @@ describe('備註編輯、並排預覽、Mermaid 與各入口行為', () => {
     const noteEditor = vscode.window.activeTextEditor!;
     assert.ok(api.notes.isNoteDocument(noteEditor.document.uri), '應開啟備註分頁');
     assert.strictEqual(noteEditor.document.languageId, 'markdown');
+    assert.ok(api.notes.lastStatusMessage?.includes('ArticleView.post'), `開啟備註時應顯示編輯提示：${api.notes.lastStatusMessage}`);
     await waitFor(previewTabCount, (n) => n === 1, '開啟右側並排 Markdown 預覽');
     await noteEditor.edit((b) => b.insert(new vscode.Position(0, 0), '送出文章\n\n- 需要登入\n- 會寄通知信'));
     if (isCursor) {
@@ -62,6 +63,11 @@ describe('備註編輯、並排預覽、Mermaid 與各入口行為', () => {
       '存檔後備註編輯分頁自動關閉',
     );
     await waitFor(previewTabCount, (n) => n === 0, '存檔後預覽分頁一起關閉');
+    await waitFor(
+      () => api.notes.lastStatusMessage,
+      (m) => m === vscode.l10n.t('Note saved.'),
+      'closeOnSave=true 存檔關閉後狀態列改顯示備註已儲存（BUG-05）',
+    );
 
     const item = api.provider.getTreeItem(post);
     assert.strictEqual(((item.iconPath as vscode.ThemeIcon).color as unknown as { id: string }).id, 'charts.blue');
@@ -89,6 +95,49 @@ describe('備註編輯、並排預覽、Mermaid 與各入口行為', () => {
     assert.ok(/<pre class="code-line fb-mermaid" data-line="2">flowchart TD/.test(html), html);
     assert.ok(html.includes('A --&gt; B'));
     assert.ok(!html.includes('fb-mermaid" data-line="7"'));
+  });
+
+  it('備註含未閉合程式碼圍欄時，hover、gutter 與側邊欄 tooltip 皆先補關圍欄再接「在預覽中開啟」連結（BUG-04）', async () => {
+    const viewsUri = workspaceFile('app', 'views.py');
+    const editor = await open(viewsUri, api);
+    const post = findNode(api.provider.currentSymbolNodes, 'ArticleView.post')!;
+    const unclosed = '```mermaid\nflowchart TD\n  A --> B';
+    const expectedClosed = `${unclosed}\n\`\`\`\n\n[$(open-preview)`;
+
+    await vscode.commands.executeCommand('functionBookmarks.addFavorite', post);
+    await api.commands.editNote(post, unclosed);
+    await api.favorites.refresh();
+
+    const bodyLine = post.symbol.nameLine + 1;
+    editor.selection = new vscode.Selection(bodyLine, 0, bodyLine, 0);
+    await api.bookmarks.addLabeled('未閉合備註行', { uri: viewsUri, line: bodyLine });
+    const bm = api.store.bookmarksFor(viewsUri).find((b) => b.line === bodyLine)!;
+    assert.ok(bm, '應建立行號書籤');
+    await api.bookmarks.editNote({ type: 'bookmark', entry: { folder: folder(), uri: viewsUri, bookmark: bm } }, unclosed);
+    await api.gutter.update();
+
+    assert.ok((api.provider.getTreeItem(post).tooltip as vscode.MarkdownString).value.includes(expectedClosed), '函式節點 tooltip 應補關圍欄');
+    const favItem = api.provider.getTreeItem({ type: 'favorite', fav: api.favorites.all[0], parent: api.provider.sections.bookmarks });
+    assert.ok((favItem.tooltip as vscode.MarkdownString).value.includes(expectedClosed), '函式書籤 tooltip 應補關圍欄');
+    const freshBm = api.store.bookmarksFor(viewsUri).find((b) => b.id === bm.id)!;
+    const bmItem = api.provider.getTreeItem({
+      type: 'bookmark',
+      entry: { folder: folder(), uri: viewsUri, bookmark: freshBm },
+      parent: api.provider.sections.bookmarks,
+    });
+    assert.ok((bmItem.tooltip as vscode.MarkdownString).value.includes(expectedClosed), '行號書籤 tooltip 應補關圍欄');
+    assert.ok(api.gutter.hoverAt(viewsUri, bodyLine)?.includes(expectedClosed), 'gutter 滑鼠提示應補關圍欄');
+
+    const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
+      'vscode.executeHoverProvider',
+      viewsUri,
+      new vscode.Position(post.symbol.nameLine, post.symbol.nameStartCol),
+    );
+    const hoverMd = (hovers ?? [])
+      .flatMap((h) => h.contents)
+      .map((c) => (typeof c === 'string' ? c : (c as vscode.MarkdownString).value))
+      .find((v) => v.includes('command:functionBookmarks.hoverAction'));
+    assert.ok(hoverMd?.includes(expectedClosed), `函式 hover 提示應補關圍欄：${hoverMd}`);
   });
 
   it('備註取消（不存檔關閉）後不變更原內容，且立刻重開並存檔正常、暫存檔不被舊收尾刪掉（CR-01）', async () => {

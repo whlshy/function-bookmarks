@@ -3,8 +3,8 @@
  */
 import { LineBookmark } from './model';
 
-/** 單一檔案底下書籤的排序方式：依行號（預設）或依標題正序。 */
-export type FileBookmarkSort = 'line' | 'title';
+/** 單一檔案底下書籤的排序方式：依行號（預設）、依標題正序，或依建立時間由舊到新。 */
+export type FileBookmarkSort = 'line' | 'title' | 'created';
 
 /** 可參與同檔案內排序的書籤資訊。 */
 export interface SortableBookmark {
@@ -13,6 +13,8 @@ export interface SortableBookmark {
   title: string;
   /** 0 起算的行號；函式書籤找不到時為 undefined。 */
   line?: number;
+  /** 建立時間（ISO 時間字串）；舊資料沒有時為 undefined。 */
+  createdAt?: string;
 }
 
 /** 自然排序（數字依大小，如 item2 在 item10 前）、不分大小寫、支援中英文。 */
@@ -37,6 +39,33 @@ export function symbolBookmarkTitle(mark: { path: string; alias?: string }): str
 export function compareByTitle(a: SortableBookmark, b: SortableBookmark): number {
   return (
     titleCollator.compare(a.title, b.title) ||
+    (a.line ?? Number.MAX_SAFE_INTEGER) - (b.line ?? Number.MAX_SAFE_INTEGER) ||
+    (a.kind === b.kind ? 0 : a.kind === 'symbol' ? -1 : 1)
+  );
+}
+
+/**
+ * 同檔案內依建立時間由舊到新比較：
+ * - 先建立的在前（以 ISO 時間解析後的時間戳比較，支援不同時區寫法）
+ * - 沒有建立時間（或無法解析）的排在最後，彼此依行號排
+ * - 建立時間相同時依行號排（找不到行號的排最後）
+ * - 行號也相同時函式書籤排在行號書籤前（與 compareItems 一致）
+ */
+export function compareByCreated(
+  a: Pick<SortableBookmark, 'kind' | 'line' | 'createdAt'>,
+  b: Pick<SortableBookmark, 'kind' | 'line' | 'createdAt'>,
+): number {
+  const ta = a.createdAt ? Date.parse(a.createdAt) : Number.NaN;
+  const tb = b.createdAt ? Date.parse(b.createdAt) : Number.NaN;
+  const hasA = Number.isFinite(ta);
+  const hasB = Number.isFinite(tb);
+  if (hasA && hasB && ta !== tb) {
+    return ta - tb;
+  }
+  if (hasA !== hasB) {
+    return hasA ? -1 : 1;
+  }
+  return (
     (a.line ?? Number.MAX_SAFE_INTEGER) - (b.line ?? Number.MAX_SAFE_INTEGER) ||
     (a.kind === b.kind ? 0 : a.kind === 'symbol' ? -1 : 1)
   );

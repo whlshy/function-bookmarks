@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { editorForJump } from '../util/revealEditor';
 import { findInnermost } from '../detection/engine';
 import { DetectedSymbol } from '../detection/types';
 import { SECTION } from '../config';
@@ -44,7 +45,7 @@ export function bookmarkTitle(b: LineBookmark): string {
 }
 
 export async function revealLine(uri: vscode.Uri, line: number): Promise<vscode.TextEditor> {
-  const editor = await vscode.window.showTextDocument(uri, { preserveFocus: false });
+  const editor = await editorForJump(uri);
   const target = Math.min(line, editor.document.lineCount - 1);
   const col = editor.document.lineAt(target).firstNonWhitespaceCharacterIndex;
   const pos = new vscode.Position(target, col);

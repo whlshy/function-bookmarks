@@ -30,6 +30,7 @@ import { BookmarkGrouping, COMMANDS, FilterMode, FunctionTreeProvider, SymbolNod
 import { sameUri } from './util/uris';
 import { BookmarkSearchBox } from './views/searchBox';
 import { StartupLog, StartupTiming } from './util/startupLog';
+import { stringArg, stringArrayArg } from './util/commandArgs';
 import { fileGroupKey, isBookmarkNode, lineArg } from './util/editorArgs';
 
 const VIEW_ID = 'functionBookmarks.tree';
@@ -434,17 +435,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     reg('functionBookmarks.addFavorite', (node?: TreeNode) => commands.setFavorite(node, true)),
     reg('functionBookmarks.removeFavorite', (node?: TreeNode) => commands.setFavorite(node, false)),
     reg('functionBookmarks.toggleFavorite', (node?: TreeNode) => commands.setFavorite(node, 'toggle')),
-    reg('functionBookmarks.renameDisplayName', (node?: TreeNode, value?: string) => {
+    reg('functionBookmarks.renameDisplayName', (node?: TreeNode, value?: unknown) => {
       // 側邊欄 F2 或函式右鍵呼叫：只針對可改名的書籤／函式節點動作，在非書籤節點（分組、檔案、區段等）不退回改編輯器游標處函式
       const n = node ?? treeView.selection[0];
       if (!n) {
         return undefined;
       }
+      const v = stringArg(value);
       if (isBookmarkNode(n)) {
-        return bookmarks.rename(n, value);
+        return bookmarks.rename(n, v);
       }
       if (n.type === 'favorite' || isRenameableSymbol(n)) {
-        return commands.rename(n, value);
+        return commands.rename(n, v);
       }
       return undefined;
     }),
@@ -517,13 +519,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     reg('functionBookmarks.toggleBookmark', (arg?: unknown) => bookmarks.toggle(lineArg(arg))),
     reg('functionBookmarks.addLabeledBookmark', (arg?: unknown) => bookmarks.addLabeled(undefined, lineArg(arg))),
     // 函式書籤與行號書籤共用同一組指令：從側邊欄呼叫時作用在該節點；從命令選擇區／編輯器右鍵／快捷鍵呼叫時作用在游標所在的書籤
-    reg('functionBookmarks.renameBookmark', async (arg?: unknown, value?: string) => {
+    reg('functionBookmarks.renameBookmark', async (arg?: unknown, value?: unknown) => {
+      const v = stringArg(value);
       if (isTreeNodeArg(arg)) {
         if (isBookmarkNode(arg)) {
-          return bookmarks.rename(arg, value);
+          return bookmarks.rename(arg, v);
         }
         if (arg.type === 'favorite' || isRenameableSymbol(arg)) {
-          return commands.rename(arg, value);
+          return commands.rename(arg, v);
         }
         return undefined;
       }
@@ -533,16 +536,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
         return undefined;
       }
       return hit.kind === 'line'
-        ? bookmarks.rename({ type: 'bookmark', entry: hit.entry }, value)
-        : commands.rename(hit.node, value);
+        ? bookmarks.rename({ type: 'bookmark', entry: hit.entry }, v)
+        : commands.rename(hit.node, v);
     }),
-    reg('functionBookmarks.editBookmarkTags', async (arg?: unknown, value?: string) => {
+    reg('functionBookmarks.editBookmarkTags', async (arg?: unknown, value?: unknown) => {
+      const v = stringArg(value);
       if (isTreeNodeArg(arg)) {
         if (isBookmarkNode(arg)) {
-          return bookmarks.editTags(arg, value);
+          return bookmarks.editTags(arg, v);
         }
         if (arg.type === 'favorite' || arg.type === 'symbol') {
-          return commands.editTags(arg, value);
+          return commands.editTags(arg, v);
         }
         return undefined;
       }
@@ -552,8 +556,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
         return undefined;
       }
       return hit.kind === 'line'
-        ? bookmarks.editTags({ type: 'bookmark', entry: hit.entry }, value)
-        : commands.editTags(hit.node, value);
+        ? bookmarks.editTags({ type: 'bookmark', entry: hit.entry }, v)
+        : commands.editTags(hit.node, v);
     }),
     reg('functionBookmarks.removeBookmark', async (arg?: unknown) => {
       if (isTreeNodeArg(arg)) {
@@ -592,8 +596,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     ),
     reg('functionBookmarks.hideNotOnBranch', () => setHideAway(true)),
     reg('functionBookmarks.showNotOnBranch', () => setHideAway(false)),
-    reg('functionBookmarks.cleanBranchRecords', (picked?: string[]) =>
-      cleanBranchRecords(store, branches, external, Array.isArray(picked) ? picked : undefined),
+    reg('functionBookmarks.cleanBranchRecords', (picked?: unknown) =>
+      cleanBranchRecords(store, branches, external, stringArrayArg(picked)),
     ),
     store.onDidChange(() => {
       updateSourceContext();
@@ -625,6 +629,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     reg('functionBookmarks.sortFileBookmarksByTitle', (arg?: unknown) => {
       const key = fileGroupKey(arg);
       return key ? provider.setFileSort(key, 'title') : undefined;
+    }),
+    reg('functionBookmarks.sortFileBookmarksByCreated', (arg?: unknown) => {
+      const key = fileGroupKey(arg);
+      return key ? provider.setFileSort(key, 'created') : undefined;
     }),
     reg('functionBookmarks.sortFileBookmarksByLine', (arg?: unknown) => {
       const key = fileGroupKey(arg);

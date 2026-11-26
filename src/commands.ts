@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { editorForJump } from './util/revealEditor';
 import { TemplateResolver } from './django/resolver';
 import { findPartial, splitTemplateTarget } from './django/templates';
 import { findByPath, findInnermost } from './detection/engine';
@@ -22,7 +23,7 @@ export interface Target {
 }
 
 export async function reveal(uri: vscode.Uri, line: number, startCol = 0, endCol = startCol): Promise<vscode.TextEditor> {
-  const editor = await vscode.window.showTextDocument(uri, { preserveFocus: false });
+  const editor = await editorForJump(uri);
   const range = new vscode.Range(line, startCol, line, endCol);
   editor.selection = new vscode.Selection(range.start, range.end);
   editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);

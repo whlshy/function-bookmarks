@@ -86,6 +86,10 @@ export class NoteEditor implements vscode.Disposable {
   private locks = new Map<string, Promise<void>>();
   private seq = 0;
   private disposables: vscode.Disposable[] = [];
+  /** 目前顯示中的「正在編輯備註…」狀態列訊息：存檔或關閉分頁時立刻清掉，避免殘留。 */
+  private statusHint: { key: string; handle: vscode.Disposable } | undefined;
+  /** 給測試用：最近一次顯示的狀態列文字。 */
+  lastStatusMessage: string | undefined;
   /** 啟動時背景清理殘留暫存檔；建立新暫存檔前先等清理完成，避免刪到剛建的檔。 */
   readonly cleanup: Promise<void>;
 
@@ -103,6 +107,7 @@ export class NoteEditor implements vscode.Disposable {
   }
 
   dispose(): void {
+    this.clearStatusHint();
     this.disposables.forEach((d) => d.dispose());
   }
 
@@ -197,14 +202,14 @@ export class NoteEditor implements vscode.Disposable {
           await vscode.commands.executeCommand('workbench.action.files.revert').then(undefined, () => undefined);
         }
         editor = await this.ensurePreviewAndFocus(editor, uri);
-        this.showStatusHint(target.subject);
+        this.showStatusHint(uriKey(uri), target.subject);
         return editor;
       }
 
       let editor = await vscode.window.showTextDocument(uri, { preview: false });
       editor = await this.ensurePreviewAndFocus(editor, uri);
       if (reusingOpenTab) {
-        this.showStatusHint(target.subject);
+        this.showStatusHint(uriKey(uri), target.subject);
       }
       return editor;
     });
@@ -242,14 +247,28 @@ export class NoteEditor implements vscode.Disposable {
     });
   }
 
-  private showStatusHint(subject: string): void {
+  private clearStatusHint(key?: string): void {
+    if (this.statusHint && (!key || this.statusHint.key === key)) {
+      this.statusHint.handle.dispose();
+      this.statusHint = undefined;
+    }
+  }
+
+  private showStatusHint(key: string, subject: string): void {
+    this.clearStatusHint();
     const closeOnSave = this.closeOnSave();
-    vscode.window.setStatusBarMessage(
-      closeOnSave
-        ? vscode.l10n.t('Editing note for {0} — save ({1}) to apply and close; save empty to delete', subject, saveShortcut())
-        : vscode.l10n.t('Editing note for {0} — save ({1}) to apply; save empty to delete', subject, saveShortcut()),
-      8000,
-    );
+    const msg = closeOnSave
+      ? vscode.l10n.t('Editing note for {0} — save ({1}) to apply and close; save empty to delete', subject, saveShortcut())
+      : vscode.l10n.t('Editing note for {0} — save ({1}) to apply; save empty to delete', subject, saveShortcut());
+    this.lastStatusMessage = msg;
+    this.statusHint = { key, handle: vscode.window.setStatusBarMessage(msg, 8000) };
+  }
+
+  private showSavedMessage(key: string): void {
+    this.clearStatusHint(key);
+    const msg = vscode.l10n.t('Note saved.');
+    this.lastStatusMessage = msg;
+    vscode.window.setStatusBarMessage(msg, 2000);
   }
 
   private closeOnSave(): boolean {
@@ -286,11 +305,14 @@ export class NoteEditor implements vscode.Disposable {
         }
         this.sessions.delete(key);
         await this.finishUnlocked(doc.uri, key);
+        if (!this.sessions.has(key)) {
+          this.showSavedMessage(key);
+        }
       });
     } else {
       await session.apply(doc.getText());
       if (this.sessions.get(key)?.gen === session.gen) {
-        vscode.window.setStatusBarMessage(vscode.l10n.t('Note saved.'), 2000);
+        this.showSavedMessage(key);
       }
     }
   }
@@ -300,6 +322,7 @@ export class NoteEditor implements vscode.Disposable {
     const session = this.sessions.get(key);
     if (session && !this.hasOpenTab(doc.uri)) {
       this.sessions.delete(key);
+      this.clearStatusHint(key);
       await this.finish(doc.uri);
     }
   }
@@ -316,6 +339,7 @@ export class NoteEditor implements vscode.Disposable {
         continue;
       }
       this.sessions.delete(key);
+      this.clearStatusHint(key);
       void this.finish(uri);
     }
   }

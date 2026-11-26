@@ -211,6 +211,8 @@
   "{0} — Walkthrough": "{0} — 導讀文件",
   "… ({0} more line(s) omitted)": "…（以下省略 {0} 行）",
   "by title": "依標題",
+  "by created time": "依建立時間",
+  "Created {0}": "建立於 {0}",
   "Editor workspace storage": "編輯器的工作區儲存空間",
   "Stored inside the project (kept out of git via .git/info/exclude)": "存在專案內（透過 .git/info/exclude 排除於 git 之外）",
   "Stored by the editor (no file is created in the project)": "由編輯器保存（不在專案內產生檔案）",

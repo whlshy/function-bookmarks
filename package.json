@@ -2,7 +2,7 @@
   "name": "function-bookmarks",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "publisher": "whlshy",
   "icon": "media/icon.png",
   "galleryBanner": {
@@ -349,6 +349,12 @@
         "icon": "$(sort-precedence)"
       },
       {
+        "command": "functionBookmarks.sortFileBookmarksByCreated",
+        "title": "%command.sortFileBookmarksByCreated%",
+        "category": "%command.category%",
+        "icon": "$(history)"
+      },
+      {
         "command": "functionBookmarks.sortFileBookmarksByLine",
         "title": "%command.sortFileBookmarksByLine%",
         "category": "%command.category%",
@@ -634,12 +640,12 @@
         },
         {
           "command": "functionBookmarks.moveBookmarkToCursor",
-          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark.*:lost/ && viewItem !~ /^fbBookmark:fn/",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark(?!:fn).*:lost/",
           "group": "inline@0"
         },
         {
           "command": "functionBookmarks.moveBookmarkToCursor",
-          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/ && viewItem !~ /^fbBookmark:fn/",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark(?!:fn)/",
           "group": "1_bookmark@0"
         },
         {
@@ -664,18 +670,23 @@
         },
         {
           "command": "functionBookmarks.sortFileBookmarksByLine",
-          "when": "view == functionBookmarks.tree && viewItem == fbBmFile:byTitle",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBmFile:(byTitle|byCreated)$/",
           "group": "inline@1"
         },
         {
           "command": "functionBookmarks.sortFileBookmarksByTitle",
-          "when": "view == functionBookmarks.tree && viewItem == fbBmFile",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBmFile(?!:byTitle$)(:|$)/",
           "group": "1_sort@1"
         },
         {
+          "command": "functionBookmarks.sortFileBookmarksByCreated",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBmFile(?!:byCreated$)(:|$)/",
+          "group": "1_sort@2"
+        },
+        {
           "command": "functionBookmarks.sortFileBookmarksByLine",
-          "when": "view == functionBookmarks.tree && viewItem == fbBmFile:byTitle",
-          "group": "1_sort@1"
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBmFile:(byTitle|byCreated)$/",
+          "group": "1_sort@3"
         },
         {
           "command": "functionBookmarks.exportFileBookmarks",
@@ -684,7 +695,7 @@
         },
         {
           "command": "functionBookmarks.setBookmarkBranchOnly",
-          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark/ && viewItem !~ /^fbBookmark:fn/ && viewItem !~ /:branchOnly/",
+          "when": "view == functionBookmarks.tree && viewItem =~ /^fbBookmark(?!:fn)(?!.*:branchOnly)/",
           "group": "1_bookmark@5"
         },
         {
@@ -836,6 +847,10 @@
         },
         {
           "command": "functionBookmarks.sortFileBookmarksByTitle",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.sortFileBookmarksByCreated",
           "when": "false"
         },
         {

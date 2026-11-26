@@ -21,6 +21,8 @@ export interface ExportedBookmark {
   symbolKind?: string;
   /** 匯出別人的書籤時：原本的來源註記。 */
   author?: string;
+  /** 建立時間（ISO 字串）。 */
+  createdAt?: string;
   /** 不含程式碼內容時沒有。 */
   anchor?: BookmarkAnchor;
 }
@@ -138,6 +140,9 @@ export function parseExport(text: string): ExportFile | { error: 'json' | 'forma
     }
     if (typeof b.author === 'string' && b.author.trim()) {
       e.author = b.author.trim();
+    }
+    if (typeof b.createdAt === 'string' && b.createdAt.trim()) {
+      e.createdAt = b.createdAt.trim();
     }
     const anchor = parseAnchor(b.anchor);
     if (anchor) {

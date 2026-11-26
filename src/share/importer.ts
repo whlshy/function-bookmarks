@@ -510,7 +510,7 @@ export async function importBookmarks(
         file,
         line: p.line,
         source: { author: authorOf(b), importId, originalId: b.id, importedAt },
-        createdAt: importedAt,
+        createdAt: b.createdAt ?? importedAt,
       };
       if (b.label) {
         bm.label = b.label;

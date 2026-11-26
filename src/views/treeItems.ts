@@ -9,6 +9,8 @@ import { SymbolKindName } from '../detection/types';
 import { MarkStore } from '../storage/store';
 import { ResolvedFavorite } from '../symbols/favorites';
 import { basenamePosix } from '../util/paths';
+import { formatLocalDateTime } from '../util/time';
+import { closeUnclosedFences } from '../markdown/fences';
 import { bookmarkPreviewLink, previewNoteLink, trustPreviewLink } from './noteEditor';
 import { BmGroupNode, BookmarkNode, COMMANDS, displayName, FavoriteNode, FOREIGN_COLOR, ICONS, NOTE_COLOR, REFERENCE_KEYWORD, SymbolNode } from './treeNodes';
 
@@ -72,7 +74,7 @@ export class TreeItemFactory {
       return item;
     }
     const rel = element.rel ?? '';
-    const byTitle = this.ctx.fileSortOf(element.key) === 'title';
+    const sort = this.ctx.fileSortOf(element.key);
     const item = new vscode.TreeItem(this.highlighted(basenamePosix(rel)), defaultState);
     item.id = this.groupId(`bmFile:${element.key}`);
     item.resourceUri = element.uri;
@@ -80,9 +82,11 @@ export class TreeItemFactory {
     const dir = path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel);
     const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
     const folderName = multiRoot ? element.folder?.name : undefined;
-    item.description = [folderName, dir, byTitle ? vscode.l10n.t('by title') : ''].filter(Boolean).join(' · ');
+    const sortLabel =
+      sort === 'title' ? vscode.l10n.t('by title') : sort === 'created' ? vscode.l10n.t('by created time') : '';
+    item.description = [folderName, dir, sortLabel].filter(Boolean).join(' · ');
     item.tooltip = folderName ? `${folderName} · ${rel}` : rel;
-    item.contextValue = byTitle ? 'fbBmFile:byTitle' : 'fbBmFile';
+    item.contextValue = sort === 'title' ? 'fbBmFile:byTitle' : sort === 'created' ? 'fbBmFile:byCreated' : 'fbBmFile';
     return item;
   }
 
@@ -148,9 +152,13 @@ export class TreeItemFactory {
     }
     if (b.note) {
       md.appendMarkdown('\n\n---\n\n');
-      md.appendMarkdown(b.note);
+      md.appendMarkdown(closeUnclosedFences(b.note));
       md.appendMarkdown(`\n\n${bookmarkPreviewLink(element.entry.uri, b.id)}`);
       trustPreviewLink(md);
+    }
+    const created = formatLocalDateTime(b.createdAt);
+    if (created) {
+      md.appendMarkdown(`\n\n${vscode.l10n.t('Created {0}', created)}`);
     }
     item.tooltip = md;
     item.contextValue = `fbBookmark${b.note ? ':note' : ''}${lost ? ':lost' : ''}${away ? ':away' : ''}${b.scope === 'branch' ? ':branchOnly' : ''}${b.source ? ':foreign' : ''}`;
@@ -185,6 +193,7 @@ export class TreeItemFactory {
     extra: string[],
     note?: string,
     previewTarget?: { uri: vscode.Uri; kind: SymbolKindName },
+    createdAt?: string,
   ): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
     md.appendMarkdown(`**${escapeMd(alias ?? name)}**\n\n`);
@@ -198,11 +207,15 @@ export class TreeItemFactory {
     }
     if (note) {
       md.appendMarkdown('\n\n---\n\n');
-      md.appendMarkdown(note);
+      md.appendMarkdown(closeUnclosedFences(note));
       if (previewTarget) {
         md.appendMarkdown(`\n\n${previewNoteLink(previewTarget.uri, { path: symPath, kind: previewTarget.kind })}`);
         trustPreviewLink(md);
       }
+    }
+    const created = formatLocalDateTime(createdAt);
+    if (created) {
+      md.appendMarkdown(`\n\n${vscode.l10n.t('Created {0}', created)}`);
     }
     return md;
   }
@@ -236,10 +249,20 @@ export class TreeItemFactory {
     if (element.override) {
       extra.push(vscode.l10n.t('Overrides the block in {0}', element.override.label));
     }
-    item.tooltip = this.tooltip(s.name, mark?.alias, s.path, vscode.workspace.asRelativePath(element.uri, false), s.nameLine, extra, mark?.note, {
-      uri: element.uri,
-      kind: s.kind,
-    });
+    item.tooltip = this.tooltip(
+      s.name,
+      mark?.alias,
+      s.path,
+      vscode.workspace.asRelativePath(element.uri, false),
+      s.nameLine,
+      extra,
+      mark?.note,
+      {
+        uri: element.uri,
+        kind: s.kind,
+      },
+      mark?.favorite ? mark.addedAt : undefined,
+    );
     item.contextValue = `fbSymbol:${mark?.favorite ? 'fav' : 'nofav'}${mark?.alias ? ':alias' : ''}${mark?.note ? ':note' : ''}${isRef ? ':ref' : ''}${
       element.override ? ':override' : ''
     }`;
@@ -297,10 +320,20 @@ export class TreeItemFactory {
           : vscode.l10n.t('The file does not exist.'),
       );
     }
-    item.tooltip = this.tooltip(name, fav.mark.alias, fav.mark.path, fav.mark.file, line, extra, fav.mark.note, {
-      uri: fav.uri,
-      kind: fav.mark.kind,
-    });
+    item.tooltip = this.tooltip(
+      name,
+      fav.mark.alias,
+      fav.mark.path,
+      fav.mark.file,
+      line,
+      extra,
+      fav.mark.note,
+      {
+        uri: fav.uri,
+        kind: fav.mark.kind,
+      },
+      fav.mark.addedAt,
+    );
     // 與行號書籤共用右鍵選單（fbBookmark），:fn 表示函式書籤
     item.contextValue = `fbBookmark:fn${fav.mark.alias ? ':alias' : ''}${fav.mark.note ? ':note' : ''}:${fav.status}`;
     item.command = { command: COMMANDS.openFavorite, title: vscode.l10n.t('Go to symbol'), arguments: [fav] };

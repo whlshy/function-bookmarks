@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import type { ExtensionApi } from '../../../src/extension';
 import { tagsPrompt } from '../../../src/bookmarks/commands';
 import { makeAnchor, newBookmarkId } from '../../../src/bookmarks/model';
+import { formatLocalDateTime } from '../../../src/util/time';
 import { addBookmark, setFavorite, setNote, setTags } from '../../../src/storage/marks';
 import type { BmGroupNode, BookmarkNode, FavoriteNode, FileNode, SymbolNode, TreeNode } from '../../../src/views/tree';
 import {
@@ -44,7 +45,17 @@ describe('書籤操作、函式書籤、數字導覽、顏色與快捷鍵', () =
       await vscode.commands.executeCommand('functionBookmarks.addFavorite', get);
       const text = await readStoreFile();
       assert.ok(text?.includes('"path": "ArticleView.get"'), text);
+      const savedAddedAt = api.store.get(workspaceFile('app', 'views.py'), get.symbol)?.addedAt;
+      assert.ok(savedAddedAt && Number.isFinite(Date.parse(savedAddedAt)), `函式書籤存檔後應有 addedAt：${savedAddedAt}`);
+      assert.ok(text?.includes(`"addedAt": "${savedAddedAt}"`), text);
       assert.ok(api.provider.getTreeItem(get).description?.toString().startsWith('★'));
+
+      // 取消再重新加入函式書籤：建立時間應更新
+      await new Promise((r) => setTimeout(r, 20));
+      await vscode.commands.executeCommand('functionBookmarks.removeFavorite', get);
+      await vscode.commands.executeCommand('functionBookmarks.addFavorite', get);
+      const reAddedAt = api.store.get(workspaceFile('app', 'views.py'), get.symbol)?.addedAt;
+      assert.ok(reAddedAt && Date.parse(reAddedAt) > Date.parse(savedAddedAt), `重加應有較新的建立時間：${savedAddedAt} -> ${reAddedAt}`);
 
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
       await api.refreshNow();
@@ -367,6 +378,9 @@ describe('書籤操作、函式書籤、數字導覽、顏色與快捷鍵', () =
       assert.deepStrictEqual(api.favorites.all.map((f) => f.mark.path), ['alpha']);
       const on = await ours(0, 5);
       assert.ok(on[0].includes('star-full'), '已加入時顯示 ★ 移除書籤');
+      const fnAddedAt = api.store.get(fileC(), alphaNode.symbol)?.addedAt;
+      assert.ok(fnAddedAt, 'hover 加入函式書籤應有建立時間');
+      assert.ok(on[0].includes(`Created ${formatLocalDateTime(fnAddedAt)}`), `函式 hover 提示應顯示建立時間：${on[0]}`);
 
       await api.commands.rename(alphaNode, '第一個');
       assert.strictEqual(api.store.get(fileC(), alphaNode.symbol)?.alias, '第一個');
@@ -374,6 +388,23 @@ describe('書籤操作、函式書籤、數字導覽、顏色與快捷鍵', () =
       const withNote = await ours(0, 5);
       assert.strictEqual(withNote.length, 1, '備註併入同一個提示，不會跳出兩個');
       assert.ok(withNote[0].includes('筆記內容'));
+      assert.ok(
+        withNote[0].indexOf('筆記內容') < withNote[0].indexOf(`Created ${formatLocalDateTime(fnAddedAt)}`),
+        `建立時間不應放在備註前面：${withNote[0]}`,
+      );
+
+      // 行號書籤 gutter 提示顯示建立時間且不放在備註前面；沒有建立時間時不顯示
+      await openAt(fileC(), 1, api);
+      await api.bookmarks.addLabeled('帶備註行');
+      const lineBm = api.store.bookmarksFor(fileC()).find((b) => b.line === 1)!;
+      assert.ok(lineBm.createdAt);
+      await api.bookmarks.editNote({ type: 'bookmark', entry: { folder: folder(), uri: fileC(), bookmark: lineBm } }, '行書籤備註');
+      await api.gutter.update();
+      const lineHover = api.gutter.hoverAt(fileC(), 1)!;
+      const lineCreatedText = `Created ${formatLocalDateTime(lineBm.createdAt)}`;
+      assert.ok(lineHover.includes(lineCreatedText), `行書籤 gutter 提示應顯示建立時間：${lineHover}`);
+      assert.ok(lineHover.indexOf('行書籤備註') < lineHover.indexOf(lineCreatedText), `建立時間不應放在備註前面：${lineHover}`);
+      await api.bookmarks.remove({ type: 'bookmark', entry: { folder: folder(), uri: fileC(), bookmark: lineBm } });
 
       await vscode.commands.executeCommand('functionBookmarks.hoverAction', arg('toggle'));
       await api.favorites.refresh();
@@ -682,6 +713,20 @@ describe('書籤操作、函式書籤、數字導覽、顏色與快捷鍵', () =
         await runAndCancelQuickOpen(() => vscode.commands.executeCommand('functionBookmarks.setBookmarkNumber'), '函式行 setBookmarkNumber 取消');
         await runAndCancelQuickOpen(() => vscode.commands.executeCommand('functionBookmarks.setBookmarkColor'), '函式行 setBookmarkColor 取消');
         assert.strictEqual(api.store.allFavorites().length, 0, '函式名稱行取消不應留下函式書籤');
+
+        // 行號區右鍵（editor/lineNumber/context）第二參數會附帶 { preserveFocus: false }：應照常開選單、不寫入損壞物件或建孤兒書籤（BUG-01）
+        const lineCtx = { lineNumber: 2, uri: fileN() };
+        const extra = { preserveFocus: false };
+        await runAndCancelQuickOpen(
+          () => vscode.commands.executeCommand('functionBookmarks.setBookmarkNumber', lineCtx, extra),
+          '行號右鍵 setBookmarkNumber 帶 preserveFocus 應開啟選單',
+        );
+        await runAndCancelQuickOpen(
+          () => vscode.commands.executeCommand('functionBookmarks.setBookmarkColor', lineCtx, extra),
+          '行號右鍵 setBookmarkColor 帶 preserveFocus 應開啟選單',
+        );
+        assert.strictEqual(api.store.bookmarksFor(fileN()).length, 0, '行號右鍵取消不應建立損壞書籤');
+        assert.strictEqual(api.store.numbered().size, 0);
 
         // 取消後再做一次並確認：正常建立並拿到 1 號
         await openAt(fileN(), 1, api);

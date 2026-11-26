@@ -1,7 +1,7 @@
-/** 書籤項目的搜尋欄位、依標題排序與不重複計數（側邊欄與快速搜尋共用）。 */
+/** 書籤項目的搜尋欄位、排序與不重複計數（側邊欄與快速搜尋共用）。 */
 import { bookmarkTitle } from '../bookmarks/commands';
 import { SearchFields } from '../bookmarks/filter';
-import { compareByTitle, lineBookmarkTitle, symbolBookmarkTitle } from '../bookmarks/sort';
+import { compareByCreated, compareByTitle, lineBookmarkTitle, symbolBookmarkTitle } from '../bookmarks/sort';
 import { BookmarkItem } from '../bookmarks/unified';
 
 /** 同檔案內的書籤依側邊欄顯示名稱正序排序（函式書籤與行號書籤混排，不含圈號前綴）。 */
@@ -13,6 +13,18 @@ export function compareBookmarkItemsByTitle(a: BookmarkItem, b: BookmarkItem): n
     b.kind === 'line'
       ? { kind: 'line', title: lineBookmarkTitle(b.entry.bookmark), line: b.line }
       : { kind: 'symbol', title: symbolBookmarkTitle(b.fav.mark), line: b.line },
+  );
+}
+
+/** 同檔案內的書籤依建立時間由舊到新排序（沒有建立時間排最後，相同時依行號）。 */
+export function compareBookmarkItemsByCreated(a: BookmarkItem, b: BookmarkItem): number {
+  return compareByCreated(
+    a.kind === 'line'
+      ? { kind: 'line', line: a.line, createdAt: a.entry.bookmark.createdAt }
+      : { kind: 'symbol', line: a.line, createdAt: a.fav.mark.addedAt },
+    b.kind === 'line'
+      ? { kind: 'line', line: b.line, createdAt: b.entry.bookmark.createdAt }
+      : { kind: 'symbol', line: b.line, createdAt: b.fav.mark.addedAt },
   );
 }
 

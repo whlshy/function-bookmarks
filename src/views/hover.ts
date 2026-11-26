@@ -3,6 +3,8 @@ import { SECTION } from '../config';
 import { DetectedSymbol, SymbolKindName } from '../detection/types';
 import { MarkStore } from '../storage/store';
 import { SymbolService } from '../symbols/symbolService';
+import { closeUnclosedFences } from '../markdown/fences';
+import { formatLocalDateTime } from '../util/time';
 import { PREVIEW_NOTE_COMMAND, previewNoteLink } from './noteEditor';
 
 export const HOVER_ACTION = 'functionBookmarks.hoverAction';
@@ -94,8 +96,12 @@ export class BookmarkHoverProvider implements vscode.HoverProvider {
     md.appendMarkdown(links.join(' &nbsp;·&nbsp; '));
     if (mark?.note) {
       md.appendMarkdown('\n\n---\n\n');
-      md.appendMarkdown(mark.note);
+      md.appendMarkdown(closeUnclosedFences(mark.note));
       md.appendMarkdown(`\n\n${previewNoteLink(document.uri, s)}`);
+    }
+    const created = mark?.favorite ? formatLocalDateTime(mark.addedAt) : undefined;
+    if (created) {
+      md.appendMarkdown(`\n\n${vscode.l10n.t('Created {0}', created)}`);
     }
     return new vscode.Hover(md, new vscode.Range(s.nameLine, s.nameStartCol, s.nameLine, s.nameEndCol));
   }

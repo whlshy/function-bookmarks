@@ -6,6 +6,8 @@ import { uriKey } from '../util/uris';
 import { bookmarkTitle } from '../bookmarks/commands';
 import { circled, DEFAULT_COLOR, effectiveColor, GutterKind, gutterSvg, LOST_HEX, paletteColor, svgDataUri } from '../bookmarks/decor';
 import { SECTION } from '../config';
+import { closeUnclosedFences } from '../markdown/fences';
+import { formatLocalDateTime } from '../util/time';
 import { bookmarkPreviewLink, trustPreviewLink } from './noteEditor';
 
 function escapeMd(s: string): string {
@@ -266,9 +268,13 @@ export class FavoriteGutter implements vscode.Disposable {
         }
         if (b.note) {
           md.appendMarkdown('\n\n---\n\n');
-          md.appendMarkdown(b.note);
+          md.appendMarkdown(closeUnclosedFences(b.note));
           md.appendMarkdown(`\n\n${bookmarkPreviewLink(uri, b.id)}`);
           trustPreviewLink(md);
+        }
+        const created = formatLocalDateTime(b.createdAt);
+        if (created) {
+          md.appendMarkdown(`\n\n${vscode.l10n.t('Created {0}', created)}`);
         }
         add(kind, color, b.number, {
           range: new vscode.Range(b.line, text.firstNonWhitespaceCharacterIndex, b.line, text.text.length),

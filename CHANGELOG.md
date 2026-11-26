@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.2 (2026-11-27) — undo puts bookmarks back, sort by created time and fixes found with the mouse
+
+- **Undo puts a bookmark back**: delete the line a bookmark is on, press `Ctrl+Z`, and the bookmark is on that line again (it no longer stays on the next line). This also works for a deleted block, for several undos in a row, and when `functionBookmarks.bookmarks.onLineDelete` is `remove`
+- New tests check that bookmarks stay with their code when you move lines (`Alt+↑` / `Alt+↓`), join lines with `Backspace`, and when a formatter such as Prettier rewraps code
+- **Sort by created time**: right-click a file in the bookmarks view and choose *Sort by Created Time* (oldest first; older bookmarks without a time come last). Side bar tooltips and function bookmark hovers show when a bookmark was created
+- Jumping to a bookmark keeps you in a diff editor (either side), and uses the split that already shows the file instead of opening it again in the current one
+- Fix: *Set Bookmark Number…* from the line number context menu no longer saves a broken number (the gutter icon showed `ct O`), and *Set Bookmark Color…* there opens the color list again
+- Fix: *Move Bookmark to Cursor* and *Show Only on This Branch* no longer appear on every row of the side bar
+- Fix: with the file still open, switching to a branch without that file now marks its bookmarks *not on this branch*
+- Fix: a note with an unclosed code block no longer swallows the *Open in preview* link in hovers
+- Fix: after a note is saved and closed, the status bar no longer keeps saying the note is being edited
+
 ## 0.9.1 (2026-11-26) — side bar menu fix and more project files
 
 - Fix: commands in the bookmarks view's `…` menu no longer act on the item selected in the side bar. With a bookmark or file selected, *Import Bookmarks…* failed with *This is not valid JSON*, *Choose Bookmark Storage for This Workspace…* could save an invalid choice, *Export Bookmarks…* exported only the selected file, and *Set Tag Color…* skipped choosing the tag. Right-clicking a file row to export that file, and the color button on a tag row, work as before

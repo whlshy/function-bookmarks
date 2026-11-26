@@ -6,7 +6,7 @@ import { BranchService } from '../git/branchService';
 import { MarkStore } from '../storage/store';
 import { FavoritesModel } from '../symbols/favorites';
 import { SymbolService } from '../symbols/symbolService';
-import { oneOf, plainOptions } from '../util/commandArgs';
+import { oneOf, plainOptions, stringArg, stringArrayArg } from '../util/commandArgs';
 import { isBookmarkNode, sourceArg } from '../util/editorArgs';
 import type { BmGroupNode, TreeNode } from '../views/tree';
 import { exportBookmarks, ExportOptions } from './exporter';
@@ -50,10 +50,10 @@ export function registerShareCommands(deps: ShareCommandDeps): vscode.Disposable
       importBookmarks(shareDeps, service, arg instanceof vscode.Uri ? { uri: arg } : (plainOptions<ImportOptions>(arg, IMPORT_OPTION_KEYS) ?? {})),
     ),
     reg('functionBookmarks.chooseStorage', (choice?: unknown) => store.chooseStorage(oneOf(choice, STORAGE_CHOICES))),
-    reg('functionBookmarks.filterBookmarkSources', (hidden?: unknown) => filterSources(store, Array.isArray(hidden) ? hidden : undefined)),
+    reg('functionBookmarks.filterBookmarkSources', (hidden?: unknown) => filterSources(store, stringArrayArg(hidden))),
     reg('functionBookmarks.filterBookmarkSourcesActive', () => filterSources(store)),
-    reg('functionBookmarks.deleteBookmarkSource', (arg?: unknown, confirmed?: boolean) => deleteSource(store, sourceArg(arg), confirmed === true)),
-    reg('functionBookmarks.renameBookmarkSource', (arg?: unknown, newName?: string) => renameSource(store, sourceArg(arg), newName)),
+    reg('functionBookmarks.deleteBookmarkSource', (arg?: unknown, confirmed?: unknown) => deleteSource(store, sourceArg(arg), confirmed === true)),
+    reg('functionBookmarks.renameBookmarkSource', (arg?: unknown, newName?: unknown) => renameSource(store, sourceArg(arg), stringArg(newName))),
     reg('functionBookmarks.makeBookmarkMine', (node?: TreeNode) => makeMine(store, bookmarks.entryOf(isBookmarkNode(node) ? node : undefined))),
   ];
 }

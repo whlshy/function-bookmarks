@@ -163,6 +163,11 @@ export async function runAndCancelQuickOpen<T = unknown>(
 export async function resetWorkspace(api: ExtensionApi, opts: { closeEditors?: boolean } = {}): Promise<void> {
   if (opts.closeEditors) {
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await waitFor(
+      () => vscode.window.tabGroups.all.reduce((n, g) => n + g.tabs.length, 0),
+      (n) => n === 0,
+      '所有分頁都已關閉',
+    );
   }
   api.searchBox.close();
   api.searchBox.setQuery('');

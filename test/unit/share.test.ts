@@ -49,8 +49,25 @@ describe('匯出與匯入書籤：格式', () => {
         repo: { remote: 'x', commit: 'abc' },
         files: { 'app\\views.py': { hashes: 'AAAAAA==' } },
         bookmarks: [
-          { kind: 'line', id: 'a', file: 'app/views.py', line: 3, label: '登入', tags: ['auth', ''], anchor: { text: 'x = 1', before: [], after: [] } },
-          { kind: 'symbol', id: 'b', file: 'app/views.py', line: 10, path: 'ArticleView.get', symbolKind: 'method' },
+          {
+            kind: 'line',
+            id: 'a',
+            file: 'app/views.py',
+            line: 3,
+            label: '登入',
+            tags: ['auth', ''],
+            createdAt: '2026-11-27T06:01:00.000Z',
+            anchor: { text: 'x = 1', before: [], after: [] },
+          },
+          {
+            kind: 'symbol',
+            id: 'b',
+            file: 'app/views.py',
+            line: 10,
+            path: 'ArticleView.get',
+            symbolKind: 'method',
+            createdAt: '2026-11-27T06:02:00.000Z',
+          },
           { kind: 'line', id: 'c', file: '../secret.py', line: 1 },
           { kind: 'line', id: 'd', file: 'a.py', line: -1 },
           null,
@@ -65,10 +82,10 @@ describe('匯出與匯入書籤：格式', () => {
     assert.strictEqual(r.includesCode, true);
     assert.deepStrictEqual(Object.keys(r.files!), ['app/views.py']);
     assert.deepStrictEqual(
-      r.bookmarks.map((b) => [b.id, b.kind, b.line, b.tags, b.path]),
+      r.bookmarks.map((b) => [b.id, b.kind, b.line, b.tags, b.path, b.createdAt]),
       [
-        ['a', 'line', 3, ['auth'], undefined],
-        ['b', 'symbol', 10, undefined, 'ArticleView.get'],
+        ['a', 'line', 3, ['auth'], undefined, '2026-11-27T06:01:00.000Z'],
+        ['b', 'symbol', 10, undefined, 'ArticleView.get', '2026-11-27T06:02:00.000Z'],
       ],
     );
   });

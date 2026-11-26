@@ -144,6 +144,27 @@ describe('Git 分支追蹤與 .git/info/exclude', () => {
       await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     });
 
+    it('檔案開著且該檔在目標分支不存在：切分支後仍標成不在此分支並可隱藏，切回後恢復（BUG-03）', async () => {
+      await vscode.window.showTextDocument(fileB());
+      await api.external.idle();
+      try {
+        await checkout('main');
+        assert.deepStrictEqual(await settle(fileB(), ['~'], '分頁開著切到沒有 fileB 的 main 分支'), ['~']);
+
+        await vscode.commands.executeCommand('functionBookmarks.hideNotOnBranch');
+        const groups = await api.provider.getChildren(api.provider.sections.bookmarks);
+        assert.ok(!groups.some((g) => (g as BmGroupNode).rel === rel(fileB())), '開啟隱藏後應藏起不在此分支的 fileB');
+        await vscode.commands.executeCommand('functionBookmarks.showNotOnBranch');
+
+        await checkout('feature');
+        assert.deepStrictEqual(await settle(fileB(), ['2'], '分頁開著切回 feature 後 fileB 恢復'), ['2']);
+      } finally {
+        await vscode.commands.executeCommand('functionBookmarks.showNotOnBranch');
+        await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor').then(undefined, () => undefined);
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      }
+    });
+
     it('隱藏不在此分支的書籤；只在這個分支顯示的書籤在其他分支隱藏且不換算', async () => {
       await checkout('main');
       await settle(fileA(), ['~', '12'], '切到 main');

@@ -1,5 +1,6 @@
 import * as assert from 'assert';
-import { compareByTitle, lineBookmarkTitle, SortableBookmark, symbolBookmarkTitle } from '../../src/bookmarks/sort';
+import { compareByCreated, compareByTitle, lineBookmarkTitle, SortableBookmark, symbolBookmarkTitle } from '../../src/bookmarks/sort';
+import { formatLocalDateTime } from '../../src/util/time';
 
 const sortTitles = (items: SortableBookmark[]) => [...items].sort(compareByTitle).map((i) => i.title);
 
@@ -124,5 +125,64 @@ describe('書籤依標題排序（compareByTitle）', () => {
       [...items].sort(compareByTitle).map((i) => `${i.kind}:${i.line ?? 'none'}`),
       ['symbol:2', 'symbol:10', 'line:10', 'line:30', 'symbol:none'],
     );
+  });
+});
+
+describe('書籤依建立時間排序（compareByCreated）', () => {
+  it('先建立的在前（函式書籤與行號書籤混排，支援不同時區 ISO 字串）', () => {
+    const items: SortableBookmark[] = [
+      { kind: 'line', title: 'c', line: 1, createdAt: '2026-11-27T06:03:00.000Z' },
+      { kind: 'symbol', title: 'a', line: 20, createdAt: '2026-11-27T14:01:00+08:00' }, // 06:01Z
+      { kind: 'line', title: 'b', line: 10, createdAt: '2026-11-27T06:02:00.000Z' },
+    ];
+    assert.deepStrictEqual(
+      [...items].sort(compareByCreated).map((i) => i.title),
+      ['a', 'b', 'c'],
+    );
+  });
+
+  it('混合有、沒有（含無效字串）建立時間：沒有建立時間的排最後，彼此依行號排', () => {
+    const items: SortableBookmark[] = [
+      { kind: 'line', title: 'noTime30', line: 30 },
+      { kind: 'line', title: 'later', line: 2, createdAt: '2026-11-27T06:05:00.000Z' },
+      { kind: 'symbol', title: 'noTimeNone', line: undefined },
+      { kind: 'symbol', title: 'badTime5', line: 5, createdAt: 'not-a-date' },
+      { kind: 'symbol', title: 'earlier', line: 50, createdAt: '2026-11-27T06:01:00.000Z' },
+      { kind: 'line', title: 'noTime5', line: 5 },
+    ];
+    assert.deepStrictEqual(
+      [...items].sort(compareByCreated).map((i) => i.title),
+      ['earlier', 'later', 'badTime5', 'noTime5', 'noTime30', 'noTimeNone'],
+    );
+  });
+
+  it('建立時間相同時依行號排；行號也相同時函式書籤排在行號書籤前', () => {
+    const t = '2026-11-27T06:00:00.000Z';
+    const items: SortableBookmark[] = [
+      { kind: 'line', title: 'line20', line: 20, createdAt: t },
+      { kind: 'symbol', title: 'symNone', line: undefined, createdAt: t },
+      { kind: 'line', title: 'line10', line: 10, createdAt: t },
+      { kind: 'symbol', title: 'sym10', line: 10, createdAt: t },
+      { kind: 'symbol', title: 'sym2', line: 2, createdAt: t },
+    ];
+    assert.deepStrictEqual(
+      [...items].sort(compareByCreated).map((i) => i.title),
+      ['sym2', 'sym10', 'line10', 'line20', 'symNone'],
+    );
+  });
+});
+
+describe('建立時間格式化（formatLocalDateTime）', () => {
+  it('將有效 ISO 時間轉為本地 YYYY-MM-DD HH:mm（補零、不依賴語系）', () => {
+    assert.strictEqual(formatLocalDateTime(new Date(2026, 10, 27, 14, 3, 59).toISOString()), '2026-11-27 14:03');
+    assert.strictEqual(formatLocalDateTime(new Date(2026, 0, 5, 8, 7, 0).toISOString()), '2026-01-05 08:07');
+    assert.strictEqual(formatLocalDateTime(new Date(2026, 11, 31, 0, 0, 0).toISOString()), '2026-12-31 00:00');
+    assert.strictEqual(formatLocalDateTime(new Date(2026, 11, 31, 23, 59, 0).toISOString()), '2026-12-31 23:59');
+  });
+
+  it('缺值或無效時間回傳 undefined', () => {
+    assert.strictEqual(formatLocalDateTime(undefined), undefined);
+    assert.strictEqual(formatLocalDateTime(''), undefined);
+    assert.strictEqual(formatLocalDateTime('not-a-date'), undefined);
   });
 });

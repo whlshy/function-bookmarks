@@ -54,10 +54,13 @@ describe('匯出、匯入書籤與來源管理', () => {
     ];
     const text = (ls: string[]) => ls.join('\n') + '\n';
     type Exported = {
-      bookmarks: { kind: string; line: number; label?: string; path?: string; anchor?: unknown }[];
+      bookmarks: { kind: string; line: number; label?: string; path?: string; anchor?: unknown; createdAt?: string }[];
       files?: Record<string, unknown>;
       includesCode: boolean;
     };
+
+    const LINE_CREATED = '2026-11-26T01:02:00.000Z';
+    const FN_CREATED = new Date('2026-11-26T03:04:00.000Z');
 
     async function setupMine(): Promise<void> {
       await api.external.idle();
@@ -71,9 +74,10 @@ describe('匯出、匯入書籤與來源管理', () => {
           tags: ['article'],
           note: '要檢查權限',
           anchor: makeAnchor(BASE, 10),
+          createdAt: LINE_CREATED,
         });
         next = addBookmark(next, { id: newBookmarkId(), file: relA, line: 4, anchor: makeAnchor(BASE, 4) });
-        return setFavorite(next, { file: relA, path: 'helper', kind: 'function' }, true, 3);
+        return setFavorite(next, { file: relA, path: 'helper', kind: 'function' }, true, 3, FN_CREATED);
       });
       await api.favorites.refresh();
       await api.external.idle();
@@ -115,11 +119,11 @@ describe('匯出、匯入書籤與來源管理', () => {
       assert.strictEqual(data.format, 'function-bookmarks/v1');
       assert.ok(data.exportedBy);
       assert.deepStrictEqual(
-        data.bookmarks.map((b) => [b.kind, b.line, b.label ?? b.path]).sort(),
+        data.bookmarks.map((b) => [b.kind, b.line, b.label ?? b.path, b.createdAt]).sort(),
         [
-          ['line', 10, '改標題'],
-          ['line', 4, undefined],
-          ['symbol', 3, 'helper'],
+          ['line', 10, '改標題', LINE_CREATED],
+          ['line', 4, undefined, undefined],
+          ['symbol', 3, 'helper', FN_CREATED.toISOString()],
         ].sort(),
       );
       assert.ok(data.files?.[relA], '附上行雜湊');
@@ -161,7 +165,9 @@ describe('匯出、匯入書籤與來源管理', () => {
         ],
       );
       const labeled = foreign().find((b) => b.label === '改標題')!;
-      assert.deepStrictEqual([labeled.tags, labeled.note], [['article'], '要檢查權限']);
+      assert.deepStrictEqual([labeled.tags, labeled.note, labeled.createdAt], [['article'], '要檢查權限', LINE_CREATED]);
+      const importedFn = foreign().find((b) => b.symbol?.path === 'helper')!;
+      assert.strictEqual(importedFn.createdAt, FN_CREATED.toISOString(), '匯入的函式書籤應保留原本的建立時間');
 
       await vscode.window.showTextDocument(fileA());
       api.gutter.schedule(0);

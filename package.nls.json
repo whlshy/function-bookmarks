@@ -65,6 +65,7 @@
   "command.groupBookmarksByTag": "Group Bookmarks by Tag",
   "command.groupBookmarksByFile": "Group Bookmarks by File",
   "command.sortFileBookmarksByTitle": "Sort by Title",
+  "command.sortFileBookmarksByCreated": "Sort by Created Time",
   "command.sortFileBookmarksByLine": "Sort by Line Number",
   "config.onLineDelete": "What happens to a bookmark when its line is deleted in the editor.",
   "config.onLineDelete.moveToNext": "Move it to the next line.",

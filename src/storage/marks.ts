@@ -199,7 +199,7 @@ export function parseStore(text: string): StoreData | undefined {
       if (typeof m.line === 'number' && m.line >= 0) {
         mark.line = Math.floor(m.line);
       }
-      if (typeof m.addedAt === 'string') {
+      if (typeof m.addedAt === 'string' && m.addedAt.trim()) {
         mark.addedAt = m.addedAt;
       }
       symbols.push(mark);
@@ -361,8 +361,10 @@ function upsert(data: StoreData, key: MarkKey, patch: (m: SymbolMark) => SymbolM
 export function setFavorite(data: StoreData, key: MarkKey, favorite: boolean, line?: number, now = new Date()): StoreData {
   return upsert(data, key, (m) => {
     if (favorite) {
-      m.favorite = true;
-      m.addedAt = m.addedAt ?? now.toISOString();
+      if (!m.favorite) {
+        m.favorite = true;
+        m.addedAt = now.toISOString();
+      }
     } else {
       // 取消書籤時標籤、號碼、顏色一併移除（自訂名稱與備註保留）
       delete m.favorite;
@@ -630,7 +632,7 @@ function parseBookmarks(list: unknown): LineBookmark[] {
     if (typeof b.color === 'string' && b.color) {
       bm.color = b.color;
     }
-    if (typeof b.createdAt === 'string') {
+    if (typeof b.createdAt === 'string' && b.createdAt.trim()) {
       bm.createdAt = b.createdAt;
     }
     out.push(bm);

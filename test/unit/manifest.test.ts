@@ -24,9 +24,11 @@ describe('package.json、package.nls 與 l10n 一致性', () => {
     assert.notStrictEqual(toggleFav?.icon, '$(star)');
     assert.strictEqual(toggleFav?.icon, '$(star-empty)');
 
-    // 排序切換按鈕應有圖示
+    // 排序切換按鈕應有圖示與標題
     const byId = new Map(cmds.map((c) => [c.command, c]));
     assert.ok(byId.get('functionBookmarks.sortFileBookmarksByTitle')?.icon, '依標題排序應有圖示');
+    assert.ok(byId.get('functionBookmarks.sortFileBookmarksByCreated')?.title, '依建立時間排序應有標題');
+    assert.ok(byId.get('functionBookmarks.sortFileBookmarksByCreated')?.icon, '依建立時間排序應有圖示');
     assert.ok(byId.get('functionBookmarks.sortFileBookmarksByLine')?.icon, '依行號排序應有圖示');
 
     // 所有快捷鍵與選單引用的指令都必須宣告在 contributes.commands
@@ -53,12 +55,66 @@ describe('package.json、package.nls 與 l10n 一致性', () => {
       'view/item/context 不應殘留已廢棄的 fbFavorite',
     );
 
-    // moveBookmarkToCursor 必須排除函式書籤（fbBookmark:fn）
+    // 整個 package.json 的 when 條件都不得使用 VS Code 不支援的 `!~` 運算子
+    const allWhen: { where: string; value: string }[] = [];
+    const collectWhen = (obj: unknown, where: string) => {
+      if (Array.isArray(obj)) {
+        obj.forEach((v, i) => collectWhen(v, `${where}[${i}]`));
+        return;
+      }
+      if (!obj || typeof obj !== 'object') {
+        return;
+      }
+      for (const [k, v] of Object.entries(obj)) {
+        if (k === 'when' && typeof v === 'string') {
+          allWhen.push({ where: `${where}.${k}`, value: v });
+        } else {
+          collectWhen(v, `${where}.${k}`);
+        }
+      }
+    };
+    collectWhen(pkg, 'package.json');
+    assert.ok(allWhen.length > 0, '應找到 when 條件');
+    for (const w of allWhen) {
+      assert.strictEqual(w.value.includes('!~'), false, `${w.where} 不得使用不支援的 !~ 運算子：${w.value}`);
+    }
+
+    // moveBookmarkToCursor 必須排除函式書籤（fbBookmark:fn），且不得匹配非書籤列
+    const viewItemRegex = (when: string | undefined): RegExp => {
+      const m = when?.match(/viewItem\s*=~\s*\/(.+)\/([a-z]*)/);
+      assert.ok(m, `缺少 viewItem =~ /.../ 條件：${when}`);
+      return new RegExp(m[1], m[2]);
+    };
     const moveItems = itemMenu.filter((m) => m.command === 'functionBookmarks.moveBookmarkToCursor');
     assert.strictEqual(moveItems.length, 2);
-    for (const m of moveItems) {
-      assert.ok(m.when?.includes('viewItem !~ /^fbBookmark:fn/'), `moveBookmarkToCursor 應排除函式書籤：${m.when}`);
+    const moveInline = moveItems.find((m) => m.group?.startsWith('inline'));
+    const moveCtx = moveItems.find((m) => !m.group?.startsWith('inline'));
+    const moveInlineRe = viewItemRegex(moveInline?.when);
+    const moveCtxRe = viewItemRegex(moveCtx?.when);
+    assert.strictEqual(moveInlineRe.test('fbBookmark:lost'), true);
+    assert.strictEqual(moveInlineRe.test('fbBookmark:note:lost:branchOnly'), true);
+    assert.strictEqual(moveInlineRe.test('fbBookmark'), false);
+    assert.strictEqual(moveInlineRe.test('fbBookmark:fn:ok'), false);
+    assert.strictEqual(moveInlineRe.test('fbBookmark:fn:lost'), false);
+    assert.strictEqual(moveCtxRe.test('fbBookmark'), true);
+    assert.strictEqual(moveCtxRe.test('fbBookmark:note:lost:branchOnly:foreign'), true);
+    assert.strictEqual(moveCtxRe.test('fbBookmark:fn:ok'), false);
+    assert.strictEqual(moveCtxRe.test('fbBookmark:fn:note:missing'), false);
+    for (const nonBookmark of ['fbSearch', 'fbSearch:active', 'fbBmFile', 'fbBmTag', 'fbBmSource:foreign', 'fbSymbol:nofav', 'fbSymbol:fav', 'fbSection.bookmarks']) {
+      assert.strictEqual(moveInlineRe.test(nonBookmark), false, `inline move 不應出現在 ${nonBookmark}`);
+      assert.strictEqual(moveCtxRe.test(nonBookmark), false, `右鍵 move 不應出現在 ${nonBookmark}`);
     }
+
+    // setBookmarkBranchOnly 只出現在非函式且尚未限定分支的行號書籤
+    const branchOnlyItem = itemMenu.find((m) => m.command === 'functionBookmarks.setBookmarkBranchOnly');
+    const branchOnlyRe = viewItemRegex(branchOnlyItem?.when);
+    assert.strictEqual(branchOnlyRe.test('fbBookmark'), true);
+    assert.strictEqual(branchOnlyRe.test('fbBookmark:note:lost:foreign'), true);
+    assert.strictEqual(branchOnlyRe.test('fbBookmark:branchOnly'), false);
+    assert.strictEqual(branchOnlyRe.test('fbBookmark:note:lost:branchOnly:foreign'), false);
+    assert.strictEqual(branchOnlyRe.test('fbBookmark:fn:ok'), false);
+    assert.strictEqual(branchOnlyRe.test('fbSymbol:nofav'), false);
+    assert.strictEqual(branchOnlyRe.test('fbSearch'), false);
 
     // 側邊欄預覽備註不重複比對書籤
     const previewRules = itemMenu.filter((m) => m.command === 'functionBookmarks.previewNote');
@@ -68,11 +124,44 @@ describe('package.json、package.nls 與 l10n 一致性', () => {
     assert.strictEqual(forSymbol.length, 1);
     assert.ok(forSymbol[0].when?.includes('^fbSymbol'), `不應重複比對 fbBookmark：${forSymbol[0].when}`);
 
-    // 檔案列 inline 排序按鈕與匯出／清除適用兩種 contextValue
-    const toTitle = itemMenu.find((m) => m.command === 'functionBookmarks.sortFileBookmarksByTitle' && m.group?.startsWith('inline'));
-    const toLine = itemMenu.find((m) => m.command === 'functionBookmarks.sortFileBookmarksByLine' && m.group?.startsWith('inline'));
-    assert.strictEqual(toTitle?.when, 'view == functionBookmarks.tree && viewItem == fbBmFile');
-    assert.strictEqual(toLine?.when, 'view == functionBookmarks.tree && viewItem == fbBmFile:byTitle');
+    // 檔案列 inline 排序按鈕（預設→標題、標題／建立時間→行號）、右鍵 1_sort（顯示沒在用的兩種）與匯出／清除
+    const matchViewItem = (when: string | undefined, value: string): boolean => {
+      assert.ok(when, '缺少 when 條件');
+      const eq = when.match(/viewItem\s*==\s*([^\s&|]+)/);
+      if (eq) {
+        return value === eq[1];
+      }
+      return viewItemRegex(when).test(value);
+    };
+    const toTitleInline = itemMenu.find((m) => m.command === 'functionBookmarks.sortFileBookmarksByTitle' && m.group?.startsWith('inline'));
+    const toLineInline = itemMenu.find((m) => m.command === 'functionBookmarks.sortFileBookmarksByLine' && m.group?.startsWith('inline'));
+    assert.strictEqual(toTitleInline?.when, 'view == functionBookmarks.tree && viewItem == fbBmFile');
+    assert.strictEqual(matchViewItem(toLineInline?.when, 'fbBmFile'), false);
+    assert.strictEqual(matchViewItem(toLineInline?.when, 'fbBmFile:byTitle'), true);
+    assert.strictEqual(matchViewItem(toLineInline?.when, 'fbBmFile:byCreated'), true);
+    assert.strictEqual(matchViewItem(toLineInline?.when, 'fbBookmark'), false);
+
+    const sortMenu = itemMenu.filter((m) => m.group?.startsWith('1_sort'));
+    const visibleSortCommands = (viewItem: string) =>
+      sortMenu
+        .filter((m) => matchViewItem(m.when, viewItem))
+        .map((m) => m.command)
+        .sort();
+    assert.deepStrictEqual(visibleSortCommands('fbBmFile'), [
+      'functionBookmarks.sortFileBookmarksByCreated',
+      'functionBookmarks.sortFileBookmarksByTitle',
+    ]);
+    assert.deepStrictEqual(visibleSortCommands('fbBmFile:byTitle'), [
+      'functionBookmarks.sortFileBookmarksByCreated',
+      'functionBookmarks.sortFileBookmarksByLine',
+    ]);
+    assert.deepStrictEqual(visibleSortCommands('fbBmFile:byCreated'), [
+      'functionBookmarks.sortFileBookmarksByLine',
+      'functionBookmarks.sortFileBookmarksByTitle',
+    ]);
+    for (const nonFile of ['fbSearch', 'fbBmTag', 'fbBmSource:foreign', 'fbBookmark', 'fbFile', 'fbSymbol:fav']) {
+      assert.deepStrictEqual(visibleSortCommands(nonFile), [], `1_sort 不應出現在 ${nonFile}`);
+    }
     assert.ok(itemMenu.find((m) => m.command === 'functionBookmarks.exportFileBookmarks')?.when?.includes('/^fbBmFile/'));
 
     // 標題列（…）的指令會收到選取中的樹節點，無法分辨是從標題列還是項目右鍵執行：同一個指令不能兩邊都放
@@ -128,6 +217,7 @@ describe('package.json、package.nls 與 l10n 一致性', () => {
     for (const hideCmd of [
       'functionBookmarks.renameDisplayName',
       'functionBookmarks.sortFileBookmarksByTitle',
+      'functionBookmarks.sortFileBookmarksByCreated',
       'functionBookmarks.sortFileBookmarksByLine',
       'functionBookmarks.searchClearAndClose',
       'functionBookmarks.searchToList',

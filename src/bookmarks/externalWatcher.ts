@@ -99,9 +99,15 @@ export class ExternalChangeWatcher implements vscode.Disposable {
       files.onDidChange(onFs),
       files.onDidCreate((uri) => {
         this.renames.noteCreated(uri);
-        onFs(uri);
+        if (this.has(uri)) {
+          this.schedule([uri]);
+        }
       }),
-      files.onDidDelete(onFs),
+      files.onDidDelete((uri) => {
+        if (this.has(uri)) {
+          this.schedule([uri]);
+        }
+      }),
       vscode.workspace.onDidChangeTextDocument((e) => this.onChange(e)),
       vscode.workspace.onDidOpenTextDocument((doc) => this.has(doc.uri) && this.schedule([doc.uri])),
       vscode.workspace.onDidCloseTextDocument((doc) => this.onClose(doc)),
@@ -305,13 +311,28 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     return this.running;
   }
 
-  private async readDisk(uri: vscode.Uri): Promise<string | undefined> {
+  private async readDisk(uri: vscode.Uri): Promise<{ status: 'ok'; text: string } | { status: 'notFound' } | { status: 'error' }> {
     try {
-      return uri.scheme === 'file'
-        ? await fs.readFile(uri.fsPath, 'utf8')
-        : new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
-    } catch {
-      return undefined;
+      const text =
+        uri.scheme === 'file'
+          ? await fs.readFile(uri.fsPath, 'utf8')
+          : new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+      return { status: 'ok', text };
+    } catch (err) {
+      return isNotFound(err) ? { status: 'notFound' } : { status: 'error' };
+    }
+  }
+
+  private async existsOnDisk(uri: vscode.Uri): Promise<'exists' | 'notFound' | 'error'> {
+    try {
+      if (uri.scheme === 'file') {
+        await fs.stat(uri.fsPath);
+      } else {
+        await vscode.workspace.fs.stat(uri);
+      }
+      return 'exists';
+    } catch (err) {
+      return isNotFound(err) ? 'notFound' : 'error';
     }
   }
 
@@ -374,21 +395,39 @@ export class ExternalChangeWatcher implements vscode.Disposable {
       }
       text = doc.getText();
       languageId = doc.languageId;
-      if (!doc.isDirty) {
-        // 磁碟已經改了、編輯器還沒重新載入：等它載入（換算以載入後的內容為準）；等太久就直接用磁碟內容
-        const disk = await this.readDisk(uri);
-        if (disk !== undefined && disk !== text) {
-          const waits = this.reloadWaits.get(key) ?? 0;
-          if (waits < 4) {
-            this.reloadWaits.set(key, waits + 1);
-            this.retryLater(uri, false);
+      if (!doc.isUntitled) {
+        if (!doc.isDirty) {
+          // 磁碟已經改了、編輯器還沒重新載入：等它載入（換算以載入後的內容為準）；等太久就直接用磁碟內容
+          // 檔案在磁碟上已不存在（例如分頁開著卻切到沒有此檔的分支）：比照關閉分頁走 missing() 流程
+          const disk = await this.readDisk(uri);
+          if (disk.status === 'notFound') {
+            this.reloadWaits.delete(key);
+            this.pendingReload.delete(key);
+            this.pendingEditorChanges.delete(key);
+            await this.missing(uri, branchCache);
             return;
           }
-          text = disk;
-          fromDisk = true;
+          if (disk.status === 'ok' && disk.text !== text) {
+            const waits = this.reloadWaits.get(key) ?? 0;
+            if (waits < 4) {
+              this.reloadWaits.set(key, waits + 1);
+              this.retryLater(uri, false);
+              return;
+            }
+            text = disk.text;
+            fromDisk = true;
+          }
+        } else if ((await this.existsOnDisk(uri)) === 'notFound') {
+          // 分頁開著時磁碟檔案被刪除（如 git checkout 切到沒有此檔的分支），VS Code 會把分頁標成髒的孤立文件；仍走 missing()
+          this.reloadWaits.delete(key);
+          this.pendingReload.delete(key);
+          this.pendingEditorChanges.delete(key);
+          await this.missing(uri, branchCache);
+          return;
         }
       }
       this.reloadWaits.delete(key);
+      this.renameWaits.delete(key);
     } else {
       try {
         text =
@@ -402,6 +441,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
         }
         throw err;
       }
+      this.renameWaits.delete(key);
       languageId = languageForPath(uri.path);
     }
     await this.apply(uri, text, languageId, fromDisk, branchCache, deferSave);
@@ -706,7 +746,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
       // 交給 apply 換算（含切換分支的處理）；同時暫存編輯內容，確認是編輯器內一般打字時重播平移，避免改寫行內文字被誤判成刪行
       this.pendingReload.add(key);
       const entry = this.pendingEditorChanges.get(key) ?? { batches: [], useDiff: false };
-      entry.batches.push({ changes, lineCount: doc.lineCount });
+      entry.batches.push({ changes, lineCount: doc.lineCount, undo: e.reason === vscode.TextDocumentChangeReason.Undo });
       if (isWholeDocumentReplace(changes, doc.lineCount) || isBlockReplace(changes)) {
         entry.useDiff = true;
       }

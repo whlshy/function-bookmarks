@@ -61,6 +61,7 @@ interface Candidate {
   tags: string[];
   imported: boolean;
   number?: number;
+  createdAt?: string;
   line_?: LineBookmark;
   symbol?: { path: string; kind: string; alias?: string; note?: string; startLine?: number; endLine?: number };
 }
@@ -89,7 +90,17 @@ function candidates(deps: ShareDeps, folder: vscode.WorkspaceFolder): Candidate[
       continue;
     }
     const b = e.bookmark;
-    out.push({ id: b.id, file: b.file, line: b.line, title: bookmarkTitle(b), tags: b.tags ?? [], imported: !!b.source, number: b.number, line_: b });
+    out.push({
+      id: b.id,
+      file: b.file,
+      line: b.line,
+      title: bookmarkTitle(b),
+      tags: b.tags ?? [],
+      imported: !!b.source,
+      number: b.number,
+      createdAt: b.createdAt,
+      line_: b,
+    });
   }
   for (const f of deps.favorites.all) {
     if (f.folder.uri.toString() !== folder.uri.toString()) {
@@ -104,6 +115,7 @@ function candidates(deps: ShareDeps, folder: vscode.WorkspaceFolder): Candidate[
       tags: m.tags ?? [],
       imported: false,
       number: m.number,
+      createdAt: m.addedAt,
       symbol: {
         path: m.path,
         kind: m.kind,
@@ -321,6 +333,9 @@ async function buildJson(
     }
     if (c.line_?.source) {
       e.author = c.line_.source.author;
+    }
+    if (c.createdAt) {
+      e.createdAt = c.createdAt;
     }
     if (includeCode) {
       if (lines && lineOk(c) && c.line < lines.length) {
