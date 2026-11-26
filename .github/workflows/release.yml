@@ -6,9 +6,7 @@ name: Release
 # 發布用 Trusted Publishing（OIDC，不用權杖）：
 #   Marketplace：publisher 管理頁 → Trusted Publishing，Open VSX：Settings → Trusted Publishers，
 #   兩邊都登記 whlshy／function-bookmarks／release.yml（environment 留空）。
-#   vsce 4、ovsx 1.4 起支援，兩者都需要 Node 22。
-# 退路：GitHub Secrets 裡還有 VSCE_PAT／OVSX_PAT 時，免權杖發布失敗會改用權杖再試一次。
-#   第一次免權杖發布成功後，就可以刪掉這兩個 Secret。
+#   vsce 4、ovsx 1.4 起支援，兩者都需要 Node 22。不需要任何 GitHub Secrets。
 
 on:
   push:
@@ -47,28 +45,6 @@ jobs:
           prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
           generate_release_notes: true
       - name: 發布到 VS Code Marketplace
-        env:
-          FALLBACK_PAT: ${{ secrets.VSCE_PAT }}
-        run: |
-          vsix="function-bookmarks-${GITHUB_REF_NAME#v}.vsix"
-          if npx --yes @vscode/vsce@4.1.1 publish --oidc --no-dependencies --packagePath "$vsix"; then
-            exit 0
-          fi
-          if [ -z "$FALLBACK_PAT" ]; then
-            echo "::error::Trusted Publishing 失敗，也沒有 VSCE_PAT 可以退回"; exit 1
-          fi
-          echo "::warning::Trusted Publishing 失敗，改用 VSCE_PAT 發布"
-          npx vsce publish --no-dependencies --packagePath "$vsix" -p "$FALLBACK_PAT"
+        run: npx --yes @vscode/vsce@4.1.1 publish --oidc --no-dependencies --packagePath function-bookmarks-${GITHUB_REF_NAME#v}.vsix
       - name: 發布到 Open VSX（Cursor 從這裡安裝）
-        env:
-          FALLBACK_PAT: ${{ secrets.OVSX_PAT }}
-        run: |
-          vsix="function-bookmarks-${GITHUB_REF_NAME#v}.vsix"
-          if npx --yes ovsx@1.4.0 publish "$vsix" --trusted-publishing; then
-            exit 0
-          fi
-          if [ -z "$FALLBACK_PAT" ]; then
-            echo "::error::Trusted Publishing 失敗，也沒有 OVSX_PAT 可以退回"; exit 1
-          fi
-          echo "::warning::Trusted Publishing 失敗，改用 OVSX_PAT 發布"
-          npx --yes ovsx@1.4.0 publish "$vsix" -p "$FALLBACK_PAT"
+        run: npx --yes ovsx@1.4.0 publish function-bookmarks-${GITHUB_REF_NAME#v}.vsix --trusted-publishing
