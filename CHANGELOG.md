@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.1 (2026-11-26) — side bar menu fix and more project files
+
+- Fix: commands in the bookmarks view's `…` menu no longer act on the item selected in the side bar. With a bookmark or file selected, *Import Bookmarks…* failed with *This is not valid JSON*, *Choose Bookmark Storage for This Workspace…* could save an invalid choice, *Export Bookmarks…* exported only the selected file, and *Set Tag Color…* skipped choosing the tag. Right-clicking a file row to export that file, and the color button on a tag row, work as before
+- *Whole Project* also lists Python stub files (`.pyi`) and Django / Jinja templates (`.djhtml`, `.jinja`, `.jinja2`, `.j2`). If you set `functionBookmarks.project.include` yourself, your setting is kept
+- README: version, CI and license badges, and a Ko-fi link for anyone who wants to support the extension
+- Internal: the largest source files are split into smaller modules, with more unit tests
+
 ## 0.9.0 (2026-11-26) — new shortcuts, storage per workspace, importing a bookmarks file and many fixes
 
 ### Keyboard shortcuts have changed

@@ -806,7 +806,11 @@ describe('書籤操作、函式書籤、數字導覽、顏色與快捷鍵', () =
       const todo = tags.find((t) => t.key === 'todo')!;
       assert.strictEqual(api.provider.getTreeItem(todo).contextValue, 'fbBmTag');
       assert.strictEqual(iconColor(todo), 'charts.green');
-      await vscode.commands.executeCommand('functionBookmarks.setTagColor', todo, null);
+      // 標題列（…）收到選取中的標籤列：不直接改顏色，先問標籤
+      await runAndCancelQuickOpen(() => vscode.commands.executeCommand('functionBookmarks.setTagColor', todo, [todo]), '標題列設定標籤顏色取消');
+      assert.strictEqual(api.store.tagColors().get('todo'), 'green');
+      // 標籤列的行內按鈕與右鍵：直接設定該標籤
+      await vscode.commands.executeCommand('functionBookmarks.setColorOfTag', todo, null);
       await vscode.commands.executeCommand('functionBookmarks.groupBookmarksByFile');
       await vscode.commands.executeCommand('functionBookmarks.setBookmarkColor', second, null);
       await api.gutter.update();

@@ -90,6 +90,6 @@ const rules: DetectionRule[] = [
 export const django: LanguageDef = {
   syntax: { html: 'template', 'django-html': 'template', 'jinja-html': 'template', jinja: 'template' },
   extensions: { '.html': 'html', '.htm': 'html', '.djhtml': 'django-html', '.jinja': 'jinja-html', '.jinja2': 'jinja-html', '.j2': 'jinja-html' },
-  projectExtensions: ['html', 'htm'],
+  projectExtensions: ['html', 'htm', 'djhtml', 'jinja', 'jinja2', 'j2'],
   rules,
 };

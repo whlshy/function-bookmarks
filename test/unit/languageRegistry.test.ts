@@ -11,6 +11,10 @@ describe('語言清單（detection/languages）', () => {
       .map((c) => c.properties['functionBookmarks.project.include'])
       .find(Boolean);
     assert.strictEqual(props?.default, `**/*.{${PROJECT_EXTENSIONS.join(',')}}`);
+    // Python 型別檔與 Django／Jinja 模板也列在「整個專案」
+    for (const ext of ['pyi', 'djhtml', 'jinja', 'jinja2', 'j2']) {
+      assert.ok(PROJECT_EXTENSIONS.includes(ext), ext);
+    }
   });
 
   it('每個語言：副檔名對到的語言有遮罩設定或規則；「整個專案」的副檔名都認得', () => {

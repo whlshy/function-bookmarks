@@ -73,7 +73,12 @@ describe('package.json、package.nls 與 l10n 一致性', () => {
     const toLine = itemMenu.find((m) => m.command === 'functionBookmarks.sortFileBookmarksByLine' && m.group?.startsWith('inline'));
     assert.strictEqual(toTitle?.when, 'view == functionBookmarks.tree && viewItem == fbBmFile');
     assert.strictEqual(toLine?.when, 'view == functionBookmarks.tree && viewItem == fbBmFile:byTitle');
-    assert.ok(itemMenu.find((m) => m.command === 'functionBookmarks.exportBookmarks')?.when?.includes('/^fbBmFile/'));
+    assert.ok(itemMenu.find((m) => m.command === 'functionBookmarks.exportFileBookmarks')?.when?.includes('/^fbBmFile/'));
+
+    // 標題列（…）的指令會收到選取中的樹節點，無法分辨是從標題列還是項目右鍵執行：同一個指令不能兩邊都放
+    const titleCommands = new Set((pkg.contributes.menus['view/title'] as { command: string }[]).map((m) => m.command));
+    const both = [...new Set(itemMenu.map((m) => m.command))].filter((c) => titleCommands.has(c));
+    assert.deepStrictEqual(both, [], `同時在標題列與項目右鍵：${both.join(', ')}`);
     assert.ok(itemMenu.find((m) => m.command === 'functionBookmarks.clearBookmarksInFile')?.when?.includes('/^fbBmFile/'));
 
     // view/title 的 2_bookmarks 分組中，非互斥項目不共用相同 @order

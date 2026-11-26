@@ -33,6 +33,6 @@ const rules: DetectionRule[] = [
 export const python: LanguageDef = {
   syntax: { python: 'python' },
   extensions: { '.py': 'python', '.pyi': 'python' },
-  projectExtensions: ['py'],
+  projectExtensions: ['py', 'pyi'],
   rules,
 };

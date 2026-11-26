@@ -8,14 +8,9 @@ import { BOOKMARKS_FILE } from './gitExclude';
 import { ensureBookmarksFileExcluded } from './gitExcludeFs';
 import { LineBookmark, visibleOnBranch } from '../bookmarks/model';
 import { emptyStore, favorites, findMark, hasStoreData, MarkKey, mergeStoreData, parseStore, renamePath, serializeStore, StoreData, SymbolMark } from './marks';
-import {
-  clearHandledOppositeSources,
-  HandledOppositeSources,
-  hashStoreData,
-  isOppositeSourceHandled,
-  markOppositeSourcesHandled,
-  oppositeStorageMode,
-} from './storageMode';
+import { HandledOppositeRecords, hashesOfDataMap, hashStoreData, oppositeStorageMode } from './storageMode';
+import { SnapshotProtection } from './snapshotProtection';
+import { collectNumbered, collectSources, collectTagColors, collectTags, FolderData } from './storeQueries';
 import { askCopyFromOpposite, askMigration, pickStorageChoice, showStorageUnchanged, StoragePickItem, storagePickItems } from './storagePrompts';
 
 export type { StoragePickItem };
@@ -56,7 +51,6 @@ export interface StoreChange {
 const ALL_CHANGED: StoreChange = { symbolsChanged: true };
 
 const STATE_KEY = 'marks:';
-const HANDLED_OPPOSITE_KEY = 'handledOppositeStorage';
 /** 檔案監看器略過「自己剛寫入的同一份最新內容」的時間視窗（毫秒）；逾時或改為不同版本時一律視為外部變更。 */
 const RECENT_WRITE_TTL_MS = 5000;
 
@@ -84,13 +78,12 @@ export class MarkStore implements vscode.Disposable {
   private watchers: vscode.Disposable[] = [];
   private readonly changed = new vscode.EventEmitter<StoreChange>();
   readonly onDidChange = this.changed.event;
-  private readonly protectionChanged = new vscode.EventEmitter<void>();
-  /** 快照保護集合變動（例如啟動檢查結束或使用者點了「保持空白」）：讓外部監看補清理不再需要的快照。 */
-  readonly onDidChangeSnapshotProtection = this.protectionChanged.event;
-  /** 正等待使用者決定是否搬移書籤的檔案（uriKey）：這段期間不可清除它們的分支快照。 */
-  private protectedSnapshotFiles = new Set<string>();
-  /** 啟動時的另一端存放檢查尚未完成前，先保護空白資料夾的快照不被提前清掉。 */
-  private startupCheckPending = false;
+  /** 切換存放位置或等待搬移決定期間，不可清除的分支快照（啟動檢查完成前也保護空白資料夾）。 */
+  private readonly protection = new SnapshotProtection((folder) => this.hasData(folder));
+  /** 快照保護範圍縮小（例如啟動檢查結束或使用者點了「保持空白」）：讓外部監看補清理不再需要的快照。 */
+  readonly onDidChangeSnapshotProtection = this.protection.onDidChange;
+  /** 已處理過的另一端來源資料（雜湊）。 */
+  private readonly handledOpposite: HandledOppositeRecords;
   private oppositeCheckInFlight: Promise<OppositeStorageFound | undefined> | undefined;
   private disposables: vscode.Disposable[] = [];
   private mode: StorageMode;
@@ -103,6 +96,7 @@ export class MarkStore implements vscode.Disposable {
   suppressStoragePrompt = false;
 
   constructor(private readonly context: vscode.ExtensionContext) {
+    this.handledOpposite = new HandledOppositeRecords(context.workspaceState);
     this.mode = this.effectiveStorageMode();
   }
 
@@ -118,14 +112,7 @@ export class MarkStore implements vscode.Disposable {
 
   /** 這個檔案（uriKey）是否正在等待搬移決定，暫時不可清除其分支快照。 */
   isSnapshotProtected(fileUriKey: string): boolean {
-    if (this.protectedSnapshotFiles.has(fileUriKey)) {
-      return true;
-    }
-    if (!this.startupCheckPending) {
-      return false;
-    }
-    const folder = this.folderOfFileKey(fileUriKey);
-    return !folder || !this.hasData(folder);
+    return this.protection.isProtected(fileUriKey);
   }
 
   /** 等目前進行中的另一端存放背景檢查完成（供外部監看與測試同步用）。 */
@@ -172,7 +159,7 @@ export class MarkStore implements vscode.Disposable {
     }
     const fkey = uriKey(folder.uri);
     await this.markOppositeHandled(mode, { [fkey]: otherHash });
-    this.releaseProtectedSnapshots(this.collectBookmarkFileKeys(new Map([[fkey, other!]])));
+    this.protection.release(this.collectBookmarkFileKeys(new Map([[fkey, other!]])));
     if (this.lastOppositeCheck?.to === mode && this.lastOppositeCheck.data.has(fkey)) {
       this.lastOppositeCheck.data.delete(fkey);
       if (this.lastOppositeCheck.data.size === 0) {
@@ -186,7 +173,7 @@ export class MarkStore implements vscode.Disposable {
     this.mode = this.effectiveStorageMode();
     await this.reloadAll();
     // 若有空白資料夾，啟動背景檢查另一端存放完成前先保護快照（避免 activate 期間的 onDidChange 提前清光）
-    this.startupCheckPending = (vscode.workspace.workspaceFolders ?? []).some((f) => !this.hasData(f) && !this.isBroken(f));
+    this.protection.beginStartupCheck((vscode.workspace.workspaceFolders ?? []).some((f) => !this.hasData(f) && !this.isBroken(f)));
     this.disposables.push(
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         void this.flush().then(() => this.reloadAll()).then(() => this.checkOppositeStorage());
@@ -240,7 +227,7 @@ export class MarkStore implements vscode.Disposable {
     const prevData = new Map(this.data);
     const sourceKeys = [...prevData.entries()].filter(([, d]) => hasStoreData(d)).map(([k]) => k);
     // 在 reloadAll 觸發外部監看 seed() 前先保護來源端檔案的分支快照，避免等待搬移決定時被清空
-    this.setProtectedSnapshots(sourceKeys.length ? this.collectBookmarkFileKeys(prevData) : new Set());
+    this.protection.set(sourceKeys.length ? this.collectBookmarkFileKeys(prevData) : new Set());
     this.mode = nextMode;
     await this.reloadAll();
     // 主動切到新模式時，清掉該模式先前已處理過的紀錄，讓這次切換可以正常提示
@@ -281,7 +268,7 @@ export class MarkStore implements vscode.Disposable {
       });
     }
     await this.markOppositeHandled(this.mode, handledHashes);
-    this.releaseProtectedSnapshots(releaseFiles);
+    this.protection.release(releaseFiles);
   }
 
   /** 檢查目前存放端空白、但另一端存放位置有這個資料夾書籤的情況（啟動背景呼叫，不阻擋啟動）。 */
@@ -297,7 +284,7 @@ export class MarkStore implements vscode.Disposable {
   }
 
   private async runCheckOppositeStorage(): Promise<OppositeStorageFound | undefined> {
-    const wasPending = this.startupCheckPending;
+    const wasPending = this.protection.startupPending;
     try {
       const currentMode = this.effectiveStorageMode();
       const opposite = oppositeStorageMode(currentMode);
@@ -328,7 +315,7 @@ export class MarkStore implements vscode.Disposable {
         this.lastOppositeCheck = undefined;
         return undefined;
       }
-      this.addProtectedSnapshots(this.collectBookmarkFileKeys(foundData));
+      this.protection.add(this.collectBookmarkFileKeys(foundData));
       const found: OppositeStorageFound = { from: opposite, to: currentMode, data: foundData };
       this.lastOppositeCheck = found;
       if (!this.suppressStoragePrompt && !this.oppositePromptActive) {
@@ -336,10 +323,7 @@ export class MarkStore implements vscode.Disposable {
       }
       return found;
     } finally {
-      if (wasPending || this.startupCheckPending) {
-        this.startupCheckPending = false;
-        this.protectionChanged.fire();
-      }
+      this.protection.finishStartupCheck(wasPending);
     }
   }
 
@@ -351,42 +335,22 @@ export class MarkStore implements vscode.Disposable {
     if (choice === 'copy') {
       await this.migrateStorageData(found.data, 'copy');
     } else {
-      await this.markOppositeHandled(found.to, this.hashesOfDataMap(found.data));
-      this.releaseProtectedSnapshots(this.collectBookmarkFileKeys(found.data));
+      await this.markOppositeHandled(found.to, hashesOfDataMap(found.data));
+      this.protection.release(this.collectBookmarkFileKeys(found.data));
     }
     this.lastOppositeCheck = undefined;
   }
 
   isOppositeSourceHandled(folder: vscode.WorkspaceFolder, mode: StorageMode, sourceHash: string): boolean {
-    const state = this.context.workspaceState.get<HandledOppositeSources>(HANDLED_OPPOSITE_KEY);
-    return isOppositeSourceHandled(state, mode, uriKey(folder.uri), sourceHash);
+    return this.handledOpposite.isHandled(uriKey(folder.uri), mode, sourceHash);
   }
 
-  async markOppositeHandled(mode: StorageMode, hashes: Record<string, string>): Promise<void> {
-    if (!Object.keys(hashes).length) {
-      return;
-    }
-    const cur = this.context.workspaceState.get<HandledOppositeSources>(HANDLED_OPPOSITE_KEY);
-    await this.context.workspaceState.update(HANDLED_OPPOSITE_KEY, markOppositeSourcesHandled(cur, mode, hashes));
+  markOppositeHandled(mode: StorageMode, hashes: Record<string, string>): Promise<void> {
+    return this.handledOpposite.mark(mode, hashes);
   }
 
-  async clearHandledOpposite(mode: StorageMode, folderKeys?: string[]): Promise<void> {
-    const cur = this.context.workspaceState.get<HandledOppositeSources>(HANDLED_OPPOSITE_KEY);
-    const next = clearHandledOppositeSources(cur, mode, folderKeys);
-    if (JSON.stringify(next) === JSON.stringify(cur ?? {})) {
-      return;
-    }
-    await this.context.workspaceState.update(HANDLED_OPPOSITE_KEY, next);
-  }
-
-  private hashesOfDataMap(dataMap: Map<string, StoreData>): Record<string, string> {
-    const out: Record<string, string> = {};
-    for (const [fkey, data] of dataMap) {
-      if (hasStoreData(data)) {
-        out[fkey] = hashStoreData(data);
-      }
-    }
-    return out;
+  clearHandledOpposite(mode: StorageMode, folderKeys?: string[]): Promise<void> {
+    return this.handledOpposite.clear(mode, folderKeys);
   }
 
   private collectBookmarkFileKeys(dataMap: Map<string, StoreData>): Set<string> {
@@ -402,40 +366,6 @@ export class MarkStore implements vscode.Disposable {
       }
     }
     return out;
-  }
-
-  private folderOfFileKey(fileUriKey: string): vscode.WorkspaceFolder | undefined {
-    try {
-      return vscode.workspace.getWorkspaceFolder(vscode.Uri.parse(fileUriKey));
-    } catch {
-      return undefined;
-    }
-  }
-
-  private setProtectedSnapshots(next: Set<string>): void {
-    const shrank = [...this.protectedSnapshotFiles].some((k) => !next.has(k));
-    this.protectedSnapshotFiles = next;
-    if (shrank) {
-      this.protectionChanged.fire();
-    }
-  }
-
-  private addProtectedSnapshots(keys: Set<string>): void {
-    for (const k of keys) {
-      this.protectedSnapshotFiles.add(k);
-    }
-  }
-
-  private releaseProtectedSnapshots(keys: Set<string>): void {
-    let removed = false;
-    for (const k of keys) {
-      if (this.protectedSnapshotFiles.delete(k)) {
-        removed = true;
-      }
-    }
-    if (removed) {
-      this.protectionChanged.fire();
-    }
   }
 
   private async promptOppositeStorage(found: OppositeStorageFound): Promise<void> {
@@ -464,8 +394,8 @@ export class MarkStore implements vscode.Disposable {
     }
     if (choice === 'keep') {
       // 明確選擇保持空白／保留現有資料：記住來源雜湊並解除快照保護，避免之後清光書籤時把舊來源復活
-      await this.markOppositeHandled(to, this.hashesOfDataMap(prevData));
-      this.releaseProtectedSnapshots(this.collectBookmarkFileKeys(prevData));
+      await this.markOppositeHandled(to, hashesOfDataMap(prevData));
+      this.protection.release(this.collectBookmarkFileKeys(prevData));
       return;
     }
     await this.migrateStorageData(prevData, choice);
@@ -474,7 +404,7 @@ export class MarkStore implements vscode.Disposable {
   dispose(): void {
     // 立刻清掉所有延遲存檔 timer（包含已移出工作區的資料夾），並觸發寫入
     void this.flush().catch(() => undefined);
-    [...this.watchers, ...this.disposables, this.changed, this.protectionChanged].forEach((d) => d.dispose());
+    [...this.watchers, ...this.disposables, this.changed, this.protection].forEach((d) => d.dispose());
   }
 
   locate(uri: vscode.Uri): Located | undefined {
@@ -574,63 +504,27 @@ export class MarkStore implements vscode.Disposable {
 
   /** 所有出現過的匯入來源（不含自己），依名稱排序。 */
   sources(): string[] {
-    const out = new Set<string>();
-    for (const d of this.data.values()) {
-      for (const b of d.bookmarks ?? []) {
-        if (b.source) {
-          out.add(b.source.author);
-        }
-      }
-    }
-    return [...out].sort((a, b) => a.localeCompare(b));
+    return collectSources(this.data.values());
   }
 
   /** 所有書籤（行號書籤與函式書籤）使用過的標籤，去重並排序。 */
   allTags(): string[] {
-    const out = new Set<string>();
-    for (const e of this.allBookmarks()) {
-      for (const t of e.bookmark.tags ?? []) {
-        out.add(t);
-      }
-    }
-    for (const f of this.allFavorites()) {
-      for (const t of f.mark.tags ?? []) {
-        out.add(t);
-      }
-    }
-    return [...out].sort();
+    return collectTags(this.allBookmarks(), this.allFavorites());
   }
 
   /** 所有資料夾的標籤顏色（同一個標籤在不同資料夾設了不同顏色時，以第一個資料夾為準）。 */
   tagColors(): Map<string, string> {
-    const out = new Map<string, string>();
-    for (const folder of vscode.workspace.workspaceFolders ?? []) {
-      for (const [tag, color] of Object.entries(this.data.get(uriKey(folder.uri))?.tagColors ?? {})) {
-        if (!out.has(tag)) {
-          out.set(tag, color);
-        }
-      }
-    }
-    return out;
+    return collectTagColors(this.folderData());
   }
 
   /** 已經用掉的號碼：號碼 → 書籤（行號書籤或函式書籤）。包含目前隱藏的書籤（號碼仍被佔用）。 */
   numbered(): Map<number, NumberedEntry> {
-    const out = new Map<number, NumberedEntry>();
-    for (const folder of vscode.workspace.workspaceFolders ?? []) {
-      const d = this.data.get(uriKey(folder.uri));
-      for (const bookmark of d?.bookmarks ?? []) {
-        if (bookmark.number && !out.has(bookmark.number)) {
-          out.set(bookmark.number, { kind: 'line', folder, uri: this.uriOf(folder, bookmark.file), bookmark });
-        }
-      }
-      for (const mark of d?.symbols ?? []) {
-        if (mark.favorite && mark.number && !out.has(mark.number)) {
-          out.set(mark.number, { kind: 'symbol', folder, uri: this.uriOf(folder, mark.file), mark });
-        }
-      }
-    }
-    return out;
+    return collectNumbered(this.folderData(), (folder, rel) => this.uriOf(folder, rel));
+  }
+
+  /** 依工作區資料夾順序列出各資料夾的資料。 */
+  private folderData(): FolderData[] {
+    return (vscode.workspace.workspaceFolders ?? []).map((folder) => ({ folder, data: this.data.get(uriKey(folder.uri)) }));
   }
 
   /** 通知畫面重新整理（例如切換分支後，顯示的書籤不同了）。 */

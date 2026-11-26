@@ -2,7 +2,9 @@
 
 **替函式和程式碼行加上自己命名的書籤，`git pull` 之後也不會跑掉。** VS Code 與 Cursor 都能使用。
 
-[English](README.md)
+[![VS Marketplace](https://vsmarketplacebadges.dev/version-short/whlshy.function-bookmarks.svg?label=VS%20Marketplace&colorB=007ACC)](https://marketplace.visualstudio.com/items?itemName=whlshy.function-bookmarks) [![Open VSX](https://img.shields.io/open-vsx/v/whlshy/function-bookmarks?label=Open%20VSX&color=a60ee5)](https://open-vsx.org/extension/whlshy/function-bookmarks) [![CI](https://img.shields.io/github/actions/workflow/status/whlshy/function-bookmarks/ci.yml?branch=main&label=CI)](https://github.com/whlshy/function-bookmarks/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Ko-fi](https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/whlshy)
+
+[English](README.md) · 繁體中文 · [更新紀錄](CHANGELOG.md)
 
 > 預覽版（0.x）。歡迎到 [問題回報](https://github.com/whlshy/function-bookmarks/issues) 提供意見或回報問題。
 

@@ -61,7 +61,7 @@ export class BookmarkCommands {
     private readonly favorites: FavoritesModel,
   ) {}
 
-  /** 名稱剛好在這一行的符號（函式、類別、block…），有的話 Ctrl+Alt+B 建立函式書籤。 */
+  /** 名稱剛好在這一行的符號（函式、類別、block…），有的話 Alt+Shift+B B 建立函式書籤。 */
   async symbolAtNameLine(doc: vscode.TextDocument, line: number): Promise<DetectedSymbol | undefined> {
     let hit: DetectedSymbol | undefined;
     const walk = (list: DetectedSymbol[]) => {
@@ -270,7 +270,7 @@ export class BookmarkCommands {
    * 確保指定行有可編輯的書籤（供行號右鍵「編輯備註」使用）：
    * 1. 先找這一行畫面上看得到的書籤：行號書籤優先，其次是名稱在這一行的函式書籤（與行號右鍵其他四個指令一致）。
    * 2. 這一行沒有看得到的書籤時：若「我的」被來源篩選隱藏且這一行已有自己的書籤，不重複新增也不誤改，只提示可以顯示。
-   * 3. 否則依 Ctrl+Alt+B 規則先建立書籤（函式名稱那一行建函式書籤，其他行建行號書籤，並套用 autoNumber）。
+   * 3. 否則依 Alt+Shift+B B 規則先建立書籤（函式名稱那一行建函式書籤，其他行建行號書籤，並套用 autoNumber）。
    */
   async ensureAtLine(
     target: { uri: vscode.Uri; line: number },

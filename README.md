@@ -2,7 +2,9 @@
 
 **Bookmark functions and lines with your own names. They stay in place after `git pull`.** Works in VS Code and Cursor.
 
-[繁體中文說明](README.zh-TW.md)
+[![VS Marketplace](https://vsmarketplacebadges.dev/version-short/whlshy.function-bookmarks.svg?label=VS%20Marketplace&colorB=007ACC)](https://marketplace.visualstudio.com/items?itemName=whlshy.function-bookmarks) [![Open VSX](https://img.shields.io/open-vsx/v/whlshy/function-bookmarks?label=Open%20VSX&color=a60ee5)](https://open-vsx.org/extension/whlshy/function-bookmarks) [![CI](https://img.shields.io/github/actions/workflow/status/whlshy/function-bookmarks/ci.yml?branch=main&label=CI)](https://github.com/whlshy/function-bookmarks/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Ko-fi](https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/whlshy)
+
+English · [繁體中文](README.zh-TW.md) · [Changelog](CHANGELOG.md)
 
 > Preview (0.x). Feedback and bug reports are welcome in the [issue tracker](https://github.com/whlshy/function-bookmarks/issues).
 

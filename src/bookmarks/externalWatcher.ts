@@ -1,5 +1,4 @@
 import * as fs from 'fs/promises';
-import * as path from 'path';
 import * as vscode from 'vscode';
 import { findByPath, findInnermost } from '../detection/engine';
 import { DetectedSymbol } from '../detection/types';
@@ -17,47 +16,17 @@ import { applyLineChangeBatches, LineChangeBatch, onLineDeleteSetting } from './
 import {
   BranchRelocateResult,
   conflictRegions,
-  diffLines,
-  hashLine,
   relocate,
   relocateBookmarks,
   relocateOnBranch,
   splitLines,
   updateLineHashes,
 } from './relocate';
+import { RenameDetector, hashText, sameHashes } from './renameDetector';
+import { FileSnapshots } from './snapshots';
 
-const STATE_KEY = 'snapshots:v2';
-const LEGACY_STATE_KEY = 'snapshots:v1';
-/** 每個檔案最多記住幾個分支的內容。 */
-const MAX_BRANCH_SNAPSHOTS = 10;
 /** git 正在改檔（index.lock）時，最多等多久再處理。 */
 const MAX_BUSY_RETRIES = 60;
-/** 偵測檔案改名時，候選檔案超過這個大小就不讀進來比對。 */
-const MAX_RENAME_COMPARE_BYTES = 2 * 1024 * 1024;
-
-interface PersistedState {
-  known?: Record<string, number[]>;
-  branch?: Record<string, string>;
-  snaps?: Record<string, Record<string, number[]>>;
-}
-
-function hashText(text: string): number[] {
-  return splitLines(text).map(hashLine);
-}
-
-function sameHashes(a: number[], b: number[]): boolean {
-  return a.length === b.length && a.every((h, i) => h === b[i]);
-}
-
-/** 兩份內容有幾成的行相同（判斷是不是同一個檔案被改名）。 */
-function commonRatio(a: number[], b: number[]): number {
-  const max = Math.max(a.length, b.length);
-  if (!max) {
-    return 1;
-  }
-  const removed = diffLines(a, b).reduce((n, h) => n + (h.oldEnd - h.oldStart), 0);
-  return (a.length - removed) / max;
-}
 
 function isNotFound(err: unknown): boolean {
   return (
@@ -83,11 +52,8 @@ function branchName(id: string | undefined): string | undefined {
  * 在目前分支找不到的書籤標成「不在此分支」，切回去自動恢復。
  */
 export class ExternalChangeWatcher implements vscode.Disposable {
-  private known = new Map<string, number[]>();
-  /** 記住的內容屬於哪個分支（分支 id）。 */
-  private knownBranch = new Map<string, string>();
-  /** 各分支最後記住的內容：檔案 → 分支名稱 → 行雜湊。 */
-  private snaps = new Map<string, Map<string, number[]>>();
+  /** 記住的內容、所屬分支與各分支最後記住的內容（存在 workspaceState）。 */
+  private readonly snapshots: FileSnapshots;
   /** 從磁碟重新載入、還沒換算的開著的檔案：這段期間的編輯也一起暫存，確認是一般編輯時重播平移，否則走差異換算。 */
   private pendingReload = new Set<string>();
   /** pendingReload 期間收到的編輯批次；若確認是編輯器內一般打字且非整份／多行區塊取代，直接重播平移避免誤刪書籤。 */
@@ -98,12 +64,10 @@ export class ExternalChangeWatcher implements vscode.Disposable {
   private reloadWaits = new Map<string, number>();
   /** 檔案不見、還沒找到改名對象的次數（新檔案的通知可能比較晚到，再等一下）。 */
   private renameWaits = new Map<string, number>();
-  /** 最近新出現的檔案（判斷改名用）。 */
-  private recentCreates = new Map<string, { uri: vscode.Uri; at: number }>();
+  /** 從最近新出現的檔案找改名後的位置。 */
+  private readonly renames = new RenameDetector();
   private pending = new Map<string, vscode.Uri>();
   private timer: NodeJS.Timeout | undefined;
-  private persistTimer: NodeJS.Timeout | undefined;
-  private persisting: Promise<void> | undefined;
   private conflictTimers = new Map<string, NodeJS.Timeout>();
   /** 因合併衝突標成需確認的書籤（檔案 → 書籤 id），衝突解決後重新定位。 */
   private conflictLost = new Map<string, Set<string>>();
@@ -120,11 +84,11 @@ export class ExternalChangeWatcher implements vscode.Disposable {
   constructor(
     private readonly store: MarkStore,
     private readonly service: SymbolService,
-    private readonly state: vscode.Memento,
+    state: vscode.Memento,
     private readonly branches: BranchService,
     files: FileEvents,
   ) {
-    this.load();
+    this.snapshots = new FileSnapshots(state);
     this.lastBookmarked = new Set(this.bookmarkedUris().map(uriKey));
     const onFs = (uri: vscode.Uri) => {
       if (!openDocumentFor(uri) && this.has(uri)) {
@@ -134,7 +98,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     this.disposables.push(
       files.onDidChange(onFs),
       files.onDidCreate((uri) => {
-        this.noteCreated(uri);
+        this.renames.noteCreated(uri);
         onFs(uri);
       }),
       files.onDidDelete(onFs),
@@ -170,24 +134,13 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     clearTimeout(this.seedTimer);
     this.retryTimers.forEach((t) => clearTimeout(t));
     this.conflictTimers.forEach((t) => clearTimeout(t));
-    if (this.persistTimer) {
-      clearTimeout(this.persistTimer);
-      this.persistTimer = undefined;
-      void this.persist();
-    }
+    this.snapshots.dispose();
     this.disposables.forEach((d) => d.dispose());
   }
 
   /** 立刻把延後中的快照寫入 workspaceState，並等待進行中的寫入完成（停用擴充套件時呼叫）。 */
-  async flushPersist(): Promise<void> {
-    if (this.persistTimer) {
-      clearTimeout(this.persistTimer);
-      this.persistTimer = undefined;
-      await this.persist();
-    }
-    if (this.persisting) {
-      await this.persisting;
-    }
+  flushPersist(): Promise<void> {
+    return this.snapshots.flush();
   }
 
   /** 啟動時：檢查所有有書籤的檔案。 */
@@ -244,7 +197,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     this.pendingReload.delete(key);
     this.pendingEditorChanges.delete(key);
     this.pending.delete(key);
-    if (!this.known.has(key)) {
+    if (!this.snapshots.has(key)) {
       return Promise.resolve();
     }
     const task = (async () => {
@@ -275,39 +228,17 @@ export class ExternalChangeWatcher implements vscode.Disposable {
 
   /** 這個分支在某檔案記住的內容（測試、清理用）。 */
   snapshotBranches(uri: vscode.Uri): string[] {
-    return [...(this.snaps.get(uriKey(uri))?.keys() ?? [])];
+    return this.snapshots.branches(uriKey(uri));
   }
 
   /** 清掉指定分支記住的內容；給定 folder 時只清該資料夾的檔案，避免誤刪其他資料夾仍在用的快照。 */
   forgetBranches(names: string[], folder?: vscode.WorkspaceFolder): void {
-    let changed = false;
-    for (const [k, m] of this.snaps) {
-      if (folder && !this.keyInFolder(k, folder)) {
-        continue;
-      }
-      for (const n of names) {
-        if (m.delete(n)) {
-          changed = true;
-        }
-      }
-    }
-    if (changed) {
-      this.persistSoon();
-    }
+    this.snapshots.forgetBranches(names, folder ? (k) => this.keyInFolder(k, folder) : undefined);
   }
 
   /** 所有記住內容的分支名稱；給定 folder 時只回傳該資料夾的檔案。 */
   rememberedBranches(folder?: vscode.WorkspaceFolder): string[] {
-    const out = new Set<string>();
-    for (const [k, m] of this.snaps) {
-      if (folder && !this.keyInFolder(k, folder)) {
-        continue;
-      }
-      for (const n of m.keys()) {
-        out.add(n);
-      }
-    }
-    return [...out];
+    return this.snapshots.rememberedBranches(folder ? (k) => this.keyInFolder(k, folder) : undefined);
   }
 
   private has(uri: vscode.Uri): boolean {
@@ -498,8 +429,8 @@ export class ExternalChangeWatcher implements vscode.Disposable {
       return;
     }
     const hashes = hashText(text);
-    const old = this.known.get(key);
-    const prevId = this.knownBranch.get(key);
+    const old = this.snapshots.content(key);
+    const prevId = this.snapshots.branchOf(key);
     if (!old) {
       // 第一次看到這個檔案（剛加書籤、從舊版升級）：書籤行號就是對應現在的內容
       this.pendingReload.delete(key);
@@ -512,8 +443,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
       this.pendingReload.delete(key);
       this.pendingEditorChanges.delete(key);
       if (br.id !== undefined && prevId !== br.id) {
-        this.knownBranch.set(key, br.id);
-        this.persistSoon();
+        this.snapshots.setBranch(key, br.id);
       }
       await this.heal(uri, splitLines(text));
       return;
@@ -535,7 +465,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
       switched,
       prevBranch: prevName,
       curBranch: br.name,
-      curSnapshot: br.name ? this.snaps.get(key)?.get(br.name) : undefined,
+      curSnapshot: br.name ? this.snapshots.branchSnapshot(key, br.name) : undefined,
       symbolStart: (p) => findByPath(symbols, p)?.startLine,
     });
     // 換算期間檔案又被編輯（打字）的話，這次的結果作廢，以最新內容重來
@@ -545,7 +475,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
       return;
     }
     if (prevName) {
-      this.saveSnapshot(key, prevName, old);
+      this.snapshots.saveBranch(key, prevName, old);
     }
     this.pendingReload.delete(key);
     this.pendingEditorChanges.delete(key);
@@ -595,8 +525,8 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     if (br === 'busy') {
       return;
     }
-    const old = this.known.get(key);
-    const target = old ? await this.findRename(uri, old) : undefined;
+    const old = this.snapshots.content(key);
+    const target = old ? await this.renames.find(uri, old, (c) => this.store.bookmarksFor(c, { includeHidden: true }).length > 0) : undefined;
     if (!target && old && (this.renameWaits.get(key) ?? 0) < 2) {
       // 改名後的新檔案通知可能還沒到：等一下再找一次
       this.renameWaits.set(key, (this.renameWaits.get(key) ?? 0) + 1);
@@ -606,34 +536,20 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     this.renameWaits.delete(key);
     const toLoc = target ? this.store.locate(target) : undefined;
     if (target && toLoc && toLoc.folder.uri.toString() === loc.folder.uri.toString()) {
-      const toKey = uriKey(target);
-      this.known.set(toKey, old!);
-      this.known.delete(key);
-      const b = this.knownBranch.get(key);
-      if (b !== undefined) {
-        this.knownBranch.set(toKey, b);
-        this.knownBranch.delete(key);
-      }
-      const s = this.snaps.get(key);
-      if (s) {
-        this.snaps.set(toKey, s);
-        this.snaps.delete(key);
-      }
-      this.persistSoon();
+      this.snapshots.move(key, uriKey(target));
       await this.store.update(loc.folder, (d) => renamePath(d, loc.rel, toLoc.rel));
       this.schedule([target], 0);
       return;
     }
-    const prevId = this.knownBranch.get(key);
+    const prevId = this.snapshots.branchOf(key);
     const switched = prevId !== undefined && br.id !== undefined && prevId !== br.id;
     const prevName = switched ? branchName(prevId) : undefined;
     if (prevName && old) {
-      this.saveSnapshot(key, prevName, old);
+      this.snapshots.saveBranch(key, prevName, old);
     }
     if (br.id !== undefined) {
       // 記住的內容保留（屬於離開的分支），切回去時用來換算
-      this.knownBranch.set(key, br.id);
-      this.persistSoon();
+      this.snapshots.setBranch(key, br.id);
     }
     await this.store.update(loc.folder, (d) =>
       updateBookmarksInFile(d, loc.rel, (b) => {
@@ -653,51 +569,6 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     );
   }
 
-  /** 從最近新出現的檔案中，找內容和記住的內容最相近的（同名、同副檔名優先），六成以上相同才算改名。 */
-  private async findRename(uri: vscode.Uri, old: number[]): Promise<vscode.Uri | undefined> {
-    const now = Date.now();
-    const ext = path.posix.extname(uri.path);
-    const base = path.posix.basename(uri.path);
-    const candidates = [...this.recentCreates.values()]
-      .filter((c) => now - c.at < 120_000 && uriKey(c.uri) !== uriKey(uri) && path.posix.extname(c.uri.path) === ext)
-      .sort((a, b) => Number(path.posix.basename(b.uri.path) === base) - Number(path.posix.basename(a.uri.path) === base) || b.at - a.at)
-      .slice(0, 30);
-    let best: vscode.Uri | undefined;
-    let bestScore = 0.6;
-    for (const c of candidates) {
-      if (this.store.bookmarksFor(c.uri, { includeHidden: true }).length) {
-        continue;
-      }
-      let text: string;
-      try {
-        // 太大的檔案不讀進來比對（改名偵測只是輔助，避免一次讀好幾個大檔）
-        if ((await vscode.workspace.fs.stat(c.uri)).size > MAX_RENAME_COMPARE_BYTES) {
-          continue;
-        }
-        text = new TextDecoder().decode(await vscode.workspace.fs.readFile(c.uri));
-      } catch {
-        continue;
-      }
-      const score = commonRatio(old, hashText(text));
-      if (score >= bestScore) {
-        bestScore = score;
-        best = c.uri;
-      }
-    }
-    return best;
-  }
-
-  private noteCreated(uri: vscode.Uri): void {
-    if (uri.scheme !== 'file') {
-      return;
-    }
-    this.recentCreates.set(uriKey(uri), { uri, at: Date.now() });
-    if (this.recentCreates.size > 500) {
-      const oldest = [...this.recentCreates.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, 100);
-      oldest.forEach(([k]) => this.recentCreates.delete(k));
-    }
-  }
-
   /**
    * 分支變了：還沒處理到的檔案先記下在離開的分支上的位置與內容（之後內容變動時再換算），
    * 再檢查所有檔案；只屬於某分支的書籤的顯示也跟著更新。
@@ -709,9 +580,9 @@ export class ExternalChangeWatcher implements vscode.Disposable {
       const keys = new Set<string>();
       for (const uri of this.bookmarkedUris(e.folder)) {
         const key = uriKey(uri);
-        const old = this.known.get(key);
-        if (old && this.knownBranch.get(key) === fromId) {
-          this.saveSnapshot(key, fromName, old);
+        const old = this.snapshots.content(key);
+        if (old && this.snapshots.branchOf(key) === fromId) {
+          this.snapshots.saveBranch(key, fromName, old);
           keys.add(key);
         }
       }
@@ -733,17 +604,6 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     }
     this.store.notifyChanged();
     this.checkAll();
-  }
-
-  private saveSnapshot(key: string, branch: string, hashes: number[]): void {
-    const m = this.snaps.get(key) ?? new Map<string, number[]>();
-    m.delete(branch);
-    m.set(branch, hashes);
-    while (m.size > MAX_BRANCH_SNAPSHOTS) {
-      m.delete(m.keys().next().value as string);
-    }
-    this.snaps.set(key, m);
-    this.persistSoon();
   }
 
   private async write(
@@ -842,7 +702,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     const doc = e.document;
     const key = uriKey(doc.uri);
     const changes = this.toChanges(e);
-    if (this.known.has(key) && (this.pendingReload.has(key) || this.isReload(e))) {
+    if (this.snapshots.has(key) && (this.pendingReload.has(key) || this.isReload(e))) {
       // 交給 apply 換算（含切換分支的處理）；同時暫存編輯內容，確認是編輯器內一般打字時重播平移，避免改寫行內文字被誤判成刪行
       this.pendingReload.add(key);
       const entry = this.pendingEditorChanges.get(key) ?? { batches: [], useDiff: false };
@@ -858,7 +718,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
       void this.relocateBuffer(doc);
     }
     // 一般編輯由 BookmarkTracker 平移；記住的內容跟著更新（只重算被改到的行，大檔打字不必每次整份雜湊）
-    const old = this.known.get(key);
+    const old = this.snapshots.content(key);
     const next = old && updateLineHashes(old, changes, doc.lineCount, (i) => doc.lineAt(i).text);
     this.remember(doc.uri, next ?? hashText(doc.getText()));
     this.scheduleConflictCheck(doc);
@@ -881,7 +741,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
    */
   handlesByDiff(e: vscode.TextDocumentChangeEvent, changes: LineChange[]): boolean {
     const key = uriKey(e.document.uri);
-    if (!this.known.has(key)) {
+    if (!this.snapshots.has(key)) {
       return false;
     }
     return (
@@ -895,7 +755,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
   /** 開著的文件：用編輯前記住的內容與目前內容比對，立刻換算（回傳 Promise 讓呼叫端可 await 寫入完成）。 */
   private async relocateBuffer(doc: vscode.TextDocument): Promise<void> {
     const loc = this.store.locate(doc.uri);
-    const old = this.known.get(uriKey(doc.uri));
+    const old = this.snapshots.content(uriKey(doc.uri));
     const bookmarks = this.store.bookmarksFor(doc.uri);
     if (!loc || !old || !bookmarks.length) {
       return;
@@ -1023,27 +883,25 @@ export class ExternalChangeWatcher implements vscode.Disposable {
     const keys = new Set(uris.map(uriKey));
     let removed = false;
     let deferred = false;
-    for (const k of new Set([...this.known.keys(), ...this.snaps.keys()])) {
+    for (const k of this.snapshots.keys()) {
       if (!keys.has(k)) {
         // 切換存放位置或等待使用者決定是否從另一端複製書籤時，先保留分支快照，避免複製回來後快照消失
         if (this.store.isSnapshotProtected(k)) {
           deferred = true;
           continue;
         }
-        this.known.delete(k);
-        this.knownBranch.delete(k);
-        this.snaps.delete(k);
+        this.snapshots.forget(k);
         this.conflictLost.delete(k);
         removed = true;
       }
     }
     this.deferredPrune = deferred;
     if (removed) {
-      this.persistSoon();
+      this.snapshots.persistSoon();
     }
     const toCheck = uris.filter((u) => {
       const k = uriKey(u);
-      return !this.known.has(k) || !this.lastBookmarked.has(k);
+      return !this.snapshots.has(k) || !this.lastBookmarked.has(k);
     });
     this.lastBookmarked = keys;
     if (toCheck.length) {
@@ -1053,59 +911,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
 
   /** 記住內容；`branchId` 沒給時用目前分支（快取）。 */
   private remember(uri: vscode.Uri, hashes: number[], branchId?: string): void {
-    const key = uriKey(uri);
-    this.known.set(key, hashes);
     const id = branchId ?? this.branches.current(vscode.workspace.getWorkspaceFolder(uri))?.id;
-    if (id !== undefined) {
-      this.knownBranch.set(key, id);
-    }
-    this.persistSoon();
-  }
-
-  private load(): void {
-    const saved = this.state.get<PersistedState>(STATE_KEY);
-    const known = saved?.known ?? this.state.get<Record<string, number[]>>(LEGACY_STATE_KEY) ?? {};
-    for (const [k, v] of Object.entries(known)) {
-      if (Array.isArray(v)) {
-        this.known.set(k, v);
-      }
-    }
-    for (const [k, v] of Object.entries(saved?.branch ?? {})) {
-      if (typeof v === 'string') {
-        this.knownBranch.set(k, v);
-      }
-    }
-    for (const [k, v] of Object.entries(saved?.snaps ?? {})) {
-      if (v && typeof v === 'object') {
-        this.snaps.set(k, new Map(Object.entries(v).filter(([, h]) => Array.isArray(h))));
-      }
-    }
-  }
-
-  private persistSoon(): void {
-    clearTimeout(this.persistTimer);
-    this.persistTimer = setTimeout(() => {
-      this.persistTimer = undefined;
-      void this.persist();
-    }, 2000);
-  }
-
-  private persist(): Promise<void> {
-    const data: PersistedState = {
-      known: Object.fromEntries(this.known),
-      branch: Object.fromEntries(this.knownBranch),
-      snaps: Object.fromEntries([...this.snaps].map(([k, m]) => [k, Object.fromEntries(m)])),
-    };
-    const p = Promise.resolve(this.state.update(STATE_KEY, data)).then(
-      () => undefined,
-      () => undefined,
-    );
-    this.persisting = p;
-    void p.finally(() => {
-      if (this.persisting === p) {
-        this.persisting = undefined;
-      }
-    });
-    return p;
+    this.snapshots.remember(uriKey(uri), hashes, id);
   }
 }

@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
-import { serializeStore, StoreData } from './marks';
+import type * as vscode from 'vscode';
+import { hasStoreData, serializeStore, StoreData } from './marks';
 
 /**
  * 書籤存放模式的解析與另一端來源資料的已處理雜湊紀錄。全部是純函式，不依賴 VS Code。
@@ -107,4 +108,43 @@ export function clearHandledOppositeSources(
     delete next[mode];
   }
   return next;
+}
+
+const HANDLED_OPPOSITE_KEY = 'handledOppositeStorage';
+
+/** 每個資料夾書籤資料的雜湊（沒有資料的略過）：資料夾 uriKey → 雜湊。 */
+export function hashesOfDataMap(dataMap: Map<string, StoreData>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [fkey, data] of dataMap) {
+    if (hasStoreData(data)) {
+      out[fkey] = hashStoreData(data);
+    }
+  }
+  return out;
+}
+
+/** 已處理過的另一端來源資料紀錄（存在 workspaceState 的 handledOppositeStorage）。 */
+export class HandledOppositeRecords {
+  constructor(private readonly state: vscode.Memento) {}
+
+  isHandled(folderKey: string, mode: StorageMode, sourceHash: string): boolean {
+    return isOppositeSourceHandled(this.state.get<HandledOppositeSources>(HANDLED_OPPOSITE_KEY), mode, folderKey, sourceHash);
+  }
+
+  async mark(mode: StorageMode, hashes: Record<string, string>): Promise<void> {
+    if (!Object.keys(hashes).length) {
+      return;
+    }
+    const cur = this.state.get<HandledOppositeSources>(HANDLED_OPPOSITE_KEY);
+    await this.state.update(HANDLED_OPPOSITE_KEY, markOppositeSourcesHandled(cur, mode, hashes));
+  }
+
+  async clear(mode: StorageMode, folderKeys?: string[]): Promise<void> {
+    const cur = this.state.get<HandledOppositeSources>(HANDLED_OPPOSITE_KEY);
+    const next = clearHandledOppositeSources(cur, mode, folderKeys);
+    if (JSON.stringify(next) === JSON.stringify(cur ?? {})) {
+      return;
+    }
+    await this.state.update(HANDLED_OPPOSITE_KEY, next);
+  }
 }

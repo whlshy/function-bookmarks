@@ -133,7 +133,7 @@ export class BookmarkExtras {
       void vscode.window.showWarningMessage(vscode.l10n.t('Only files inside a workspace folder can be bookmarked.'));
       return undefined;
     }
-    // 這一行還沒有書籤：照 Ctrl+Alt+B 的規則加入（函式名稱那一行加函式書籤，其他行加行號書籤）
+    // 這一行還沒有書籤：照 Alt+Shift+B B 的規則加入（函式名稱那一行加函式書籤，其他行加行號書籤）
     await this.bookmarks.toggle({ uri, line });
     // 「我的」被篩選隱藏時，剛加（或原本就有）的自己的書籤看不到，也要找得到
     return this.atLine(doc, line, true);
@@ -420,7 +420,7 @@ export class BookmarkExtras {
     await this.commitTarget(t, { number: n }, { hiddenMine: resolved.hiddenMine });
   }
 
-  /** Ctrl+Alt+Shift+1～9：游標那一行設為這個號碼；已經是這個號碼就拿掉。取消時不建立多餘書籤。 */
+  /** Alt+Shift+B Shift+1～9：游標那一行設為這個號碼；已經是這個號碼就拿掉。取消時不建立多餘書籤。 */
   async toggleNumber(n: number, confirmed?: boolean): Promise<void> {
     if (!(n >= 1 && n <= 9)) {
       return;
@@ -440,7 +440,7 @@ export class BookmarkExtras {
     await this.commitTarget(t, { number: n }, { hiddenMine: resolved.hiddenMine });
   }
 
-  /** Ctrl+Alt+1～9：跳到這個號碼的書籤；沒有給號碼時列出所有有號碼的書籤。 */
+  /** Alt+Shift+B 1～9：跳到這個號碼的書籤；沒有給號碼時列出所有有號碼的書籤。 */
   async goToNumber(n?: number): Promise<{ uri: vscode.Uri; line: number } | undefined> {
     const used = this.store.numbered();
     if (n === undefined) {

@@ -2,7 +2,7 @@
   "name": "function-bookmarks",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "publisher": "whlshy",
   "icon": "media/icon.png",
   "galleryBanner": {
@@ -19,6 +19,9 @@
     "url": "https://github.com/whlshy/function-bookmarks/issues"
   },
   "homepage": "https://github.com/whlshy/function-bookmarks#readme",
+  "sponsor": {
+    "url": "https://ko-fi.com/whlshy"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -204,6 +207,12 @@
         "icon": "$(export)"
       },
       {
+        "command": "functionBookmarks.exportFileBookmarks",
+        "title": "%command.exportBookmarks%",
+        "category": "%command.category%",
+        "icon": "$(export)"
+      },
+      {
         "command": "functionBookmarks.importBookmarks",
         "title": "%command.importBookmarks%",
         "category": "%command.category%",
@@ -384,6 +393,12 @@
       },
       {
         "command": "functionBookmarks.setTagColor",
+        "title": "%command.setTagColor%",
+        "icon": "$(symbol-color)",
+        "category": "%command.category%"
+      },
+      {
+        "command": "functionBookmarks.setColorOfTag",
         "title": "%command.setTagColor%",
         "icon": "$(symbol-color)",
         "category": "%command.category%"
@@ -663,7 +678,7 @@
           "group": "1_sort@1"
         },
         {
-          "command": "functionBookmarks.exportBookmarks",
+          "command": "functionBookmarks.exportFileBookmarks",
           "when": "view == functionBookmarks.tree && viewItem =~ /^fbBmFile/",
           "group": "3_share@1"
         },
@@ -718,12 +733,12 @@
           "group": "1_style@2"
         },
         {
-          "command": "functionBookmarks.setTagColor",
+          "command": "functionBookmarks.setColorOfTag",
           "when": "view == functionBookmarks.tree && viewItem == fbBmTag",
           "group": "inline@1"
         },
         {
-          "command": "functionBookmarks.setTagColor",
+          "command": "functionBookmarks.setColorOfTag",
           "when": "view == functionBookmarks.tree && viewItem == fbBmTag",
           "group": "1_tag@1"
         }
@@ -845,6 +860,14 @@
         },
         {
           "command": "functionBookmarks.searchClearAndClose",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.exportFileBookmarks",
+          "when": "false"
+        },
+        {
+          "command": "functionBookmarks.setColorOfTag",
           "when": "false"
         },
         {
@@ -1123,7 +1146,7 @@
         "properties": {
           "functionBookmarks.project.include": {
             "type": "string",
-            "default": "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,c,h,cpp,cc,cxx,hpp,hh,hxx,cu,cuh,m,mm,rs,go,java,cs,kt,kts,swift,php,rb,rake,md,markdown,html,htm,proto,vue,svelte,sh,bash,zsh,sql}",
+            "default": "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,pyi,c,h,cpp,cc,cxx,hpp,hh,hxx,cu,cuh,m,mm,rs,go,java,cs,kt,kts,swift,php,rb,rake,md,markdown,html,htm,djhtml,jinja,jinja2,j2,proto,vue,svelte,sh,bash,zsh,sql}",
             "markdownDescription": "%config.project.include%",
             "order": 0
           },

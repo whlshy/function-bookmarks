@@ -2,18 +2,17 @@ import * as vscode from 'vscode';
 import { BookmarkCommands, isBookmarkLinkArg, revealLine } from './bookmarks/commands';
 import { BookmarkTracker } from './bookmarks/tracker';
 import { BookmarkExtras } from './bookmarks/extras';
+import { registerExtrasCommands } from './bookmarks/extrasCommands';
 import { BookmarkStatusBar } from './views/statusBar';
 import { RuleTester } from './views/ruleTester';
 import { ExternalChangeWatcher } from './bookmarks/externalWatcher';
 import { watchGitHead } from './bookmarks/gitHead';
 import { BranchService } from './git/branchService';
 import { cleanBranchRecords, setBranchScope } from './git/branchCommands';
-import { exportBookmarks, ExportOptions } from './share/exporter';
-import { importBookmarks, ImportOptions } from './share/importer';
-import { deleteSource, filterSources, makeMine, renameSource } from './share/sources';
+import { registerShareCommands } from './share/shareCommands';
 import { ReconcileWatcher } from './storage/reconcileWatcher';
 import { Commands, reveal } from './commands';
-import { readSettings, SECTION, WorkspaceStorageChoice } from './config';
+import { readSettings, SECTION } from './config';
 import { TemplateResolver } from './django/resolver';
 import { RuleError, SymbolKindName } from './detection/types';
 import { MarkStore, BookmarkEntry } from './storage/store';
@@ -27,26 +26,17 @@ import { FavoriteGutter } from './views/gutter';
 import { FileEvents } from './util/fileEvents';
 import { NoteEditor, PREVIEW_NOTE_COMMAND } from './views/noteEditor';
 import { collectProjectSymbols, searchFunctions, searchMarks } from './views/search';
-import { BmGroupNode, BookmarkGrouping, BookmarkNode, COMMANDS, FilterMode, FunctionTreeProvider, SymbolNode, TreeNode } from './views/tree';
-import { sameUri, uriKey } from './util/uris';
+import { BookmarkGrouping, COMMANDS, FilterMode, FunctionTreeProvider, SymbolNode, TreeNode } from './views/tree';
+import { sameUri } from './util/uris';
 import { BookmarkSearchBox } from './views/searchBox';
 import { StartupLog, StartupTiming } from './util/startupLog';
+import { fileGroupKey, isBookmarkNode, lineArg } from './util/editorArgs';
 
 const VIEW_ID = 'functionBookmarks.tree';
 const STATE_FILTER = 'filterMode';
 const STATE_BM_GROUP = 'bookmarkGrouping';
 const STATE_HIDE_AWAY = 'hideNotOnBranch';
 const STATE_HIDDEN_SOURCES = 'hiddenSources';
-
-/** 行號右鍵選單傳入的參數：{ lineNumber（1 起算）, uri }。 */
-function lineArg(arg: unknown): { uri: vscode.Uri; line: number } | undefined {
-  const a = arg as { lineNumber?: unknown; uri?: unknown } | undefined;
-  return a && typeof a.lineNumber === 'number' && a.uri instanceof vscode.Uri ? { uri: a.uri, line: a.lineNumber - 1 } : undefined;
-}
-
-function isBookmarkNode(n: unknown): n is BookmarkNode {
-  return (n as BookmarkNode | undefined)?.type === 'bookmark';
-}
 
 export interface ExtensionApi {
   /** 給整合測試使用。 */
@@ -130,14 +120,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     await vscode.commands.executeCommand('setContext', 'functionBookmarks.iconsHidden', hide);
     statusBar.update();
   };
-  /** 快捷鍵傳入 { number: 1 }，也可直接傳數字。 */
-  /** 行號右鍵選單傳入 { lineNumber, uri }；編輯器右鍵傳入檔案 Uri（改用游標所在的行）。 */
-  const extrasArg = (arg: unknown) => {
-    const at = lineArg(arg);
-    return at ? { type: 'line', ...at } : arg instanceof vscode.Uri ? undefined : arg;
-  };
-  const numberArg = (arg: unknown): number | undefined =>
-    typeof arg === 'number' ? arg : typeof (arg as { number?: unknown } | undefined)?.number === 'number' ? (arg as { number: number }).number : undefined;
   const treeView = vscode.window.createTreeView<TreeNode>(VIEW_ID, {
     treeDataProvider: provider,
     showCollapseAll: true,
@@ -207,25 +189,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     updateBranchLabel();
   };
   updateSourceContext();
-  const shareDeps = { store, favorites, branches, service };
-  const entryArg = (node?: TreeNode) => bookmarks.entryOf(isBookmarkNode(node) ? node : undefined);
-  const sourceArg = (arg?: unknown) =>
-    typeof arg === 'string' ? arg : (arg as { type?: string; by?: string; key?: string } | undefined)?.by === 'source' ? (arg as { key: string }).key : undefined;
-  /** 依檔案分組的檔案列參數（BmGroupNode、Uri 或 uriKey 字串），回傳檔案的 uriKey。 */
-  const fileGroupKey = (arg?: unknown): string | undefined => {
-    if (typeof arg === 'string') {
-      return arg;
-    }
-    if (arg instanceof vscode.Uri) {
-      return uriKey(arg);
-    }
-    const g = arg as Partial<BmGroupNode> | undefined;
-    if (g?.type === 'bmGroup' && g.by === 'file') {
-      return g.uri ? uriKey(g.uri) : g.key;
-    }
-    return undefined;
-  };
-
   const setHideAway = async (hide: boolean) => {
     provider.hideNotOnBranch = hide;
     await context.workspaceState.update(STATE_HIDE_AWAY, hide);
@@ -486,7 +449,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
       return undefined;
     }),
     reg('functionBookmarks.editNote', async (node?: unknown) => {
-      // 行號右鍵選單（{ lineNumber, uri }）：針對右鍵那一行（而非游標所在行）編輯備註；沒書籤就先依 Ctrl+Alt+B 規則建立
+      // 行號右鍵選單（{ lineNumber, uri }）：針對右鍵那一行（而非游標所在行）編輯備註；沒書籤就先依 Alt+Shift+B B 規則建立
       const at = lineArg(node);
       if (at) {
         const hit = await bookmarks.ensureAtLine(at);
@@ -637,47 +600,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
       void updateCursorBookmarkContext();
     }),
     favorites.onDidChange(() => void updateCursorBookmarkContext()),
-    reg('functionBookmarks.exportBookmarks', (arg?: unknown, extra?: unknown) => {
-      const g = arg as Partial<BmGroupNode> | undefined;
-      const uri =
-        arg instanceof vscode.Uri
-          ? arg
-          : g?.type === 'bmGroup' && g.by === 'file' && g.uri instanceof vscode.Uri
-            ? g.uri
-            : undefined;
-      if (uri) {
-        // Explorer 右鍵第二個參數是選取的 Uri[] 陣列，測試呼叫時可傳 ExportOptions 物件
-        const opts = extra && typeof extra === 'object' && !Array.isArray(extra) ? (extra as ExportOptions) : {};
-        return exportBookmarks(shareDeps, opts, uri);
-      }
-      return exportBookmarks(shareDeps, (arg as ExportOptions | undefined) ?? {});
-    }),
-    reg('functionBookmarks.importBookmarks', (arg?: unknown) =>
-      importBookmarks(shareDeps, service, arg instanceof vscode.Uri ? { uri: arg } : ((arg as ImportOptions | undefined) ?? {})),
-    ),
-    reg('functionBookmarks.chooseStorage', (choice?: WorkspaceStorageChoice) => store.chooseStorage(choice)),
-    reg('functionBookmarks.filterBookmarkSources', (hidden?: unknown) => filterSources(store, Array.isArray(hidden) ? hidden : undefined)),
-    reg('functionBookmarks.filterBookmarkSourcesActive', () => filterSources(store)),
+    ...registerShareCommands({ store, favorites, branches, service, bookmarks }),
     reg('functionBookmarks.groupBookmarksBySource', () => applyViewState(provider.filterMode, 'source')),
-    reg('functionBookmarks.deleteBookmarkSource', (arg?: unknown, confirmed?: boolean) => deleteSource(store, sourceArg(arg), confirmed === true)),
-    reg('functionBookmarks.renameBookmarkSource', (arg?: unknown, newName?: string) => renameSource(store, sourceArg(arg), newName)),
-    reg('functionBookmarks.makeBookmarkMine', (node?: TreeNode) => makeMine(store, entryArg(node))),
     reg('functionBookmarks.clearAllBookmarks', () => bookmarks.clearAll()),
     // M7：數字快速書籤、顏色、暫時隱藏圖示
-    reg('functionBookmarks.setBookmarkNumber', (node?: unknown, value?: number | 'next' | null, confirmed?: boolean) =>
-      extras.setNumber(extrasArg(node), value, confirmed),
-    ),
-    reg('functionBookmarks.toggleNumberedBookmark', (arg?: unknown, confirmed?: boolean) => {
-      const n = numberArg(arg);
-      return n === undefined ? extras.setNumber(undefined) : extras.toggleNumber(n, confirmed);
-    }),
-    reg('functionBookmarks.goToNumberedBookmark', (arg?: unknown) => extras.goToNumber(numberArg(arg))),
-    reg('functionBookmarks.tourNext', () => extras.tour(1)),
-    reg('functionBookmarks.tourPrevious', () => extras.tour(-1)),
-    reg('functionBookmarks.setBookmarkColor', (node?: unknown, value?: string | null) =>
-      extras.setColor(extrasArg(node), value),
-    ),
-    reg('functionBookmarks.setTagColor', (arg?: unknown, value?: string | null) => extras.setTagColor(arg, value)),
+    ...registerExtrasCommands(extras),
     reg('functionBookmarks.hideBookmarkIcons', () => setIconsHidden(true)),
     reg('functionBookmarks.showBookmarkIcons', () => setIconsHidden(false)),
     reg('functionBookmarks.toggleBookmarkIcons', () => setIconsHidden(!gutter.hidden)),

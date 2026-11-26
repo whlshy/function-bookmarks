@@ -242,13 +242,51 @@ describe('匯出、匯入書籤與來源管理', () => {
       assert.ok(viewsGroup);
 
       const res = await vscode.commands.executeCommand<{ count: number; text: string }>(
-        'functionBookmarks.exportBookmarks',
+        'functionBookmarks.exportFileBookmarks',
         viewsGroup,
         { format: 'json', target: 'clipboard', includeCode: false },
       );
       assert.strictEqual(res?.count, 1, '應只匯出 app/views.py 的 1 個書籤');
       const parsed = JSON.parse(res.text) as { bookmarks: { file: string; label?: string }[] };
       assert.deepStrictEqual(parsed.bookmarks.map((b) => [b.file, b.label]), [['app/views.py', 'views 的書籤']]);
+    });
+
+    it('側邊欄標題列（…）的匯出、匯入、選擇存放位置收到選取中的樹節點時不當成參數，照常先詢問', async () => {
+      // VS Code／Cursor 從標題列執行指令時，第一個參數是選取中的樹節點，第二個是選取清單
+      const views = workspaceFile('app', 'views.py');
+      await openAt(views, 1, api);
+      await api.bookmarks.addLabeled('views 的書籤');
+      await api.favorites.refresh();
+      const groups = (await api.provider.getChildren(api.provider.sections.bookmarks)) as BmGroupNode[];
+      const viewsGroup = groups.find((g) => g.by === 'file' && g.rel === 'app/views.py')!;
+      assert.ok(viewsGroup);
+      await vscode.env.clipboard.writeText('ORIGINAL_CLIPBOARD');
+
+      // 匯出：不會直接只匯出選取的檔案，而是先問格式
+      const exp = await runAndCancelQuickOpen(
+        () => vscode.commands.executeCommand('functionBookmarks.exportBookmarks', viewsGroup, [viewsGroup]),
+        '標題列匯出取消',
+      );
+      assert.strictEqual(exp, undefined);
+      assert.strictEqual(await vscode.env.clipboard.readText(), 'ORIGINAL_CLIPBOARD');
+
+      // 匯入：不會把檔案列的 uri（程式碼檔）當成要匯入的檔案，而是先問從檔案或剪貼簿
+      const count = api.store.allBookmarks().length;
+      const imp = await runAndCancelQuickOpen(
+        () => vscode.commands.executeCommand('functionBookmarks.importBookmarks', viewsGroup, [viewsGroup]),
+        '標題列匯入取消',
+      );
+      assert.strictEqual(imp, undefined);
+      assert.strictEqual(api.store.allBookmarks().length, count);
+
+      // 選擇存放位置：不會把樹節點存成存放設定
+      const mode = api.store.effectiveStorageMode();
+      const chosen = await runAndCancelQuickOpen(
+        () => vscode.commands.executeCommand('functionBookmarks.chooseStorage', viewsGroup, [viewsGroup]),
+        '標題列選擇存放位置取消',
+      );
+      assert.strictEqual(chosen, undefined);
+      assert.strictEqual(api.store.effectiveStorageMode(), mode);
     });
 
     it('篩選來源、依來源分組、上下跳轉只在篩選結果內；改來源名、轉成我的、刪除來源', async () => {
