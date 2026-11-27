@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.0 (2026-11-27) — eight more languages built in, and Simplified Chinese, Japanese and Korean
+
+- **Built-in detection for Lua, Dart, Scala, Elixir, PowerShell, R, Haskell and Zig**: their functions, classes and methods are listed without a language extension (before, these used the language server and showed nothing without one). This includes Scala 3 indentation syntax, Dart constructors, Elixir functions with several clauses (shown as one), a Haskell type signature with its equations (shown as one), R6 classes, Zig generic types and `test` blocks, and ExUnit `describe` / `test`
+- *Whole Project* also lists `.lua`, `.dart`, `.scala`, `.sc`, `.ex`, `.exs`, `.ps1`, `.psm1`, `.R`, `.hs` and `.zig` files. If you set `functionBookmarks.project.include` yourself, your setting is kept
+- **Simplified Chinese, Japanese and Korean** user interface; the extension follows the display language of VS Code / Cursor
+- Your own detection rules can use two new `body` values, `indentBlock` and `braceOrIndent`, and `mergeClauses` to show adjacent clauses with the same name as one symbol
+- **Next / Previous Bookmark settings**: `functionBookmarks.bookmarks.navigationScope` can limit them to the current file, and turning off `functionBookmarks.bookmarks.navigationWrap` makes them stop at the last / first bookmark instead of wrapping around (the status bar says so). The defaults keep the old behavior
+- README: a list of the supported languages
+- Fix: pressing `Enter` after the indentation of a bookmarked line now moves the bookmark down with the code (it used to stay on the line left with only spaces)
+- Fix: *Next / Previous Bookmark* skips bookmarks in files that were deleted, instead of getting stuck on them or opening a deleted file
+- Fix: a `.vscode/function-bookmarks.json` saved with a BOM (for example by Notepad or PowerShell) is read again instead of being treated as broken; imported files with a BOM work too
+
 ## 0.9.2 (2026-11-27) — undo puts bookmarks back, sort by created time and fixes found with the mouse
 
 - **Undo puts a bookmark back**: delete the line a bookmark is on, press `Ctrl+Z`, and the bookmark is on that line again (it no longer stays on the next line). This also works for a deleted block, for several undos in a row, and when `functionBookmarks.bookmarks.onLineDelete` is `remove`

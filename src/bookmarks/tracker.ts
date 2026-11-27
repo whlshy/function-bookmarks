@@ -21,6 +21,43 @@ export interface LineChangeBatch {
 /** 刪行後復原時把書籤放回原位用的紀錄（每個檔案最近幾次刪行）。 */
 const deletions = new DeletionMemory();
 
+/**
+ * 找出「插入點前只有空白、且插入的文字含換行」的變更（游標在縮排後面按 Enter）。
+ * 事件發生時文件已經是改完的內容：依各變更改前的位移（由前往後累加長度差）算出插入點在新文件的位置，
+ * 那一行在插入點之前的文字就是原本的前綴。多游標時每個變更各自判斷。
+ */
+function blankBeforeInserts(e: vscode.TextDocumentChangeEvent): Set<vscode.TextDocumentContentChangeEvent> {
+  const out = new Set<vscode.TextDocumentContentChangeEvent>();
+  if (!e.contentChanges.some((c) => c.rangeLength === 0 && c.text.includes('\n'))) {
+    return out;
+  }
+  const sorted = [...e.contentChanges].sort((a, b) => a.rangeOffset - b.rangeOffset);
+  let shift = 0;
+  for (const c of sorted) {
+    if (c.rangeLength === 0 && c.text.includes('\n') && c.range.start.character > 0) {
+      const pos = e.document.positionAt(c.rangeOffset + shift);
+      if (pos.character > 0 && /^[ \t]*$/.test(e.document.lineAt(pos.line).text.slice(0, pos.character))) {
+        out.add(c);
+      }
+    }
+    shift += c.text.length - c.rangeLength;
+  }
+  return out;
+}
+
+/** 把編輯器的變更事件轉成行號換算用的 LineChange（一般編輯與乾淨檔案第一次編輯的重播共用）。 */
+export function toLineChanges(e: vscode.TextDocumentChangeEvent): LineChange[] {
+  const blank = blankBeforeInserts(e);
+  return e.contentChanges.map((c) => ({
+    startLine: c.range.start.line,
+    startChar: c.range.start.character,
+    endLine: c.range.end.line,
+    endChar: c.range.end.character,
+    text: c.text.replace(/\r\n/g, '\n'),
+    ...(blank.has(c) ? { blankBefore: true } : {}),
+  }));
+}
+
 /** 書籤所在的行是否在這批變更中被刪除。 */
 function deletedBy(line: number, changes: LineChange[]): boolean {
   const ordered = [...changes].sort((a, b) => b.startLine - a.startLine || b.startChar - a.startChar);
@@ -161,13 +198,7 @@ export class BookmarkTracker implements vscode.Disposable {
     if (!loc || (this.store.bookmarksFor(e.document.uri).length === 0 && !undo)) {
       return;
     }
-    const changes: LineChange[] = e.contentChanges.map((c) => ({
-      startLine: c.range.start.line,
-      startChar: c.range.start.character,
-      endLine: c.range.end.line,
-      endChar: c.range.end.character,
-      text: c.text.replace(/\r\n/g, '\n'),
-    }));
+    const changes = toLineChanges(e);
     if (isWholeDocumentReplace(changes, e.document.lineCount) || this.handledByDiff?.(e, changes)) {
       return;
     }

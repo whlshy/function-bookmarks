@@ -1,15 +1,22 @@
 import { Syntax } from '../types';
 import { syntaxForLanguage } from '../languages';
 import { C_FAMILY, maskCFamily } from './cFamily';
+import { maskDart } from './dart';
+import { maskElixir } from './elixir';
+import { maskHaskell } from './haskell';
 import { maskJs } from './js';
+import { maskLua } from './lua';
 import { maskMarkdown } from './markdown';
 import { maskPhp } from './php';
+import { maskPowerShell } from './powershell';
 import { maskPython } from './python';
+import { maskR } from './r';
 import { maskRuby } from './ruby';
 import { maskShell } from './shell';
 import { maskSql } from './sql';
 import { maskSfc } from './sfc';
 import { maskTemplate } from './template';
+import { maskZig } from './zig';
 
 export { syntaxForLanguage };
 
@@ -43,6 +50,20 @@ export function maskText(text: string, syntax: Syntax): string {
       return maskSql(text);
     case 'sfc':
       return maskSfc(text);
+    case 'dart':
+      return maskDart(text);
+    case 'lua':
+      return maskLua(text);
+    case 'elixir':
+      return maskElixir(text);
+    case 'powershell':
+      return maskPowerShell(text);
+    case 'r':
+      return maskR(text);
+    case 'haskell':
+      return maskHaskell(text);
+    case 'zig':
+      return maskZig(text);
     default: {
       const family = C_FAMILY[syntax];
       return family ? maskCFamily(text, family) : text;

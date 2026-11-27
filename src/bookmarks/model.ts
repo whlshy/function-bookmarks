@@ -82,6 +82,8 @@ export interface LineChange {
   endLine: number;
   endChar: number;
   text: string;
+  /** 插入點之前（同一行）只有空白：例如游標在縮排後面按 Enter。由呼叫端依文件內容判斷。 */
+  blankBefore?: boolean;
 }
 
 export interface ShiftResult {
@@ -104,7 +106,7 @@ function countNewlines(s: string): number {
  * 依一次編輯換算書籤行號：
  * - 編輯範圍之前：不變
  * - 編輯範圍之後：加上增減的行數
- * - 在該行開頭插入整行（例如在行首按 Enter）：書籤跟著原本的內容往下
+ * - 在該行開頭插入整行（例如在行首按 Enter），或插入點前只有縮排（在縮排後面按 Enter）：書籤跟著原本的內容往下
  * - 該行被整行刪除：移到刪除範圍之後的那一行，並標記 deleted
  */
 export function shiftLine(line: number, change: LineChange): ShiftResult {
@@ -119,7 +121,8 @@ export function shiftLine(line: number, change: LineChange): ShiftResult {
   }
   if (line === change.startLine) {
     const pureInsert = change.startLine === change.endLine && change.startChar === change.endChar;
-    if (pureInsert && change.startChar === 0 && change.text.endsWith('\n')) {
+    // 插入的文字以換行（可再接自動縮排）結尾，原本這一行的內容整個被推到下一行
+    if (pureInsert && (change.startChar === 0 || change.blankBefore) && /\n[ \t]*$/.test(change.text)) {
       return { line: line + inserted, deleted: false };
     }
     // 整行刪除（例如 Ctrl+Shift+K，範圍從該行第 0 欄到下一行以上且替換為空字串）：視為刪除這一行
@@ -163,14 +166,16 @@ export function sortBookmarks<T extends Pick<LineBookmark, 'file' | 'line'>>(lis
 }
 
 /**
- * 下一個／上一個書籤（跨檔案，依檔名、行號排序，頭尾相接）。
+ * 下一個／上一個書籤（跨檔案，依檔名、行號排序，預設頭尾相接）。
  * `file`、`line` 是目前游標位置；沒有開檔時從第一個（或最後一個）開始。
+ * `wrap` 為 `false` 時，到最後一個（或第一個）不再循環，改回傳 `undefined`。
  */
 export function neighbor<T extends Pick<LineBookmark, 'file' | 'line'>>(
   list: T[],
   file: string | undefined,
   line: number,
   direction: 1 | -1,
+  wrap = true,
 ): T | undefined {
   const sorted = sortBookmarks(list);
   if (sorted.length === 0) {
@@ -181,9 +186,9 @@ export function neighbor<T extends Pick<LineBookmark, 'file' | 'line'>>(
   }
   const cmp = (b: T) => b.file.localeCompare(file) || b.line - line;
   if (direction === 1) {
-    return sorted.find((b) => cmp(b) > 0) ?? sorted[0];
+    return sorted.find((b) => cmp(b) > 0) ?? (wrap ? sorted[0] : undefined);
   }
-  return [...sorted].reverse().find((b) => cmp(b) < 0) ?? sorted[sorted.length - 1];
+  return [...sorted].reverse().find((b) => cmp(b) < 0) ?? (wrap ? sorted[sorted.length - 1] : undefined);
 }
 
 /** 新增書籤時建議的名稱：選取的文字 → 游標所在單字 → 所在函式名稱 → 該行內容。 */

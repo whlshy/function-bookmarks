@@ -528,24 +528,76 @@ export class BookmarkCommands {
     }
   }
 
-  /** 跳到下一個（1）或上一個（-1）書籤，跨檔案、頭尾相接；可傳入篩選後的清單。 */
+  /** 跳到下一個（1）或上一個（-1）書籤（含函式書籤與行號書籤），依設定決定範圍與是否頭尾循環。 */
   async go(direction: 1 | -1): Promise<{ uri: vscode.Uri; line: number } | undefined> {
+    // 多資料夾工作區以視窗／工作區層級設定為準（與 autoNumber、showLabelAtLineEnd 一致，跨資料夾導覽行為統一）
+    const cfg = vscode.workspace.getConfiguration(SECTION);
+    const scope = cfg.get<string>('bookmarks.navigationScope', 'all') === 'currentFile' ? 'currentFile' : 'all';
+    const wrap = cfg.get<boolean>('bookmarks.navigationWrap', true);
+
     const folders = vscode.workspace.workspaceFolders ?? [];
     const keyOf = (folder: vscode.WorkspaceFolder, file: string) => `${String(folders.indexOf(folder)).padStart(3, '0')}/${file}`;
-    // 函式書籤用目前偵測到的行號；找不到的函式不參與跳轉
-    const items = shownBookmarkItems(this.store, this.favorites)
-      .filter((i) => i.line !== undefined)
-      .map((i) => ({ file: keyOf(i.folder, i.file), line: i.line!, entry: { uri: i.uri, line: i.line! } }));
     const editor = vscode.window.activeTextEditor;
     const loc = editor ? this.store.locate(editor.document.uri) : undefined;
-    const current = loc ? `${String(folders.indexOf(loc.folder)).padStart(3, '0')}/${loc.rel}` : undefined;
-    const target = neighbor(items, current, editor?.selection.active.line ?? 0, direction);
-    if (!target) {
-      void vscode.window.showInformationMessage(vscode.l10n.t('No bookmarks yet.'));
+    const current = loc ? keyOf(loc.folder, loc.rel) : undefined;
+    // currentFile 模式但沒有作用中的編輯器時，視為 all
+    const currentFileOnly = scope === 'currentFile' && editor !== undefined;
+
+    // 函式書籤用目前偵測到的行號；找不到的函式不參與跳轉
+    const allItems = shownBookmarkItems(this.store, this.favorites)
+      .filter((i) => i.line !== undefined)
+      .map((i) => ({ file: keyOf(i.folder, i.file), line: i.line!, entry: { uri: i.uri, line: i.line! } }));
+    const items = currentFileOnly
+      ? current !== undefined
+        ? allItems.filter((i) => i.file === current)
+        : []
+      : allItems;
+
+    if (items.length === 0) {
+      if (currentFileOnly) {
+        vscode.window.setStatusBarMessage(vscode.l10n.t('No bookmarks in this file.'), 3000);
+      } else {
+        // 和其他跳轉提示一樣用狀態列短暫顯示，不跳出會擋住程式碼的通知
+        vscode.window.setStatusBarMessage(vscode.l10n.t('No bookmarks yet.'), 3000);
+      }
       return undefined;
     }
-    await revealLine(target.entry.uri, target.entry.line);
-    return target.entry;
+
+    // 開不了的檔案（已被刪除、搬走）跳過，從它的位置繼續找下一個；不然游標不動，每次都挑到同一個而卡住
+    let pool = items;
+    let fromFile = current;
+    let fromLine = editor?.selection.active.line ?? 0;
+    let lastError: unknown;
+    for (
+      let target = neighbor(pool, fromFile, fromLine, direction, wrap);
+      target;
+      target = neighbor(pool, fromFile, fromLine, direction, wrap)
+    ) {
+      try {
+        // 先確認磁碟上還有這個檔案：剛關閉的分頁 VS Code 還會留著內容，不檢查會打開一個「已刪除」的分頁
+        await vscode.workspace.fs.stat(target.entry.uri);
+        await revealLine(target.entry.uri, target.entry.line);
+        return target.entry;
+      } catch (err) {
+        lastError = err;
+        const skipped = target.entry.uri.toString();
+        pool = pool.filter((i) => i.entry.uri.toString() !== skipped);
+        fromFile = target.file;
+        fromLine = target.line;
+      }
+    }
+    if (!wrap && pool.length > 0) {
+      // 不循環且沒有下一個／上一個（含跳過已刪除的書籤後後面沒有了）：游標不動並以狀態列短暫提示
+      vscode.window.setStatusBarMessage(
+        direction === 1 ? vscode.l10n.t('Already at the last bookmark.') : vscode.l10n.t('Already at the first bookmark.'),
+        3000,
+      );
+      return undefined;
+    }
+    if (lastError !== undefined) {
+      throw lastError;
+    }
+    return undefined;
   }
 
   async editNote(node?: unknown, value?: string): Promise<void> {

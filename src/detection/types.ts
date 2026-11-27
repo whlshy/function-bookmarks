@@ -10,7 +10,22 @@ export type SymbolKindName =
   | 'heading'
   | 'reference';
 
-export type BodyKind = 'brace' | 'indent' | 'pair' | 'line' | 'call' | 'heading' | 'embedded' | 'end' | 'statement';
+/**
+ * - `indentBlock`：開頭那一行，加上後面縮排比它深的各行（Haskell）。
+ * - `braceOrIndent`：標頭先遇到 { 就配對大括號；沒有 { 時，下一行縮排較深就到那段縮排結束，否則只算那一行（Scala 2 與 3）。
+ */
+export type BodyKind =
+  | 'brace'
+  | 'indent'
+  | 'pair'
+  | 'line'
+  | 'call'
+  | 'heading'
+  | 'embedded'
+  | 'end'
+  | 'statement'
+  | 'indentBlock'
+  | 'braceOrIndent';
 
 /**
  * 一條函式偵測規則。
@@ -56,6 +71,11 @@ export interface DetectionRule {
    * 標頭那一行結束、下一行不是 { 或 : 開頭時就結束，不會往後吃到下一個 {。
    */
   optionalBody?: boolean;
+  /**
+   * 同一層緊鄰、名稱與種類都相同的符號合併成一個（Elixir 的多段 def、Haskell 的型別簽名與各段等式），
+   * 範圍從第一段到最後一段，名稱位置在第一段。
+   */
+  mergeClauses?: boolean;
 }
 
 export interface DetectedSymbol {
@@ -105,6 +125,14 @@ export type Syntax =
   | 'proto'
   | 'shell'
   | 'sql'
+  | 'scala'
+  | 'dart'
+  | 'lua'
+  | 'elixir'
+  | 'powershell'
+  | 'r'
+  | 'haskell'
+  | 'zig'
   /** Vue、Svelte 單檔元件的外層（template 的 HTML 註解）。 */
   | 'sfc'
   | 'none';

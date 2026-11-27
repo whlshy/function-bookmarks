@@ -3,6 +3,7 @@
  */
 import { BookmarkAnchor, LineBookmark } from '../bookmarks/model';
 import { StoreData } from '../storage/marks';
+import { stripBom } from '../util/bom';
 
 export const EXPORT_FORMAT = 'function-bookmarks/v1';
 
@@ -103,7 +104,7 @@ function parseAnchor(v: unknown): BookmarkAnchor | undefined {
 export function parseExport(text: string): ExportFile | { error: 'json' | 'format' } {
   let raw: unknown;
   try {
-    raw = JSON.parse(text);
+    raw = JSON.parse(stripBom(text));
   } catch {
     return { error: 'json' };
   }

@@ -2,7 +2,7 @@
   "name": "function-bookmarks",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.9.2",
+  "version": "0.10.0",
   "publisher": "whlshy",
   "icon": "media/icon.png",
   "galleryBanner": {
@@ -952,23 +952,43 @@
             "markdownDescription": "%config.bookmarks.showLabelAtLineEnd%",
             "order": 2
           },
+          "functionBookmarks.bookmarks.navigationScope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "currentFile"
+            ],
+            "enumDescriptions": [
+              "%config.bookmarks.navigationScope.all%",
+              "%config.bookmarks.navigationScope.currentFile%"
+            ],
+            "default": "all",
+            "markdownDescription": "%config.bookmarks.navigationScope%",
+            "order": 3
+          },
+          "functionBookmarks.bookmarks.navigationWrap": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "%config.bookmarks.navigationWrap%",
+            "order": 4
+          },
           "functionBookmarks.statusBar.enabled": {
             "type": "boolean",
             "default": true,
             "markdownDescription": "%config.statusBar.enabled%",
-            "order": 3
+            "order": 5
           },
           "functionBookmarks.hover.enabled": {
             "type": "boolean",
             "default": true,
             "markdownDescription": "%config.hover.enabled%",
-            "order": 4
+            "order": 6
           },
           "functionBookmarks.followCursor": {
             "type": "boolean",
             "default": true,
             "markdownDescription": "%config.followCursor%",
-            "order": 5
+            "order": 7
           }
         }
       },
@@ -1068,7 +1088,9 @@
                     "heading",
                     "embedded",
                     "end",
-                    "statement"
+                    "statement",
+                    "indentBlock",
+                    "braceOrIndent"
                   ],
                   "description": "%config.rule.body%"
                 },
@@ -1117,6 +1139,10 @@
                 "optionalBody": {
                   "type": "boolean",
                   "description": "%config.rule.optionalBody%"
+                },
+                "mergeClauses": {
+                  "type": "boolean",
+                  "description": "%config.rule.mergeClauses%"
                 }
               }
             },
@@ -1161,7 +1187,7 @@
         "properties": {
           "functionBookmarks.project.include": {
             "type": "string",
-            "default": "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,pyi,c,h,cpp,cc,cxx,hpp,hh,hxx,cu,cuh,m,mm,rs,go,java,cs,kt,kts,swift,php,rb,rake,md,markdown,html,htm,djhtml,jinja,jinja2,j2,proto,vue,svelte,sh,bash,zsh,sql}",
+            "default": "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,py,pyi,c,h,cpp,cc,cxx,hpp,hh,hxx,cu,cuh,m,mm,rs,go,java,cs,kt,kts,swift,php,rb,rake,md,markdown,html,htm,djhtml,jinja,jinja2,j2,proto,vue,svelte,sh,bash,zsh,sql,lua,dart,scala,sc,ex,exs,ps1,psm1,r,R,hs,zig}",
             "markdownDescription": "%config.project.include%",
             "order": 0
           },

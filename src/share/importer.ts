@@ -11,6 +11,7 @@ import { AlefragnaniImportResult, importAlefragnaniItems } from '../bookmarks/im
 import { BOOKMARKS_FILE } from '../storage/gitExclude';
 import { dedupeStoreNumbers, favorites, hasStoreData, mergeStoreData, parseStoreFileImport, StoreData } from '../storage/marks';
 import { reconcileFile } from '../storage/reconcile';
+import { stripBom } from '../util/bom';
 import { uriKey } from '../util/uris';
 import { ShareDeps } from './exporter';
 import { applyImport, decodeHashes, existingCounts, ExportedBookmark, ImportMode, normalizeRemote, parseExport } from './format';
@@ -346,7 +347,7 @@ export async function importBookmarks(
   if (input === undefined) {
     return undefined;
   }
-  const { text } = input;
+  const text = stripBom(input.text);
   const folders = vscode.workspace.workspaceFolders ?? [];
   const pickFolder = async () =>
     options.folder ??

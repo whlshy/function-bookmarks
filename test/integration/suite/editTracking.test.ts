@@ -377,6 +377,25 @@ describe('日常編輯後書籤不跑掉', () => {
     await expectFavorite(doc, 'formatInvoice', 2, 8);
   });
 
+  it('情境 5：游標在縮排後面按 Enter（自動縮排），書籤跟著程式碼往下一行', async () => {
+    const uri = await createFile('enter_indent');
+    // 第 3 行有兩格縮排：  return `…`;
+    const editor = await openAt(uri, 2, api);
+    await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+    await api.store.flush();
+    await settle(uri);
+    const doc = editor.document;
+    assert.deepStrictEqual(observe(doc), markAt(3, LINES[2]), '前置條件：書籤加在第 3 行');
+    await vscode.window.showTextDocument(doc, { viewColumn: editor.viewColumn, preserveFocus: false });
+    const active = vscode.window.activeTextEditor!;
+    active.selection = new vscode.Selection(2, 2, 2, 2);
+    await vscode.commands.executeCommand('type', { text: '\n' });
+    await waitFor(() => doc.lineCount, (n) => n === LINES.length + 2, '按 Enter 後多一行');
+    await settle(uri);
+    assert.strictEqual(doc.lineAt(3).text, LINES[2], '程式碼被推到第 4 行');
+    assert.deepStrictEqual(observe(doc), markAt(4, LINES[2]));
+  });
+
   it('情境 4b 變化：被拆行的函式下方的函式書籤，跟著函式名稱行往下 4 行', async () => {
     const doc = await setupFavorite('format_favorite_below', 'printSummary');
     await expectFavorite(doc, 'printSummary', 16, 18);

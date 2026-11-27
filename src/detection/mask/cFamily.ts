@@ -31,6 +31,8 @@ export const C_FAMILY: Partial<Record<Syntax, CFamilyOptions>> = {
   go: { quote: 'char', backtick: true },
   java: { quote: 'char', nestedBlock: false, tripleQuote: 'escape' },
   kotlin: { quote: 'char', nestedBlock: true, tripleQuote: 'raw' },
+  // Scala 的註解與字串寫法和 Kotlin 相同（""" 不跳脫、區塊註解可巢狀）
+  scala: { quote: 'char', nestedBlock: true, tripleQuote: 'raw' },
   csharp: { quote: 'char', verbatim: true, tripleQuote: 'rawMulti' },
   php: { quote: 'string', hashComment: true, multilineString: true, heredoc: true },
   // Protocol Buffers：// 與 /* */ 註解，'…' 與 "…" 字串都不跨行

@@ -1,5 +1,6 @@
 import { LineBookmark } from '../bookmarks/model';
 import { SymbolKindName } from '../detection/types';
+import { stripBom } from '../util/bom';
 
 /**
  * 函式層級的標記：收藏、自訂顯示名稱。
@@ -156,7 +157,7 @@ const KINDS = new Set<string>(['function', 'method', 'class', 'block', 'partial'
 export function parseStore(text: string): StoreData | undefined {
   let raw: unknown;
   try {
-    raw = JSON.parse(text);
+    raw = JSON.parse(stripBom(text));
   } catch {
     return undefined;
   }
@@ -229,7 +230,7 @@ function sanitizeImportFilePath(file: string): string | undefined {
 export function parseStoreFileImport(text: string): StoreData | undefined {
   let raw: unknown;
   try {
-    raw = JSON.parse(text);
+    raw = JSON.parse(stripBom(text));
   } catch {
     return undefined;
   }

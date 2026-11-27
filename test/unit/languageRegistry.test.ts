@@ -23,7 +23,8 @@ describe('語言清單（detection/languages）', () => {
         assert.ok(id in lang.syntax, `${id} 沒有遮罩設定`);
       }
       for (const ext of lang.projectExtensions) {
-        assert.ok(EXT_LANGUAGE[`.${ext}`], `.${ext} 沒有對到語言`);
+        // 副檔名查表一律用小寫（.R 與 .r 都是 R）
+        assert.ok(EXT_LANGUAGE[`.${ext.toLowerCase()}`], `.${ext} 沒有對到語言`);
       }
     }
     assert.strictEqual(new Set(PROJECT_EXTENSIONS).size, PROJECT_EXTENSIONS.length, '副檔名重複');

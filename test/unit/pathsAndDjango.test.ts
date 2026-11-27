@@ -14,7 +14,9 @@ describe('路徑工具', () => {
     assert.strictEqual(languageForPath('src/lib.rs'), 'rust');
     assert.strictEqual(languageForPath('include/x.HPP'), 'cpp');
     assert.strictEqual(languageForPath('x.h'), 'c');
-    assert.strictEqual(languageForPath('a.lua'), undefined);
+    assert.strictEqual(languageForPath('a.pas'), undefined);
+    assert.strictEqual(languageForPath('a.lua'), 'lua');
+    assert.strictEqual(languageForPath('analysis/plot.R'), 'r');
   });
 
   it('Windows 磁碟代號大小寫不同也能算出相對路徑', () => {

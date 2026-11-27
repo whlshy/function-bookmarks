@@ -12,7 +12,7 @@ import { languageForPath } from '../util/paths';
 import { FileEvents } from '../util/fileEvents';
 import { uriKey } from '../util/uris';
 import { BranchPosition, isBlockReplace, isWholeDocumentReplace, LineBookmark, LineChange, makeAnchor } from './model';
-import { applyLineChangeBatches, LineChangeBatch, onLineDeleteSetting } from './tracker';
+import { applyLineChangeBatches, LineChangeBatch, onLineDeleteSetting, toLineChanges } from './tracker';
 import {
   BranchRelocateResult,
   conflictRegions,
@@ -765,13 +765,7 @@ export class ExternalChangeWatcher implements vscode.Disposable {
   }
 
   private toChanges(e: vscode.TextDocumentChangeEvent): LineChange[] {
-    return e.contentChanges.map((c) => ({
-      startLine: c.range.start.line,
-      startChar: c.range.start.character,
-      endLine: c.range.end.line,
-      endChar: c.range.end.character,
-      text: c.text.replace(/\r\n/g, '\n'),
-    }));
+    return toLineChanges(e);
   }
 
   /**

@@ -5,8 +5,16 @@ import * as path from 'path';
 const ROOT = path.resolve(__dirname, '../../..');
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const nlsEn = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.nls.json'), 'utf8')) as Record<string, string>;
-const nlsZh = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.nls.zh-tw.json'), 'utf8')) as Record<string, string>;
-const l10nZh = JSON.parse(fs.readFileSync(path.join(ROOT, 'l10n/bundle.l10n.zh-tw.json'), 'utf8')) as Record<string, string>;
+/** 支援的介面語言清單（新增語言時只需加在這裡）。 */
+const LOCALES = ['zh-tw', 'zh-cn', 'ja', 'ko'] as const;
+/** 商店與擴充清單上顯示的名稱：英文名稱加上該語言的「函式書籤」。 */
+const DISPLAY_NAMES: Record<(typeof LOCALES)[number], string> = {
+  'zh-tw': 'Function Bookmarks 函式書籤',
+  'zh-cn': 'Function Bookmarks 函数书签',
+  ja: 'Function Bookmarks 関数ブックマーク',
+  ko: 'Function Bookmarks 함수 북마크',
+};
+const l10nBase = JSON.parse(fs.readFileSync(path.join(ROOT, 'l10n/bundle.l10n.zh-tw.json'), 'utf8')) as Record<string, string>;
 
 type CommandDecl = { command: string; title: string; category?: string; icon?: string };
 type MenuItem = { command: string; when?: string; group?: string };
@@ -263,7 +271,13 @@ describe('package.json、package.nls 與 l10n 一致性', () => {
       }
     }
     const allProps = Object.assign({}, ...groups.map((g) => g.properties));
-    for (const k of ['functionBookmarks.bookmarks.autoNumber', 'functionBookmarks.bookmarks.showLabelAtLineEnd', 'functionBookmarks.statusBar.enabled']) {
+    for (const k of [
+      'functionBookmarks.bookmarks.autoNumber',
+      'functionBookmarks.bookmarks.showLabelAtLineEnd',
+      'functionBookmarks.bookmarks.navigationScope',
+      'functionBookmarks.bookmarks.navigationWrap',
+      'functionBookmarks.statusBar.enabled',
+    ]) {
       assert.ok(k in allProps, k);
     }
     assert.strictEqual(
@@ -279,33 +293,51 @@ describe('package.json、package.nls 與 l10n 一致性', () => {
     assert.strictEqual(bytes.subarray(0, 4).toString('latin1'), 'wOFF');
   });
 
-  it('package.nls 英文與繁體中文鍵值完全對齊、無多餘或遺漏鍵；bundle.l10n 佔位符一致', () => {
+  it('所有語言的 package.nls 與 bundle.l10n 鍵集合、佔位符與檢視標題一致', () => {
     const rawPkg = fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8');
     const referenced = new Set([...rawPkg.matchAll(/%([a-zA-Z0-9._-]+)%/g)].map((m) => m[1]));
     const enKeys = new Set(Object.keys(nlsEn));
-    const zhKeys = new Set(Object.keys(nlsZh));
+    const baseL10nKeys = new Set(Object.keys(l10nBase));
+    const placeholders = (text: string): string[] => [...new Set(text.match(/\{\d+\}/g) ?? [])].sort();
 
     for (const k of referenced) {
       assert.ok(enKeys.has(k), `package.nls.json 缺少鍵：${k}`);
-      assert.ok(zhKeys.has(k), `package.nls.zh-tw.json 缺少鍵：${k}`);
     }
     for (const k of enKeys) {
       assert.ok(referenced.has(k), `package.nls.json 有未使用的鍵：${k}`);
-      assert.ok(zhKeys.has(k), `package.nls.zh-tw.json 缺少鍵：${k}`);
-    }
-    for (const k of zhKeys) {
-      assert.ok(enKeys.has(k), `package.nls.zh-tw.json 有多餘的鍵：${k}`);
     }
 
     assert.strictEqual(nlsEn.displayName, 'Function Bookmarks');
-    assert.strictEqual(nlsZh.displayName, 'Function Bookmarks 函式書籤');
     assert.strictEqual(nlsEn['container.title'], nlsEn['view.tree.name']);
-    assert.strictEqual(nlsZh['container.title'], nlsZh['view.tree.name']);
 
-    for (const [en, zh] of Object.entries(l10nZh)) {
-      const enPh = [...new Set(en.match(/\{\d+\}/g) ?? [])].sort();
-      const zhPh = [...new Set(zh.match(/\{\d+\}/g) ?? [])].sort();
-      assert.deepStrictEqual(zhPh, enPh, `l10n 佔位符不一致：${en} => ${zh}`);
+    // 逐一檢查每個語言的 package.nls.<lang>.json 與 l10n/bundle.l10n.<lang>.json
+    for (const lang of LOCALES) {
+      const nlsFile = `package.nls.${lang}.json`;
+      const l10nFile = `l10n/bundle.l10n.${lang}.json`;
+      const nls = JSON.parse(fs.readFileSync(path.join(ROOT, nlsFile), 'utf8')) as Record<string, string>;
+      const l10n = JSON.parse(fs.readFileSync(path.join(ROOT, l10nFile), 'utf8')) as Record<string, string>;
+
+      const nlsKeys = new Set(Object.keys(nls));
+      for (const k of enKeys) {
+        assert.ok(nlsKeys.has(k), `${nlsFile} 缺少鍵：${k}`);
+        assert.deepStrictEqual(placeholders(nls[k]), placeholders(nlsEn[k]), `${nlsFile} 佔位符不一致：${k}`);
+      }
+      for (const k of nlsKeys) {
+        assert.ok(enKeys.has(k), `${nlsFile} 有多餘的鍵：${k}`);
+      }
+      assert.strictEqual(nls['container.title'], nls['view.tree.name'], `${nlsFile} 的 container.title 應等於 view.tree.name`);
+      assert.strictEqual(nls.displayName, DISPLAY_NAMES[lang], `${nlsFile} 的 displayName`);
+
+      const l10nKeys = new Set(Object.keys(l10n));
+      for (const k of baseL10nKeys) {
+        assert.ok(l10nKeys.has(k), `${l10nFile} 缺少鍵：${k}`);
+      }
+      for (const k of l10nKeys) {
+        assert.ok(baseL10nKeys.has(k), `${l10nFile} 有多餘的鍵：${k}`);
+      }
+      for (const [en, translated] of Object.entries(l10n)) {
+        assert.deepStrictEqual(placeholders(translated), placeholders(en), `${l10nFile} 佔位符不一致：${en} => ${translated}`);
+      }
     }
   });
 });

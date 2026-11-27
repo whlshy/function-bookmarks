@@ -7,6 +7,8 @@ const G_TEXT = String.raw`[^;{}()<>\n]*`;
 export const GENERIC = String.raw`<${G_TEXT}(?:<${G_TEXT}(?:<${G_TEXT}>${G_TEXT})*>${G_TEXT})*>`;
 /** 後面先遇到 { 才算有本體（遇到 ; 或 } 表示只是宣告或呼叫）。 */
 export const HAS_BODY = String.raw`(?=[^;{}]*\{)`;
+/** 成對的小括號（最多三層巢狀，可以跨行）：用來確認參數之後才是本體，避免把呼叫當成定義。 */
+export const PARAMS = String.raw`\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)`;
 /** Java／Kotlin 的 @Annotation（同一行）。 */
 export const ANNOTATIONS = String.raw`(?:@[A-Za-z_][\w.]*(?:\([^)\n]*\))?[ \t]+)*`;
 export const J_KW = 'if|else|for|while|do|switch|case|return|new|throw|try|catch|finally|synchronized|assert|yield|import|package|throws';

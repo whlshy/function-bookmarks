@@ -41,6 +41,7 @@ describe('匯出與匯入書籤：格式', () => {
 
   it('讀取匯出檔：檢查格式、略過壞掉的項目與工作區外的路徑', () => {
     assert.deepStrictEqual(parseExport('{'), { error: 'json' });
+    assert.deepStrictEqual(parseExport('﻿{"format":"other","bookmarks":[]}'), { error: 'format' }, '開頭有 BOM 也能解析');
     assert.deepStrictEqual(parseExport('{"format":"other","bookmarks":[]}'), { error: 'format' });
     const r = parseExport(
       JSON.stringify({

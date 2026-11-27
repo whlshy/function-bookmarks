@@ -351,6 +351,127 @@ describe('書籤操作、函式書籤、數字導覽、顏色與快捷鍵', () =
       assert.ok(!api.favorites.all.some((f) => f.mark.file === 'app/tmp_mix.py'));
     });
 
+    it('下一個／上一個書籤：中間的檔案在磁碟上被刪掉時跳過它，不會卡在同一個', async () => {
+      const gone = workspaceFile('app', 'tmp_bm_aa.py');
+      await fsp.writeFile(gone.fsPath, body);
+      try {
+        await openAt(fileA(), 4, api);
+        await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+        await openAt(gone, 3, api);
+        await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+        await openAt(fileB(), 2, api);
+        await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+        await api.store.flush();
+        // 先關掉分頁再刪檔：分頁開著時 VS Code 仍保有內容，開得起來
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await fsp.rm(gone.fsPath, { force: true });
+        await openAt(fileA(), 0, api);
+        const pos = () => {
+          const e = vscode.window.activeTextEditor!;
+          return `${path.basename(e.document.uri.fsPath)}:${e.selection.active.line}`;
+        };
+        await vscode.commands.executeCommand('functionBookmarks.nextBookmark');
+        assert.strictEqual(pos(), 'tmp_bm_a.py:4');
+        await vscode.commands.executeCommand('functionBookmarks.nextBookmark');
+        assert.strictEqual(pos(), 'tmp_bm_b.py:2', '跳過已刪除的 tmp_bm_aa.py');
+        await vscode.commands.executeCommand('functionBookmarks.previousBookmark');
+        assert.strictEqual(pos(), 'tmp_bm_a.py:4', '往回也跳過');
+      } finally {
+        await api.bookmarks.clearAll(true);
+        await fsp.rm(gone.fsPath, { force: true });
+      }
+    });
+
+    it('下一個／上一個書籤：navigationScope（currentFile）與 navigationWrap（false／預設 true）設定', async () => {
+      const cfg = vscode.workspace.getConfiguration('functionBookmarks');
+      const gone = workspaceFile('app', 'tmp_bm_zz.py');
+      const pos = () => {
+        const e = vscode.window.activeTextEditor!;
+        return `${path.basename(e.document.uri.fsPath)}:${e.selection.active.line}`;
+      };
+      try {
+        // fileA：函式書籤（行 0 helper）＋行號書籤（行 4）；fileB：行號書籤（行 2）
+        await openAt(fileA(), 0, api);
+        await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+        await openAt(fileA(), 4, api);
+        await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+        await openAt(fileB(), 2, api);
+        await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+        await api.favorites.refresh();
+
+        // 1. 預設值（all + wrap: true）跨檔案循環
+        await openAt(fileB(), 2, api);
+        await vscode.commands.executeCommand('functionBookmarks.nextBookmark');
+        assert.strictEqual(pos(), 'tmp_bm_a.py:0', '預設應從最後一個繞回第一個');
+
+        // 2. navigationScope = currentFile：只在目前檔案裡跳（含函式書籤與行號書籤）
+        await cfg.update('bookmarks.navigationScope', 'currentFile', vscode.ConfigurationTarget.Workspace);
+        await openAt(fileA(), 0, api);
+        await vscode.commands.executeCommand('functionBookmarks.nextBookmark');
+        assert.strictEqual(pos(), 'tmp_bm_a.py:4');
+        await vscode.commands.executeCommand('functionBookmarks.nextBookmark');
+        assert.strictEqual(pos(), 'tmp_bm_a.py:0', 'currentFile 且預設循環時只在本檔內繞回，不跳到 fileB');
+        await vscode.commands.executeCommand('functionBookmarks.previousBookmark');
+        assert.strictEqual(pos(), 'tmp_bm_a.py:4', '往回也只在本檔內繞回');
+
+        // 目前檔案沒有書籤：不動，回傳 undefined
+        await openAt(fileC(), 1, api);
+        const noneInFile = await vscode.commands.executeCommand('functionBookmarks.nextBookmark');
+        assert.strictEqual(noneInFile, undefined);
+        assert.strictEqual(pos(), 'tmp_mix.py:1');
+
+        // 沒有作用中的編輯器時，currentFile 當成 all
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await vscode.commands.executeCommand('functionBookmarks.nextBookmark');
+        assert.strictEqual(pos(), 'tmp_bm_a.py:0', '無作用中編輯器時 fallback 到 all');
+
+        // 3. navigationScope = currentFile 且 navigationWrap = false：到本檔頭尾停住
+        await cfg.update('bookmarks.navigationWrap', false, vscode.ConfigurationTarget.Workspace);
+        await openAt(fileA(), 0, api);
+        assert.strictEqual(await vscode.commands.executeCommand('functionBookmarks.previousBookmark'), undefined);
+        assert.strictEqual(pos(), 'tmp_bm_a.py:0', '本檔第一個再按上一個應停住');
+        await vscode.commands.executeCommand('functionBookmarks.nextBookmark');
+        assert.strictEqual(pos(), 'tmp_bm_a.py:4');
+        assert.strictEqual(await vscode.commands.executeCommand('functionBookmarks.nextBookmark'), undefined);
+        assert.strictEqual(pos(), 'tmp_bm_a.py:4', '本檔最後一個再按下一個應停住');
+
+        // 4. navigationScope = all 且 navigationWrap = false：跨檔案到頭尾停住
+        await cfg.update('bookmarks.navigationScope', 'all', vscode.ConfigurationTarget.Workspace);
+        await openAt(fileA(), 4, api);
+        await vscode.commands.executeCommand('functionBookmarks.nextBookmark');
+        assert.strictEqual(pos(), 'tmp_bm_b.py:2');
+        assert.strictEqual(await vscode.commands.executeCommand('functionBookmarks.nextBookmark'), undefined);
+        assert.strictEqual(pos(), 'tmp_bm_b.py:2', '最後一個再按下一個應停住不繞回');
+        await vscode.commands.executeCommand('functionBookmarks.previousBookmark');
+        assert.strictEqual(pos(), 'tmp_bm_a.py:4');
+        await vscode.commands.executeCommand('functionBookmarks.previousBookmark');
+        assert.strictEqual(pos(), 'tmp_bm_a.py:0');
+        assert.strictEqual(await vscode.commands.executeCommand('functionBookmarks.previousBookmark'), undefined);
+        assert.strictEqual(pos(), 'tmp_bm_a.py:0', '第一個再按上一個應停住不繞回');
+
+        // 5. navigationWrap = false 時，最後一個檔案已從磁碟刪除：跳過後沒有剩餘目標，視為已到最後一個而不丟錯
+        await fsp.writeFile(gone.fsPath, body);
+        await openAt(gone, 3, api);
+        await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+        await api.store.flush();
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await fsp.rm(gone.fsPath, { force: true });
+        await openAt(fileB(), 2, api);
+        assert.strictEqual(await vscode.commands.executeCommand('functionBookmarks.nextBookmark'), undefined);
+        assert.strictEqual(pos(), 'tmp_bm_b.py:2', '跳過已刪除的最後一個檔案後應停在原位');
+
+        // 6. 恢復預設（navigationWrap = undefined → true）後立即重新循環
+        await cfg.update('bookmarks.navigationWrap', undefined, vscode.ConfigurationTarget.Workspace);
+        await vscode.commands.executeCommand('functionBookmarks.nextBookmark');
+        assert.strictEqual(pos(), 'tmp_bm_a.py:0', '恢復預設後應立即恢復循環');
+      } finally {
+        await cfg.update('bookmarks.navigationScope', undefined, vscode.ConfigurationTarget.Workspace);
+        await cfg.update('bookmarks.navigationWrap', undefined, vscode.ConfigurationTarget.Workspace);
+        await api.bookmarks.clearAll(true);
+        await fsp.rm(gone.fsPath, { force: true });
+      }
+    });
+
     it('滑鼠移到函式名稱上：可加入／移除書籤並併入備註；未加書籤不能改名／寫備註；設定可關閉', async () => {
       await openAt(fileC(), 0, api);
       const ours = async (line: number, ch: number) =>

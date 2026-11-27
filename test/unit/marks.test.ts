@@ -116,6 +116,11 @@ describe('收藏與自訂名稱資料', () => {
     assert.deepStrictEqual(parseStore('{}'), emptyStore());
   });
 
+  it('書籤檔開頭有 BOM（記事本、PowerShell 存檔）也能讀', () => {
+    const text = JSON.stringify({ version: 1, symbols: [], bookmarks: [{ id: 'a', file: 'x.ts', line: 3 }] });
+    assert.strictEqual(parseStore(`﻿${text}`)?.bookmarks.length, 1);
+  });
+
   it('mergeStoreData：合併書籤並以 target 為主，衝突號碼清掉來源端', () => {
     assert.strictEqual(hasStoreData(emptyStore()), false);
     let target = setFavorite(emptyStore(), key, true, 1, now);

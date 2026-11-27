@@ -347,14 +347,113 @@ function findEndKeywordEnd(masked: string, matchStart: number, from: number): nu
     const le = lineEndOffset(masked, pos);
     const line = masked.slice(pos, le);
     if (line.trim() !== '') {
-      if (indentWidth(line) <= base) {
-        return /^\s*end\b/.test(line) ? le : last;
+      const w = indentWidth(line);
+      if (w <= base) {
+        // 只有同一層縮排的 end 才是自己的結尾；更外層的 end 屬於外面的區塊（Elixir 的 `def x, do: 1` 後面接模組的 end）
+        return w === base && /^\s*end\b/.test(line) ? le : last;
       }
       last = le;
     }
     pos = le + 1;
   }
   return last;
+}
+
+/** 某一行開頭的縮排寬度。 */
+function indentAt(masked: string, lineStart: number): number {
+  return indentWidth(masked.slice(lineStart, lineEndOffset(masked, lineStart)));
+}
+
+/**
+ * 從 `pos`（某行開頭）往下，納入縮排比 `base` 深的各行（空行可以夾在中間），回傳最後一行的行尾；
+ * 一行都沒有時回傳 `fallback`。
+ */
+function deeperLinesEnd(masked: string, pos: number, base: number, fallback: number): number {
+  let end = fallback;
+  while (pos <= masked.length - 1) {
+    const le = lineEndOffset(masked, pos);
+    const line = masked.slice(pos, le);
+    if (line.trim() !== '') {
+      if (indentWidth(line) <= base) {
+        break;
+      }
+      end = le;
+    }
+    pos = le + 1;
+  }
+  return end;
+}
+
+/** 開頭那一行加上後面縮排較深的各行（Haskell 的等式、data、class … where）。 */
+function findIndentBlockEnd(masked: string, matchStart: number): number {
+  const lineStart = masked.lastIndexOf('\n', matchStart) + 1;
+  const headerEnd = lineEndOffset(masked, matchStart);
+  return deeperLinesEnd(masked, headerEnd + 1, indentAt(masked, lineStart), headerEnd);
+}
+
+/**
+ * Scala：標頭（括號外）先遇到 { 就配對大括號；換行時下一行若是 extends、with、derives、{ 或 = 開頭，標頭還沒結束。
+ * 否則下一行縮排較深就到那段縮排結束（Scala 3 的 `:`、`=` 後換行縮排；同縮排的 `end xxx` 也算進來），
+ * 再不然只算標頭那一行（`def f = 1`、抽象的 `def f: Int`）。
+ */
+function findBraceOrIndentEnd(masked: string, matchStart: number, from: number): number {
+  const lineStart = masked.lastIndexOf('\n', matchStart) + 1;
+  const base = indentAt(masked, lineStart);
+  let depth = 0;
+  const limit = Math.min(masked.length, from + MAX_HEADER_SCAN);
+  for (let i = from; i < limit; i++) {
+    const c = masked[i];
+    if (c === '(' || c === '[') {
+      depth++;
+      continue;
+    }
+    if (c === ')' || c === ']') {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth > 0) {
+      continue;
+    }
+    if (c === '{') {
+      return matchBrace(masked, i);
+    }
+    if (c === ';' || c === '}') {
+      return i;
+    }
+    if (c !== '\n') {
+      continue;
+    }
+    // 下一個非空白行
+    let pos = i + 1;
+    while (pos < masked.length && masked.slice(pos, lineEndOffset(masked, pos)).trim() === '') {
+      pos = lineEndOffset(masked, pos) + 1;
+    }
+    if (pos >= masked.length) {
+      return i;
+    }
+    const next = masked.slice(pos, lineEndOffset(masked, pos));
+    if (/^\s*(?:extends\b|with\b|derives\b|\{|=(?![=>]))/.test(next)) {
+      i = pos - 1;
+      continue;
+    }
+    if (indentWidth(next) <= base) {
+      return i;
+    }
+    let end = deeperLinesEnd(masked, pos, base, i);
+    // Scala 3 的結尾標記：同一層縮排的 `end xxx`
+    let after = end + 1;
+    while (after < masked.length && masked.slice(after, lineEndOffset(masked, after)).trim() === '') {
+      after = lineEndOffset(masked, after) + 1;
+    }
+    if (after < masked.length) {
+      const line = masked.slice(after, lineEndOffset(masked, after));
+      if (indentWidth(line) === base && /^\s*end\b/.test(line)) {
+        end = lineEndOffset(masked, after);
+      }
+    }
+    return end;
+  }
+  return lineEndOffset(masked, from);
 }
 
 /** 成對標籤：計算巢狀層數，找到對應的結束標籤。 */
@@ -469,6 +568,12 @@ function collect(
         case 'statement':
           endOffset = findStatementEnd(masked, matchStart, matchEnd);
           break;
+        case 'indentBlock':
+          endOffset = findIndentBlockEnd(masked, matchStart);
+          break;
+        case 'braceOrIndent':
+          endOffset = findBraceOrIndentEnd(masked, matchStart, matchEnd);
+          break;
         case 'call':
           endOffset = findCallEnd(masked, matchEnd);
           break;
@@ -571,6 +676,22 @@ function applyHide(nodes: RawSymbol[], hidden: Set<string> | undefined): RawSymb
   return out;
 }
 
+/** `mergeClauses`：同一層緊鄰、名稱與種類相同的符號合併成一個（範圍延伸到最後一段，子節點接在一起）。 */
+function mergeClauses(nodes: RawSymbol[]): RawSymbol[] {
+  const out: RawSymbol[] = [];
+  for (const n of nodes) {
+    n.children = mergeClauses(n.children);
+    const prev = out[out.length - 1];
+    if (prev && prev.rule.mergeClauses && n.rule.mergeClauses && prev.name === n.name && prev.rule.kind === n.rule.kind) {
+      prev.endOffset = Math.max(prev.endOffset, n.endOffset);
+      prev.children.push(...n.children);
+      continue;
+    }
+    out.push(n);
+  }
+  return out;
+}
+
 /** 同一個名稱位置被多條規則抓到時，只留最外層（規則順序在前）的那個。 */
 function dedupe(nodes: RawSymbol[], seen: Set<number>): RawSymbol[] {
   const out: RawSymbol[] = [];
@@ -642,7 +763,7 @@ export function detectSymbols(
   const masked = maskText(text, syntaxForLanguage(languageId));
   const raw = collect(text, masked, 0, languageId, rules, options, errors, 0);
   fixHeadingEnds(raw, text);
-  const tree = applyHide(dedupe(applyWithin(nest(raw), undefined), new Set()), undefined);
+  const tree = mergeClauses(applyHide(dedupe(applyWithin(nest(raw), undefined), new Set()), undefined));
   const uniqueErrors = errors.filter(
     (e, i) => errors.findIndex((x) => x.ruleId === e.ruleId && x.message === e.message) === i,
   );

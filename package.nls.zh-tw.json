@@ -19,7 +19,7 @@
   "config.rule.pattern": "正規表示式，需包含 (?<name>...) 群組（除非使用 nameTemplate 或 body 為 embedded）。",
   "config.rule.flags": "額外的正規表示式旗標，例如 i。",
   "config.rule.kind": "符號種類，決定圖示。",
-  "config.rule.body": "怎麼找結尾：brace（大括號）、indent（縮排）、pair（成對標籤）、line（單行）、call（函式呼叫括號）、heading（標題區塊）、embedded（內嵌區域）、end（同一縮排的 end，例如 Ruby）、statement（到 SQL 敘述結尾：;、GO、/ 或 DELIMITER）。",
+  "config.rule.body": "怎麼找結尾：brace（大括號）、indent（縮排）、pair（成對標籤）、line（單行）、call（函式呼叫括號）、heading（標題區塊）、embedded（內嵌區域）、end（同一縮排的 end，例如 Ruby）、statement（到 SQL 敘述結尾：;、GO、/ 或 DELIMITER）、indentBlock（這一行加上後面縮排較深的各行，例如 Haskell）、braceOrIndent（標頭有 { 就配對大括號，否則是後面縮排較深的各行，例如 Scala 3）。",
   "config.rule.end": "結束標籤（pair）或內嵌區域結尾（embedded）的正規表示式。",
   "config.rule.embeddedLanguage": "內嵌區域內要套用哪個語言的規則（embedded）。",
   "config.rule.within": "只有被這些種類包住時才算數，例如 [\"class\"]。",
@@ -44,6 +44,7 @@
   "config.rule.matchRaw": "以原始文字比對，字串內容（例如 'click'、'/api'）也能取出；起點在註解或字串裡的結果仍會略過。",
   "config.rule.hideChildren": "不顯示這些規則抓到的子節點，例如 ajax 的 success、error 回呼。",
   "config.rule.optionalBody": "允許 brace 本體省略或寫成 = 運算式（例如 Kotlin、Swift 的 data class 或單行運算式函式），不會往後吃到下一個大括號。",
+  "config.rule.mergeClauses": "同一層緊鄰、名稱與種類都相同的符號合併成一個，例如 Elixir 的多段 def、Haskell 的型別簽名與各段等式。",
   "command.editNote": "編輯備註",
   "command.previewNote": "預覽備註",
   "command.toggleBookmark": "加入／移除書籤",
@@ -108,5 +109,9 @@
   "config.notes.closeOnSave": "備註存檔（`Ctrl+S`／`Cmd+S`）後自動關閉編輯與預覽分頁。關閉此設定可只存檔不關分頁，方便邊寫邊存。",
   "config.bookmarks.autoNumber": "新增的書籤自動給下一個空號（1～9），可以用 `Alt+Shift+B 1`～`9`（macOS 為 `Ctrl+Shift+B 1`～`9`）直接跳過去。也可以隨時用「設定書籤號碼…」或 `Alt+Shift+B Shift+1`～`9` 設定或更改號碼。",
   "config.bookmarks.showLabelAtLineEnd": "在書籤那一行的行尾淡淡顯示書籤名稱（與號碼）。只有取了名稱、有號碼、或是別人的書籤才會顯示。",
+  "config.bookmarks.navigationScope": "「下一個書籤」與「上一個書籤」的跳轉範圍（不影響編號書籤導覽）。",
+  "config.bookmarks.navigationScope.all": "跨所有檔案的書籤跳轉。",
+  "config.bookmarks.navigationScope.currentFile": "只在目前檔案的書籤之間跳轉（沒有開啟編輯器時改為全部檔案）。",
+  "config.bookmarks.navigationWrap": "使用「下一個書籤」／「上一個書籤」跳到最後一個或第一個書籤時，繞回另一端繼續。關閉時到頭尾就停住。",
   "config.statusBar.enabled": "在狀態列顯示目前檔案的書籤數，以及來源篩選、圖示隱藏的狀態；點一下可以搜尋書籤。"
 }

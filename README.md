@@ -79,6 +79,8 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 | `functionBookmarks.bookmarks.onLineDelete` | `moveToNext` | When a bookmarked line is deleted: `moveToNext`, `markLost` or `remove` |
 | `functionBookmarks.bookmarks.autoNumber` | `false` | Give new bookmarks the next free number |
 | `functionBookmarks.bookmarks.showLabelAtLineEnd` | `true` | Show the bookmark name at the end of the line |
+| `functionBookmarks.bookmarks.navigationScope` | `all` | Next / previous bookmark goes through `all` files or only the `currentFile` |
+| `functionBookmarks.bookmarks.navigationWrap` | `true` | Next / previous bookmark wraps around at the last / first bookmark; turn off to stop there |
 | `functionBookmarks.statusBar.enabled` | `true` | Show bookmark count in the status bar |
 | `functionBookmarks.hover.enabled` | `true` | Popup on function names to add a bookmark, rename, edit the note |
 | `functionBookmarks.followCursor` | `true` | Highlight the function under the cursor in the side bar |
@@ -126,11 +128,32 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 ]
 ```
 
-`body` decides how the end of a symbol is found: `brace`, `indent`, `pair` (with `end`), `line`, `embedded` (with `end` and `embeddedLanguage`), `end` or `statement`. Run **Test Detection Rules on This File** to see what each rule finds.
+`body` decides how the end of a symbol is found: `brace`, `indent`, `pair` (with `end`), `line`, `embedded` (with `end` and `embeddedLanguage`), `end`, `statement`, `indentBlock` (the line plus the more-indented lines after it) or `braceOrIndent` (braces, or the more-indented lines when there is no `{`). `mergeClauses: true` joins adjacent clauses with the same name into one symbol. Run **Test Detection Rules on This File** to see what each rule finds.
 
 ## Multi-root workspaces and remote development
 
 Each workspace folder keeps its own bookmarks file with relative paths. The extension runs where your files are (`extensionKind: workspace`), so it works over SSH, WSL and Dev Containers.
+
+## Supported languages
+
+Built in, no language extension needed:
+
+| Language | What is listed |
+|---|---|
+| JavaScript, TypeScript (including JSX / TSX) | functions, classes, methods, event listeners, requests |
+| Python | functions, classes, methods |
+| C, C++, CUDA, Objective-C | functions, classes, structs, namespaces |
+| C#, Java, Kotlin, Swift, Scala, Dart | classes and their methods, constructors, functions |
+| Go, Rust, Zig | functions, methods, types, Zig tests |
+| PHP, Ruby, Lua, Elixir | classes / modules and their functions, ExUnit tests |
+| R, Haskell, PowerShell | functions, R6 classes, Haskell types and instances, PowerShell classes |
+| Shell (bash, zsh), SQL | functions; SQL procedures, views and triggers |
+| Vue, Svelte | functions in `<script>` |
+| HTML and Jinja templates | blocks, macros, includes |
+| Markdown | headings |
+| Protocol Buffers | services, RPCs, messages |
+
+Other languages use the language server of their extension. You can also add your own rules (see above).
 
 ## Privacy
 

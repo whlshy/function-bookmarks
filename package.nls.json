@@ -19,7 +19,7 @@
   "config.rule.pattern": "Regular expression with a (?<name>...) group (unless nameTemplate or body \"embedded\" is used).",
   "config.rule.flags": "Extra regular expression flags, e.g. i.",
   "config.rule.kind": "Kind of symbol; decides the icon.",
-  "config.rule.body": "How to find where the symbol ends: brace, indent, pair, line, call, heading, embedded, end (the next end at the same indentation, as in Ruby), or statement (to the end of the SQL statement: ;, GO, / or DELIMITER).",
+  "config.rule.body": "How to find where the symbol ends: brace, indent, pair, line, call, heading, embedded, end (the next end at the same indentation, as in Ruby), statement (to the end of the SQL statement: ;, GO, / or DELIMITER), indentBlock (the line plus the more-indented lines after it, as in Haskell) or braceOrIndent (braces if the header has {, otherwise the more-indented lines after it, as in Scala 3).",
   "config.rule.end": "Regular expression for the closing tag (pair) or the end of the region (embedded).",
   "config.rule.embeddedLanguage": "Language whose rules apply inside the region (embedded).",
   "config.rule.within": "Only count the symbol when it is inside one of these kinds, e.g. [\"class\"].",
@@ -44,6 +44,7 @@
   "config.rule.matchRaw": "Match against the original text so string contents (e.g. 'click', '/api') can be captured. Matches starting inside comments or strings are still skipped.",
   "config.rule.hideChildren": "Rule IDs whose child symbols are hidden under this one, e.g. ajax success/error callbacks.",
   "config.rule.optionalBody": "Allow a brace body to be omitted or written as an expression (e.g. Kotlin/Swift data classes or `=` expressions) without consuming the next `{`.",
+  "config.rule.mergeClauses": "Merge adjacent symbols with the same name and kind into one, e.g. Elixir function clauses or a Haskell type signature and its equations.",
   "command.editNote": "Edit Note",
   "command.previewNote": "Preview Note",
   "command.toggleBookmark": "Add / Remove Bookmark",
@@ -108,5 +109,9 @@
   "config.notes.closeOnSave": "Automatically close the note editor and preview tabs after saving (`Ctrl+S` / `Cmd+S`). Turn off to keep editing and save repeatedly.",
   "config.bookmarks.autoNumber": "Give every new bookmark the next free number (1–9), so you can jump to it with `Alt+Shift+B 1`–`9` (`Ctrl+Shift+B 1`–`9` on macOS). You can always set or change a number with *Set Bookmark Number…* or `Alt+Shift+B Shift+1`–`9`.",
   "config.bookmarks.showLabelAtLineEnd": "Show the bookmark name (and number) faintly at the end of the bookmarked line. Only for bookmarks with a name, a number, or from someone else.",
+  "config.bookmarks.navigationScope": "Scope of **Next Bookmark** and **Previous Bookmark** (does not affect numbered bookmark tour).",
+  "config.bookmarks.navigationScope.all": "Navigate across bookmarks in all files.",
+  "config.bookmarks.navigationScope.currentFile": "Only navigate among bookmarks in the current file (falls back to all files when no editor is active).",
+  "config.bookmarks.navigationWrap": "Wrap around when reaching the first or last bookmark with **Next Bookmark** / **Previous Bookmark**. Turn off to stop at either end.",
   "config.statusBar.enabled": "Show the number of bookmarks in the current file in the status bar, with the source filter and hidden-icon state. Click it to search bookmarks."
 }

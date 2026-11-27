@@ -79,6 +79,8 @@ Function Bookmarks 會記住每個書籤附近的內容，比對檔案修改前�
 | `functionBookmarks.bookmarks.onLineDelete` | `moveToNext` | 書籤那一行被刪掉時：`moveToNext`（移到下一行）、`markLost`（標成需確認）、`remove`（移除） |
 | `functionBookmarks.bookmarks.autoNumber` | `false` | 新增的書籤自動給下一個空號 |
 | `functionBookmarks.bookmarks.showLabelAtLineEnd` | `true` | 在行尾顯示書籤名稱 |
+| `functionBookmarks.bookmarks.navigationScope` | `all` | 下一個／上一個書籤的範圍：`all`（所有檔案）或 `currentFile`（只在目前檔案） |
+| `functionBookmarks.bookmarks.navigationWrap` | `true` | 下一個／上一個書籤到最後／第一個時繞回另一端；關閉就停在那裡 |
 | `functionBookmarks.statusBar.enabled` | `true` | 在狀態列顯示書籤數 |
 | `functionBookmarks.hover.enabled` | `true` | 滑鼠移到函式名稱時顯示加入書籤、改名、編輯備註的提示 |
 | `functionBookmarks.followCursor` | `true` | 側邊欄標示游標所在的函式 |
@@ -126,11 +128,32 @@ Function Bookmarks 會記住每個書籤附近的內容，比對檔案修改前�
 ]
 ```
 
-`body` 決定怎麼找到結尾：`brace`、`indent`、`pair`（搭配 `end`）、`line`、`embedded`（搭配 `end` 與 `embeddedLanguage`）、`end` 或 `statement`。執行「在這個檔案測試偵測規則」可以看到每條規則抓到什麼。
+`body` 決定怎麼找到結尾：`brace`、`indent`、`pair`（搭配 `end`）、`line`、`embedded`（搭配 `end` 與 `embeddedLanguage`）、`end`、`statement`、`indentBlock`（這一行加上後面縮排較深的各行）或 `braceOrIndent`（有 `{` 就配對大括號，沒有就是後面縮排較深的各行）。`mergeClauses: true` 會把緊鄰的同名定義合併成一個。執行「在這個檔案測試偵測規則」可以看到每條規則抓到什麼。
 
 ## 多資料夾工作區與遠端開發
 
 每個工作區資料夾各自一份書籤檔，使用相對路徑。套件在檔案所在的地方執行（`extensionKind: workspace`），所以 SSH、WSL、Dev Container 都能用。
+
+## 支援的語言
+
+內建支援，不需要另外安裝語言擴充：
+
+| 語言 | 列出的內容 |
+|---|---|
+| JavaScript、TypeScript（含 JSX／TSX） | 函式、類別、方法、事件監聽、請求 |
+| Python | 函式、類別、方法 |
+| C、C++、CUDA、Objective-C | 函式、類別、struct、namespace |
+| C#、Java、Kotlin、Swift、Scala、Dart | 類別與其中的方法、建構子、函式 |
+| Go、Rust、Zig | 函式、方法、型別、Zig 的 test |
+| PHP、Ruby、Lua、Elixir | 類別／模組與其中的函式、ExUnit 測試 |
+| R、Haskell、PowerShell | 函式、R6 類別、Haskell 的型別與 instance、PowerShell 類別 |
+| Shell（bash、zsh）、SQL | 函式；SQL 的預存程序、檢視、觸發程序 |
+| Vue、Svelte | `<script>` 裡的函式 |
+| HTML 與 Jinja 模板 | block、macro、include |
+| Markdown | 標題 |
+| Protocol Buffers | service、rpc、message |
+
+其他語言改用該語言擴充的語言伺服器。也可以自己加規則（見上方）。
 
 ## 隱私
 

@@ -28,6 +28,15 @@ describe('行號書籤：編輯時平移', () => {
     assert.deepStrictEqual(shiftLine(10, ins(10, 4, '\n')), { line: 10, deleted: false });
   });
 
+  it('游標在縮排後面按 Enter（插入點前只有空白，含自動縮排）：書籤跟著程式碼往下', () => {
+    assert.deepStrictEqual(shiftLine(10, { ...ins(10, 4, '\n    '), blankBefore: true }), { line: 11, deleted: false });
+    assert.deepStrictEqual(shiftLine(10, { ...ins(10, 1, '\n\t'), blankBefore: true }), { line: 11, deleted: false });
+    // 在縮排後面貼上兩行
+    assert.deepStrictEqual(shiftLine(10, { ...ins(10, 4, 'a()\n    b()\n    '), blankBefore: true }), { line: 12, deleted: false });
+    // 前面只有空白但插入的文字最後不是換行：原本的內容接在插入文字後面，書籤留在原行
+    assert.deepStrictEqual(shiftLine(10, { ...ins(10, 4, 'x\ny'), blankBefore: true }), { line: 10, deleted: false });
+  });
+
   it('刪除書籤上方的行，書籤往上', () => {
     assert.deepStrictEqual(shiftLine(10, del(2, 0, 5, 0)), { line: 7, deleted: false });
   });
@@ -125,6 +134,30 @@ describe('行號書籤：其他工具', () => {
     assert.deepStrictEqual(neighbor(list, 'b.py', 0, -1), { file: 'a.py', line: 10 });
     assert.deepStrictEqual(neighbor(list, undefined, 0, 1), { file: 'a.py', line: 2 });
     assert.strictEqual(neighbor([], 'a.py', 0, 1), undefined);
+  });
+
+  it('下一個／上一個：不循環（wrap = false）時到頭尾回傳 undefined', () => {
+    assert.deepStrictEqual(neighbor(list, 'a.py', 2, 1, false), { file: 'a.py', line: 10 });
+    assert.deepStrictEqual(neighbor(list, 'a.py', 10, 1, false), { file: 'b.py', line: 3 });
+    assert.strictEqual(neighbor(list, 'b.py', 3, 1, false), undefined, '在最後一個書籤不再循環');
+    assert.strictEqual(neighbor(list, 'b.py', 10, 1, false), undefined, '在最後一個書籤之後不再循環');
+    assert.strictEqual(neighbor(list, 'c.py', 0, 1, false), undefined, '在最後一個檔案之後不再循環');
+
+    assert.deepStrictEqual(neighbor(list, 'b.py', 3, -1, false), { file: 'a.py', line: 10 });
+    assert.deepStrictEqual(neighbor(list, 'a.py', 10, -1, false), { file: 'a.py', line: 2 });
+    assert.strictEqual(neighbor(list, 'a.py', 2, -1, false), undefined, '在第一個書籤不再循環');
+    assert.strictEqual(neighbor(list, 'a.py', 0, -1, false), undefined, '在第一個書籤之前不再循環');
+    assert.strictEqual(neighbor(list, '0.py', 0, -1, false), undefined, '在第一個檔案之前不再循環');
+
+    assert.deepStrictEqual(neighbor(list, undefined, 0, 1, false), { file: 'a.py', line: 2 }, '沒開檔時從第一個開始');
+    assert.deepStrictEqual(neighbor(list, undefined, 0, -1, false), { file: 'b.py', line: 3 }, '沒開檔時往回從最後一個開始');
+    assert.strictEqual(neighbor([], 'a.py', 0, 1, false), undefined);
+
+    // 只有一個書籤且游標剛好在上面：循環回傳自己，不循環回傳 undefined
+    const single = [{ file: 'a.py', line: 5 }];
+    assert.deepStrictEqual(neighbor(single, 'a.py', 5, 1, true), single[0]);
+    assert.strictEqual(neighbor(single, 'a.py', 5, 1, false), undefined);
+    assert.strictEqual(neighbor(single, 'a.py', 5, -1, false), undefined);
   });
 
   it('名稱建議：選取文字 → 游標單字 → 函式名稱 → 該行內容', () => {
