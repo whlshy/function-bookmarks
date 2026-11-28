@@ -248,7 +248,11 @@ describe('備註編輯、並排預覽、Mermaid 與各入口行為', () => {
     await api.bookmarks.addLabeled('備註保留目前檔案');
     const bm = api.store.bookmarksFor(views)[0];
     await api.bookmarks.editNote({ type: 'bookmark', entry: { folder: folder(), uri: views, bookmark: bm } });
-    assert.ok(api.notes.isNoteDocument(vscode.window.activeTextEditor!.document.uri));
+    await waitFor(
+      () => vscode.window.visibleTextEditors.some((e) => api.notes.isNoteDocument(e.document.uri)),
+      (open) => open,
+      '備註編輯分頁開啟',
+    );
 
     await api.refreshNow();
     assert.strictEqual(api.provider.currentFile?.uri.toString(), views.toString());
@@ -421,7 +425,8 @@ describe('備註編輯、並排預覽、Mermaid 與各入口行為', () => {
       const noticesBefore = api.bookmarks.mineHiddenNotices;
       await vscode.commands.executeCommand('functionBookmarks.editNote', { lineNumber: 2, uri: fileL() });
       assert.strictEqual(api.bookmarks.mineHiddenNotices, noticesBefore + 1);
-      assert.strictEqual(api.notes.isNoteDocument(vscode.window.activeTextEditor!.document.uri), false);
+      // 不看作用中編輯器：上一個備註分頁剛關閉時可能暫時沒有作用中編輯器（CI 的 Windows 偶發 undefined）
+      assert.ok(!vscode.window.visibleTextEditors.some((e) => api.notes.isNoteDocument(e.document.uri)), '沒有開出備註編輯分頁');
       const at1 = api.store.bookmarksFor(fileL()).filter((b) => b.line === 1);
       assert.strictEqual(at1.length, 1);
       assert.strictEqual(at1[0].note, '自己原備註');
