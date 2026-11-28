@@ -1,8 +1,9 @@
 /**
  * 書籤的匯出檔格式（*.fbookmarks.json）與匯入規則、Markdown／CSV 輸出。全部是純函式。
  */
+import { paletteColor } from '../bookmarks/decor';
 import { BookmarkAnchor, LineBookmark } from '../bookmarks/model';
-import { StoreData } from '../storage/marks';
+import { StoreData, validNumber } from '../storage/marks';
 import { stripBom } from '../util/bom';
 
 export const EXPORT_FORMAT = 'function-bookmarks/v1';
@@ -24,6 +25,15 @@ export interface ExportedBookmark {
   author?: string;
   /** 建立時間（ISO 字串）。 */
   createdAt?: string;
+  /** 數字快速書籤 1～9。 */
+  number?: number;
+  /** 書籤顏色（色盤 id）。 */
+  color?: string;
+  /**
+   * 匯出時位置已不可靠（需確認、不在目前分支、找不到函式或檔案）。
+   * 這時 anchor 是最後記得的內容（或沒有），行雜湊對不上這個行號，匯入端不能用行雜湊換算。
+   */
+  status?: ExportStatus;
   /** 不含程式碼內容時沒有。 */
   anchor?: BookmarkAnchor;
 }
@@ -37,7 +47,30 @@ export interface ExportFile {
   includesCode: boolean;
   /** 書籤所在檔案的行雜湊（base64），匯入時與本機內容比對換算位置。 */
   files?: Record<string, { hashes: string }>;
+  /** 標籤顏色：標籤 → 色盤 id，只帶這批書籤用到的標籤。 */
+  tagColors?: Record<string, string>;
   bookmarks: ExportedBookmark[];
+}
+
+/** 從一組標籤顏色中挑出指定標籤的設定（只留色盤裡有的顏色）；一個都沒有時回傳 undefined。 */
+export function pickTagColors(tags: Iterable<string>, colors: ReadonlyMap<string, string>): Record<string, string> | undefined {
+  const out: [string, string][] = [];
+  for (const tag of [...new Set(tags)].sort()) {
+    const color = colors.get(tag);
+    if (color && paletteColor(color)) {
+      out.push([tag, color]);
+    }
+  }
+  return out.length ? Object.fromEntries(out) : undefined;
+}
+
+/** 讀取匯出檔頂層的標籤顏色，不合格的項目略過。 */
+function parseTagColors(v: unknown): Record<string, string> | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) {
+    return undefined;
+  }
+  const entries = Object.entries(v).filter((e): e is [string, string] => !!e[0].trim() && typeof e[1] === 'string');
+  return pickTagColors(entries.map(([tag]) => tag), new Map(entries));
 }
 
 /** 行雜湊（uint32）壓縮成 base64。 */
@@ -145,6 +178,16 @@ export function parseExport(text: string): ExportFile | { error: 'json' | 'forma
     if (typeof b.createdAt === 'string' && b.createdAt.trim()) {
       e.createdAt = b.createdAt.trim();
     }
+    // 號碼、顏色不合格時只略過那個欄位，書籤照樣保留
+    if (validNumber(b.number)) {
+      e.number = b.number;
+    }
+    if (typeof b.color === 'string' && paletteColor(b.color)) {
+      e.color = b.color;
+    }
+    if (typeof b.status === 'string' && (EXPORT_STATUSES as readonly string[]).includes(b.status)) {
+      e.status = b.status as ExportStatus;
+    }
     const anchor = parseAnchor(b.anchor);
     if (anchor) {
       e.anchor = anchor;
@@ -162,6 +205,7 @@ export function parseExport(text: string): ExportFile | { error: 'json' | 'forma
       }
     }
   }
+  const tagColors = parseTagColors(o.tagColors);
   const repo = o.repo as Record<string, unknown> | undefined;
   return {
     format: o.format,
@@ -177,42 +221,111 @@ export function parseExport(text: string): ExportFile | { error: 'json' | 'forma
         : undefined,
     includesCode: o.includesCode !== false,
     files,
+    ...(tagColors ? { tagColors } : {}),
     bookmarks,
   };
 }
 
 export type ImportMode = 'replace' | 'merge';
 
+export interface ImportExtras {
+  /** 其他工作區資料夾已經佔用的號碼。 */
+  usedNumbers?: Iterable<number>;
+  /** 匯出檔帶的標籤顏色。 */
+  tagColors?: Record<string, string>;
+  /** 其他工作區資料夾已經設定顏色的標籤（匯入的顏色不能蓋掉畫面上的顏色）。 */
+  coloredTags?: Iterable<string>;
+  /** 回報因為號碼重複而沒有帶入的號碼數。 */
+  onNumbersSkipped?: (count: number) => void;
+}
+
 /**
  * 把匯入的書籤寫進資料：
  * - replace：刪掉這些來源之前匯入的書籤，換成這次的
  * - merge：以（來源、原始 id）比對，相同的更新（沿用本機的 id 與分支紀錄），新的加入
  * 自己的書籤與其他來源不受影響。
+ * 匯入的號碼若本機已經用掉就不帶入；合併時本機已有的號碼與顏色優先；標籤顏色只補上本機沒設定的標籤。
  */
-export function applyImport(data: StoreData, incoming: LineBookmark[], mode: ImportMode): StoreData {
+export function applyImport(data: StoreData, incoming: LineBookmark[], mode: ImportMode, extras: ImportExtras = {}): StoreData {
   const authors = new Set(incoming.map((b) => b.source?.author).filter((a): a is string => !!a));
   const existing = data.bookmarks ?? [];
-  if (mode === 'replace') {
-    const kept = existing.filter((b) => !b.source || !authors.has(b.source.author));
-    return { ...data, bookmarks: [...kept, ...incoming] };
+  // 取代時先移除同來源的舊書籤，它們的號碼就空出來了
+  const kept = mode === 'replace' ? existing.filter((b) => !b.source || !authors.has(b.source.author)) : existing;
+
+  const used = new Set<number>(extras.usedNumbers ?? []);
+  for (const m of data.symbols) {
+    if (m.favorite && m.number) {
+      used.add(m.number);
+    }
   }
-  const key = (b: LineBookmark) => `${b.source?.author}\u0000${b.source?.originalId}`;
-  const byKey = new Map(incoming.map((b) => [key(b), b]));
-  const used = new Set<string>();
-  const merged = existing.map((b) => {
-    if (!b.source) {
-      return b;
+  for (const b of kept) {
+    if (b.number) {
+      used.add(b.number);
     }
-    const k = key(b);
-    const next = byKey.get(k);
-    if (!next) {
-      return b;
+  }
+  let skipped = 0;
+  /** 佔用一個匯入的號碼；已經被佔用時回傳 undefined 並記一筆。 */
+  const claim = (n: number | undefined): number | undefined => {
+    if (!n) {
+      return undefined;
     }
-    used.add(k);
-    // 本機自己加的號碼與顏色也保留
-    return { ...next, id: b.id, positions: b.positions, scope: b.scope, homeBranch: b.homeBranch, number: b.number, color: b.color };
-  });
-  return { ...data, bookmarks: [...merged, ...incoming.filter((b) => !used.has(key(b)))] };
+    if (used.has(n)) {
+      skipped++;
+      return undefined;
+    }
+    used.add(n);
+    return n;
+  };
+  const withNumber = (b: LineBookmark, n: number | undefined): LineBookmark => {
+    const next = { ...b };
+    if (n) {
+      next.number = n;
+    } else {
+      delete next.number;
+    }
+    return next;
+  };
+  const addNew = (b: LineBookmark) => withNumber(b, claim(b.number));
+
+  let bookmarks: LineBookmark[];
+  if (mode === 'replace') {
+    bookmarks = [...kept, ...incoming.map(addNew)];
+  } else {
+    const key = (b: LineBookmark) => `${b.source?.author}\u0000${b.source?.originalId}`;
+    const byKey = new Map(incoming.map((b) => [key(b), b]));
+    const matched = new Set<string>();
+    const merged = existing.map((b) => {
+      if (!b.source) {
+        return b;
+      }
+      const k = key(b);
+      const next = byKey.get(k);
+      if (!next) {
+        return b;
+      }
+      matched.add(k);
+      const updated: LineBookmark = { ...next, id: b.id, positions: b.positions, scope: b.scope, homeBranch: b.homeBranch };
+      // 本機的號碼與顏色優先，本機沒有才用匯入的
+      if (b.color) {
+        updated.color = b.color;
+      }
+      return withNumber(updated, b.number ?? claim(next.number));
+    });
+    bookmarks = [...merged, ...incoming.filter((b) => !matched.has(key(b))).map(addNew)];
+  }
+
+  const out: StoreData = { ...data, bookmarks };
+  const colored = new Set(extras.coloredTags ?? []);
+  const newColors = Object.entries(extras.tagColors ?? {}).filter(
+    ([tag]) => !colored.has(tag) && !Object.prototype.hasOwnProperty.call(data.tagColors ?? {}, tag),
+  );
+  if (newColors.length) {
+    out.tagColors = { ...(data.tagColors ?? {}), ...Object.fromEntries(newColors) };
+  }
+  if (skipped) {
+    extras.onNumbersSkipped?.(skipped);
+  }
+  return out;
 }
 
 /** 匯入前預覽：每個來源之前匯入過幾筆。 */
@@ -226,6 +339,21 @@ export function existingCounts(data: StoreData, authors: string[]): Map<string, 
   return out;
 }
 
+/**
+ * 位置不可靠的書籤狀態：行號書籤的需確認（lost）、不在目前分支（notOnBranch），
+ * 函式書籤的找不到函式（missing）、找不到檔案（noFile）。
+ */
+export const EXPORT_STATUSES = ['lost', 'notOnBranch', 'missing', 'noFile'] as const;
+export type ExportStatus = (typeof EXPORT_STATUSES)[number];
+
+/**
+ * 有狀態的書籤可以輸出的程式碼：目前檔案裡原行號的內容已經不相干，
+ * 只有需確認的書籤能附上最後記得的那一行，其餘不附程式碼。
+ */
+export function lastKnownCode(status: ExportStatus, anchor: BookmarkAnchor | undefined): string | undefined {
+  return status === 'lost' && anchor?.text ? anchor.text : undefined;
+}
+
 /** Markdown／CSV 的一列。 */
 export interface ExportRow {
   file: string;
@@ -237,16 +365,19 @@ export interface ExportRow {
   note?: string;
   code?: string;
   source?: string;
+  /** 已翻譯的狀態文字；位置正常的書籤沒有。 */
+  status?: string;
 }
 
 function mdCell(s: string): string {
   return s.replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
 }
 
-export function toMarkdown(rows: ExportRow[], labels: { file: string; line: string; name: string; tags: string; note: string; code: string; source: string; fn: string }): string {
+export function toMarkdown(rows: ExportRow[], labels: { file: string; line: string; name: string; tags: string; note: string; code: string; source: string; fn: string; status: string }): string {
   const withCode = rows.some((r) => r.code !== undefined);
   const withSource = rows.some((r) => r.source);
-  const head = [labels.file, labels.line, labels.name, labels.tags, labels.note, ...(withCode ? [labels.code] : []), ...(withSource ? [labels.source] : [])];
+  const withStatus = rows.some((r) => r.status);
+  const head = [labels.file, labels.line, labels.name, labels.tags, labels.note, ...(withCode ? [labels.code] : []), ...(withSource ? [labels.source] : []), ...(withStatus ? [labels.status] : [])];
   const out = [`| ${head.join(' | ')} |`, `|${head.map(() => '---').join('|')}|`];
   for (const r of rows) {
     const cells = [
@@ -257,6 +388,7 @@ export function toMarkdown(rows: ExportRow[], labels: { file: string; line: stri
       mdCell(r.note ?? ''),
       ...(withCode ? [r.code ? `\`${r.code.replace(/`/g, "'").replace(/\|/g, '\\|')}\`` : ''] : []),
       ...(withSource ? [mdCell(r.source ?? '')] : []),
+      ...(withStatus ? [mdCell(r.status ?? '')] : []),
     ];
     out.push(`| ${cells.join(' | ')} |`);
   }
@@ -268,9 +400,10 @@ function csvCell(s: string): string {
 }
 
 /** CSV（開頭加 BOM，Excel 才會用 UTF-8 開啟中文）。 */
-export function toCsv(rows: ExportRow[], labels: { file: string; line: string; name: string; kind: string; tags: string; note: string; code: string; source: string; fn: string; lineKind: string }): string {
+export function toCsv(rows: ExportRow[], labels: { file: string; line: string; name: string; kind: string; tags: string; note: string; code: string; source: string; fn: string; lineKind: string; status: string }): string {
   const withCode = rows.some((r) => r.code !== undefined);
-  const head = [labels.file, labels.line, labels.name, labels.kind, labels.tags, labels.note, ...(withCode ? [labels.code] : []), labels.source];
+  const withStatus = rows.some((r) => r.status);
+  const head = [labels.file, labels.line, labels.name, labels.kind, labels.tags, labels.note, ...(withCode ? [labels.code] : []), labels.source, ...(withStatus ? [labels.status] : [])];
   const out = [head.map(csvCell).join(',')];
   for (const r of rows) {
     out.push(
@@ -283,6 +416,7 @@ export function toCsv(rows: ExportRow[], labels: { file: string; line: string; n
         r.note ?? '',
         ...(withCode ? [r.code ?? ''] : []),
         r.source ?? '',
+        ...(withStatus ? [r.status ?? ''] : []),
       ]
         .map(csvCell)
         .join(','),
@@ -313,6 +447,8 @@ export interface GuideEntry {
   source?: string;
   language?: string;
   snippet?: GuideSnippet;
+  /** 位置不可靠時在標題下方顯示警示。 */
+  status?: ExportStatus;
 }
 
 /** 導讀文件排序：有編號的依 1→9 排最前，其餘依檔案、行號接在後面。 */
@@ -368,16 +504,24 @@ function codeFence(code: string): string {
   return '`'.repeat(Math.max(3, maxRun + 1));
 }
 
-/** 輸出「導讀文件（Markdown）」：依編號與位置順序，含標題、路徑:行號、程式碼片段與備註原文。 */
+/** 輸出「導讀文件（Markdown）」：依編號與位置順序，含標題、狀態警示、路徑:行號、程式碼片段與備註原文。 */
 export function toGuideMarkdown(
   entries: GuideEntry[],
-  options: { title: string; omittedLabel: (count: number) => string },
+  options: {
+    title: string;
+    omittedLabel: (count: number) => string;
+    /** 警示文字；`hasCode`：下方附有最後記得的程式碼。 */
+    warningLabel: (status: ExportStatus, hasCode: boolean) => string;
+  },
 ): string {
   const ordered = sortGuideEntries(entries);
   const sections: string[] = [`# ${options.title}`];
   for (const e of ordered) {
     const parts: string[] = [];
     parts.push(`## ${e.number !== undefined ? `${e.number}. ` : ''}${e.name}`);
+    if (e.status) {
+      parts.push(`> ⚠ ${options.warningLabel(e.status, !!e.snippet?.code)}`);
+    }
     const meta = [
       `\`${e.file}:${e.line}\``,
       e.tags.length ? e.tags.map((t) => `#${t}`).join(' ') : undefined,

@@ -56,6 +56,13 @@ Function Bookmarks 會記住每個書籤附近的內容，比對檔案修改前�
 - 可依來源篩選、分組；別人的書籤是紫色
 - 從 **Bookmarks（alefragnani）** 換過來？「匯入書籤…」可以直接讀它的 `.vscode/bookmarks.json`（請先在該套件開啟 `bookmarks.saveBookmarksInProject`）
 
+### 給 AI 助理用（Skill＋CLI）
+
+- 側邊欄 `…` →「**設定 AI 助理 Skill…**」：在專案裡放一份說明書（`SKILL.md`）和指令工具，Cursor、Claude Code、Codex 等 AI 助理就能查詢、新增書籤
+- 問 AI「登入流程在哪？」時，它會先看你的書籤、名稱與備註；請它「把這個函式加書籤並寫備註」也做得到
+- 指令工具用同一套偵測規則，編輯器沒開也能算出書籤現在的位置；改動會直接出現在側邊欄
+- 需要 Node.js；這個資料夾只留在你的電腦（自動加進 `.git/info/exclude`），套件升級時會一起更新
+
 ## 快捷鍵
 
 | 快捷鍵（Win / Linux） | macOS | 功能 |

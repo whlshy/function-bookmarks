@@ -280,7 +280,8 @@ export function parseStoreFileImport(text: string): StoreData | undefined {
   return out;
 }
 
-function validNumber(v: unknown): v is number {
+/** 是不是合格的書籤號碼（1～9 的整數）。 */
+export function validNumber(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 9;
 }
 

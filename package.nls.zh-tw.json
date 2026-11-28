@@ -79,6 +79,7 @@
   "command.showNotOnBranch": "顯示不在此分支的書籤",
   "command.cleanBranchRecords": "清理已刪除分支的紀錄",
   "command.exportBookmarks": "匯出書籤…",
+  "command.setUpAiSkill": "設定 AI 助理 Skill…",
   "command.importBookmarks": "匯入書籤…",
   "command.chooseStorage": "選擇這個專案的書籤存放位置…",
   "command.filterBookmarkSources": "篩選來源…",

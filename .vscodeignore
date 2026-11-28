@@ -1,6 +1,7 @@
 **
 !dist/extension.js
 !dist/mermaid.min.js
+!dist/cli.js
 !media/**
 !l10n/**
 !package.json

@@ -8,22 +8,25 @@ const watch = process.argv.includes('--watch');
 fs.mkdirSync('dist', { recursive: true });
 fs.copyFileSync('node_modules/mermaid/dist/mermaid.min.js', 'dist/mermaid.min.js');
 
-const ctx = await esbuild.context({
-  entryPoints: ['src/extension.ts'],
+const common = {
   bundle: true,
   format: 'cjs',
   platform: 'node',
   target: 'node18',
-  outfile: 'dist/extension.js',
-  external: ['vscode'],
   sourcemap: !production,
   minify: production,
   logLevel: 'info',
-});
+};
+
+const contexts = await Promise.all([
+  esbuild.context({ ...common, entryPoints: ['src/extension.ts'], outfile: 'dist/extension.js', external: ['vscode'] }),
+  // 給 AI 助理用的 CLI：不依賴編輯器，「設定 AI 助理」時複製到專案的 skills 資料夾
+  esbuild.context({ ...common, entryPoints: ['src/cli/main.ts'], outfile: 'dist/cli.js', sourcemap: false }),
+]);
 
 if (watch) {
-  await ctx.watch();
+  await Promise.all(contexts.map((c) => c.watch()));
 } else {
-  await ctx.rebuild();
-  await ctx.dispose();
+  await Promise.all(contexts.map((c) => c.rebuild()));
+  await Promise.all(contexts.map((c) => c.dispose()));
 }

@@ -79,6 +79,7 @@
   "command.showNotOnBranch": "이 분기에 없는 북마크 표시",
   "command.cleanBranchRecords": "삭제된 분기 기록 정리",
   "command.exportBookmarks": "북마크 내보내기…",
+  "command.setUpAiSkill": "AI 어시스턴트 Skill 설정…",
   "command.importBookmarks": "북마크 가져오기…",
   "command.chooseStorage": "이 작업 영역의 북마크 저장 위치 선택…",
   "command.filterBookmarkSources": "출처별 필터링…",

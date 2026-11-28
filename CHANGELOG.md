@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.11.0 (2026-11-28) — AI assistants can read and add your bookmarks
+
+- **Set Up AI Assistant Skill…** (side bar `…` menu): puts a skill (`SKILL.md`) and a small command-line tool in the project's `.cursor`, `.claude` or `.agents` skills folder. Cursor, Claude Code, Codex and other AI assistants can then list your bookmarks with their names, tags and notes, read a bookmark with its code, add or change bookmarks when you ask, and print a walkthrough of the numbered bookmarks. Asked where some code lives, the assistant checks your bookmarks first
+- The tool uses the same detection rules as the extension and works out current positions even when the editor is closed; its changes show up in the side bar right away. It needs Node.js, stays on your computer (added to `.git/info/exclude`) and is updated together with the extension
+- Exported bookmark files keep **bookmark numbers and colors**, and the tag colors they use. On import, a number you already use is not taken over, and the message says how many were skipped
+- Walkthrough documents, Markdown tables and CSV exports mark bookmarks that *need checking*, are *not on this branch*, or whose function or file is gone, instead of quoting unrelated code from their old line
+- Fix: going to a numbered bookmark, stepping through the tour, clicking a bookmark in the side bar and picking one in search no longer open a deleted file; the tour skips such steps and the status bar says the file is gone
+- Going to a bookmark that *needs checking* shows a hint in the status bar on how to put it back
+- Fix: a function bookmark whose function was gone was exported with the code now on its old line, so importing it put it on an unrelated line. It is now marked *needs checking* unless its remembered code is found
+- Internal: the logic that does not depend on the editor moved into a shared core used by both the extension and the command-line tool
+
 ## 0.10.0 (2026-11-27) — eight more languages built in, and Simplified Chinese, Japanese and Korean
 
 - **Built-in detection for Lua, Dart, Scala, Elixir, PowerShell, R, Haskell and Zig**: their functions, classes and methods are listed without a language extension (before, these used the language server and showed nothing without one). This includes Scala 3 indentation syntax, Dart constructors, Elixir functions with several clauses (shown as one), a Haskell type signature with its equations (shown as one), R6 classes, Zig generic types and `test` blocks, and ExUnit `describe` / `test`

@@ -426,6 +426,102 @@ describe('匯出、匯入書籤與來源管理', () => {
       }
     });
 
+    it('匯出導讀文件、Markdown 表格與 CSV：需確認、不在目前分支、找不到函式或檔案要標示，不照行號貼程式碼', async () => {
+      await fsp.writeFile(fileA().fsPath, text(BASE));
+      const remembered = { text: 'remembered_call()', before: [], after: [] };
+      await api.store.update(folder(), (d) => {
+        let next = addBookmark(d, { id: newBookmarkId(), file: relA, line: 4, label: '需確認的', status: 'lost', anchor: remembered });
+        next = addBookmark(next, {
+          id: newBookmarkId(),
+          file: relA,
+          line: 10,
+          label: '別的分支的',
+          status: 'notOnBranch',
+          anchor: { text: 'other_branch_call()', before: [], after: [] },
+        });
+        next = setFavorite(next, { file: relA, path: 'vanished_function', kind: 'function' }, true, 100);
+        return setFavorite(next, { file: 'app/tmp_share_gone.py', path: 'gone', kind: 'function' }, true, 0);
+      });
+      await api.favorites.refresh();
+      await api.external.idle();
+
+      const run = async (format: 'guide' | 'markdown' | 'csv') =>
+        (await vscode.commands.executeCommand<{ count: number; text: string }>('functionBookmarks.exportBookmarks', {
+          folder: folder(),
+          scope: { kind: 'all' },
+          includeImported: false,
+          format,
+          includeCode: true,
+          target: 'clipboard',
+        }))!;
+
+      const guide = (await run('guide')).text;
+      for (const warning of [
+        '## 需確認的\n\n> ⚠ Needs checking: the original line could not be found. Below is the last remembered content.',
+        '## 別的分支的\n\n> ⚠ Not on the current branch',
+        '## vanished_function\n\n> ⚠ Function not found',
+        '## gone\n\n> ⚠ File not found',
+      ]) {
+        assert.ok(guide.includes(warning), `${warning}\n---\n${guide}`);
+      }
+      assert.ok(guide.includes('```python\nremembered_call()\n```'));
+      assert.strictEqual(guide.split('```').length, 3, '只有需確認的那一筆有程式碼');
+      assert.ok(!guide.includes('json.loads') && !guide.includes('article.title') && !guide.includes('other_branch_call'));
+
+      const md = (await run('markdown')).text;
+      assert.ok(md.startsWith('| File | Line | Name | Tags | Note | Code | Status |'), md);
+      assert.ok(md.includes('| 需確認的 |  |  | `remembered_call()` | needs checking |'), md);
+      assert.ok(md.includes('| 別的分支的 |  |  |  | not on this branch |'), md);
+      assert.ok(md.includes('| function not found |') && md.includes('| file not found |'), md);
+      assert.ok(!md.includes('json.loads') && !md.includes('article.title'));
+
+      const csv = (await run('csv')).text;
+      assert.ok(csv.startsWith('﻿File,Line,Name,Kind,Tags,Note,Code,Source,Status\r\n'), csv);
+      assert.ok(csv.includes(',需確認的,line,,,remembered_call(),,needs checking\r\n'), csv);
+      assert.ok(csv.includes(',別的分支的,line,,,,,not on this branch\r\n'), csv);
+      assert.ok(!csv.includes('json.loads') && !csv.includes('article.title'));
+    });
+
+    it('匯出 JSON：位置不可靠的書籤帶狀態、不用目前那一行當 anchor；匯入後只用記得的內容找，找不到標需確認', async () => {
+      await fsp.writeFile(fileA().fsPath, text(BASE));
+      await api.store.update(folder(), (d) => {
+        // 找不到的函式：記得的行號 12 現在是 return JsonResponse(...)，不能拿來當 anchor
+        // （離每個函式都超過 3 行，不會被當成改名接到別的函式）
+        let next = setFavorite(d, { file: relA, path: 'vanished_function', kind: 'function' }, true, 12);
+        // 需確認的行號書籤：記得的內容在本機另一行還找得到
+        next = addBookmark(next, { id: newBookmarkId(), file: relA, line: 1, label: '找得回來', status: 'lost', anchor: makeAnchor(BASE, 4) });
+        // 需確認且記得的內容已不存在
+        return addBookmark(next, {
+          id: newBookmarkId(),
+          file: relA,
+          line: 10,
+          label: '找不回來',
+          status: 'lost',
+          anchor: { text: 'remembered_call()', before: [], after: [] },
+        });
+      });
+      await api.favorites.refresh();
+      await api.external.idle();
+
+      const exported = (await exportJson()).text;
+      const data = JSON.parse(exported) as { bookmarks: { label?: string; path?: string; status?: string; anchor?: { text: string } }[] };
+      const fn = data.bookmarks.find((b) => b.path === 'vanished_function')!;
+      assert.strictEqual(fn.status, 'missing');
+      assert.strictEqual(fn.anchor, undefined, '找不到的函式不能用舊行號的內容當 anchor');
+      const back = data.bookmarks.find((b) => b.label === '找得回來')!;
+      assert.deepStrictEqual([back.status, back.anchor?.text], ['lost', 'data = json.loads(payload)'], '需確認的帶最後記得的內容');
+
+      await api.store.update(folder(), () => emptyStore());
+      await api.favorites.refresh();
+      const r = await importText(exported);
+      assert.strictEqual(r.imported, 3);
+      const got = (pred: (b: ReturnType<typeof foreign>[number]) => boolean) => foreign().find(pred)!;
+      const importedFn = got((b) => b.symbol?.path === 'vanished_function');
+      assert.strictEqual(importedFn.status, 'lost', '本機也找不到這個函式：標需確認，不照行號放到 save_article');
+      assert.deepStrictEqual([got((b) => b.label === '找得回來').line, got((b) => b.label === '找得回來').status], [4, undefined], '用記得的內容找回原本那一行');
+      assert.strictEqual(got((b) => b.label === '找不回來').status, 'lost');
+    });
+
     it('匯入 alefragnani Bookmarks 的 .vscode/bookmarks.json：匯入成自己的書籤，重複匯入不重複', async () => {
       await fsp.writeFile(fileA().fsPath, text(BASE));
       const json = {

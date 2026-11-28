@@ -14,7 +14,7 @@ import { reconcileFile } from '../storage/reconcile';
 import { stripBom } from '../util/bom';
 import { uriKey } from '../util/uris';
 import { ShareDeps } from './exporter';
-import { applyImport, decodeHashes, existingCounts, ExportedBookmark, ImportMode, normalizeRemote, parseExport } from './format';
+import { applyImport, decodeHashes, existingCounts, ExportedBookmark, ImportExtras, ImportMode, normalizeRemote, parseExport } from './format';
 
 export interface ImportOptions {
   /** 直接給匯出檔內容（測試、剪貼簿）。 */
@@ -37,6 +37,8 @@ export interface ImportResult {
   lost: number;
   missingFiles: number;
   mode: ImportMode;
+  /** 因為和本機的號碼重複而沒有帶入的號碼數。 */
+  skippedNumbers: number;
 }
 
 /** 匯入套件自己的書籤檔（.vscode/function-bookmarks.json）的結果。 */
@@ -110,6 +112,22 @@ async function exists(uri: vscode.Uri): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** 目標資料夾以外的工作區資料夾已經佔用的號碼（包含目前隱藏的書籤）。 */
+function numbersInOtherFolders(deps: ShareDeps, folder: vscode.WorkspaceFolder): Set<number> {
+  const target = uriKey(folder.uri);
+  const entries = [
+    ...deps.store.allBookmarks({ includeHidden: true }).map((e) => ({ folder: e.folder, number: e.bookmark.number })),
+    ...deps.store.allFavorites().map((e) => ({ folder: e.folder, number: e.mark.number })),
+  ];
+  const out = new Set<number>();
+  for (const e of entries) {
+    if (e.number && uriKey(e.folder.uri) !== target) {
+      out.add(e.number);
+    }
+  }
+  return out;
 }
 
 /**
@@ -289,13 +307,7 @@ async function importStoreData(
   };
 
   // 多資料夾工作區下，避開其他資料夾已經佔用的 1～9 號；replace 模式也一併去除檔案內部的重複號碼
-  const otherFolderNumbers = new Set<number>();
-  const targetFolderKey = uriKey(folder.uri);
-  for (const [n, entry] of deps.store.numbered()) {
-    if (uriKey(entry.folder.uri) !== targetFolderKey) {
-      otherFolderNumbers.add(n);
-    }
-  }
+  const otherFolderNumbers = numbersInOtherFolders(deps, folder);
   await deps.store.update(folder, (cur) =>
     mode === 'merge'
       ? mergeStoreData(cur, relocated, otherFolderNumbers)
@@ -494,13 +506,24 @@ export async function importBookmarks(
       }
     }
     if (lines) {
-      const withInfo = byLine.filter((b) => b.anchor || theirHashes);
       const symbolStart = (p: string) => findByPath(symbols, p)?.startLine;
+      // 匯出時位置已不可靠的書籤：行雜湊對不上它的行號，只用最後記得的內容找；
+      // 找不到或沒有內容就標成需確認，不照行號放到不相干的地方
+      const flagged = byLine.filter((b) => b.status);
+      const flaggedWithAnchor = flagged.filter((b) => b.anchor);
+      for (const r of relocateBookmarks(flaggedWithAnchor.map((b) => ({ id: b.id, line: b.line, anchor: b.anchor })), undefined, lines, symbolStart)) {
+        placed.set(r.id, { line: r.line, lost: r.status === 'lost' });
+      }
+      for (const b of flagged.filter((x) => !x.anchor)) {
+        placed.set(b.id, { line: Math.min(b.line, Math.max(0, lines.length - 1)), lost: true });
+      }
+      const normal = byLine.filter((b) => !b.status);
+      const withInfo = normal.filter((b) => b.anchor || theirHashes);
       for (const r of relocateBookmarks(withInfo.map((b) => ({ id: b.id, line: b.line, anchor: b.anchor })), theirHashes, lines, symbolStart)) {
         placed.set(r.id, { line: r.line, lost: r.status === 'lost' });
       }
       // 不含程式碼內容的匯出：只能照行號
-      for (const b of byLine.filter((x) => !x.anchor && !theirHashes)) {
+      for (const b of normal.filter((x) => !x.anchor && !theirHashes)) {
         placed.set(b.id, { line: Math.min(b.line, Math.max(0, lines.length - 1)), lost: false });
       }
     }
@@ -522,6 +545,12 @@ export async function importBookmarks(
       if (b.note) {
         bm.note = b.note;
       }
+      if (b.number) {
+        bm.number = b.number;
+      }
+      if (b.color) {
+        bm.color = b.color;
+      }
       if (b.kind === 'symbol' && b.path) {
         bm.symbol = { path: b.path, kind: b.symbolKind ?? 'function' };
       }
@@ -538,13 +567,23 @@ export async function importBookmarks(
       created.push(bm);
     }
   }
-  await deps.store.update(folder, (d) => applyImport(d, created, mode));
+  let skippedNumbers = 0;
+  const extras: ImportExtras = {
+    usedNumbers: numbersInOtherFolders(deps, folder),
+    tagColors: parsed.tagColors,
+    coloredTags: [...deps.store.tagColors().keys()],
+    onNumbersSkipped: (n) => (skippedNumbers = n),
+  };
+  await deps.store.update(folder, (d) => applyImport(d, created, mode, extras));
   const lost = created.filter((b) => b.status === 'lost').length;
   deps.store.showSources(authors);
+  const done = lost
+    ? vscode.l10n.t('Imported {0} bookmarks from {1} ({2} need checking).', created.length, author, lost)
+    : vscode.l10n.t('Imported {0} bookmarks from {1}.', created.length, author);
   void vscode.window.showInformationMessage(
-    lost
-      ? vscode.l10n.t('Imported {0} bookmarks from {1} ({2} need checking).', created.length, author, lost)
-      : vscode.l10n.t('Imported {0} bookmarks from {1}.', created.length, author),
+    skippedNumbers
+      ? `${done} ${vscode.l10n.t('{0} number(s) are already in use by your bookmarks and were not imported.', skippedNumbers)}`
+      : done,
   );
-  return { author, imported: created.length, lost, missingFiles: missingCount, mode };
+  return { author, imported: created.length, lost, missingFiles: missingCount, mode, skippedNumbers };
 }

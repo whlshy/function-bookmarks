@@ -79,6 +79,7 @@
   "command.showNotOnBranch": "このブランチにないブックマークを表示",
   "command.cleanBranchRecords": "削除済みブランチの記録を整理",
   "command.exportBookmarks": "ブックマークをエクスポート…",
+  "command.setUpAiSkill": "AI アシスタント用 Skill を設定…",
   "command.importBookmarks": "ブックマークをインポート…",
   "command.chooseStorage": "このワークスペースのブックマーク保存先を選択…",
   "command.filterBookmarkSources": "ソースでフィルター…",

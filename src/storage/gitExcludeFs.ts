@@ -73,7 +73,7 @@ async function resolveGitRepo(folder: vscode.Uri): Promise<ResolvedGitRepo | und
  * 否則把相對於 repo 根目錄的路徑加進共用 `.git/info/exclude`。不是 git 專案時什麼都不做。
  * 由儲存層第一次寫入書籤檔時呼叫（M2）。
  */
-export async function ensureBookmarksFileExcluded(folder: vscode.Uri): Promise<'already' | 'added' | 'notGit'> {
+export async function ensureBookmarksFileExcluded(folder: vscode.Uri, fileInFolder = BOOKMARKS_FILE): Promise<'already' | 'added' | 'notGit'> {
   const repo = await resolveGitRepo(folder);
   if (!repo) {
     return 'notGit';
@@ -82,7 +82,7 @@ export async function ensureBookmarksFileExcluded(folder: vscode.Uri): Promise<'
   let cur: vscode.Uri | undefined = folder;
   while (cur) {
     const relFromCur = uriKey(cur) === uriKey(folder) ? '' : relativeUnder(cur.path, folder.path)?.replace(/\/+$/, '');
-    const entryFromCur = relFromCur ? `${relFromCur}/${BOOKMARKS_FILE}` : BOOKMARKS_FILE;
+    const entryFromCur = relFromCur ? `${relFromCur}/${fileInFolder}` : fileInFolder;
     if (isCovered(await readText(vscode.Uri.joinPath(cur, '.gitignore')), entryFromCur)) {
       return 'already';
     }
@@ -92,7 +92,7 @@ export async function ensureBookmarksFileExcluded(folder: vscode.Uri): Promise<'
     cur = parentUri(cur);
   }
   const relFromRoot = uriKey(repo.repoRoot) === uriKey(folder) ? '' : relativeUnder(repo.repoRoot.path, folder.path)?.replace(/\/+$/, '');
-  const entry = relFromRoot ? `${relFromRoot}/${BOOKMARKS_FILE}` : BOOKMARKS_FILE;
+  const entry = relFromRoot ? `${relFromRoot}/${fileInFolder}` : fileInFolder;
   const exclude = vscode.Uri.joinPath(repo.commonGitDir, 'info', 'exclude');
   const next = withExcludeEntry(await readText(exclude), entry);
   if (next === undefined) {

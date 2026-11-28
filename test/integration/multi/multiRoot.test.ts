@@ -4,9 +4,9 @@ import * as fsp from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { ExtensionApi } from '../../../src/extension';
-import { addBookmark, emptyStore, serializeStore } from '../../../src/storage/marks';
+import { addBookmark, emptyStore, serializeStore, setFavorite, setSymbolExtras, setTagColor } from '../../../src/storage/marks';
 import { makeAnchor, newBookmarkId } from '../../../src/bookmarks/model';
-import type { StoreImportResult } from '../../../src/share/importer';
+import type { ImportResult, StoreImportResult } from '../../../src/share/importer';
 import { buildSearchMarkItems, filterSearchMarkItems } from '../../../src/views/search';
 import type { BmGroupNode } from '../../../src/views/tree';
 import { waitFor } from '../suite/helpers';
@@ -481,6 +481,69 @@ describe('多資料夾工作區（整合測試）', () => {
     assert.strictEqual(rMerge?.format, 'store');
     assert.strictEqual(api.store.bookmarksFor(util()).find((b) => b.id === 'f2-m1')?.number, undefined, 'merge 應清掉與資料夾 1 衝突的 1 號');
     assert.strictEqual(api.store.bookmarksFor(util()).find((b) => b.id === 'f2-m3')?.number, 3, '不衝突的 3 號應保留');
+  });
+
+  it('多資料夾工作區：匯出帶號碼與顏色，匯入另一個資料夾時保留；和現有號碼重複的不帶入', async () => {
+    const rel = 'tmp_share_numbers.py';
+    const lines = ['def first():', '    return 1', '', '', 'def second():', '    return 2', ''];
+    const uris = [f1(), f2()].map((f) => vscode.Uri.joinPath(f.uri, rel));
+    try {
+      for (const u of uris) {
+        await fsp.writeFile(u.fsPath, lines.join('\n'), 'utf8');
+      }
+      const key = { file: rel, path: 'second', kind: 'function' as const };
+      await api.store.update(f1(), (d) => {
+        let next = addBookmark(d, { id: 'num-line', file: rel, line: 1, tags: ['auth'], number: 2, color: 'red', anchor: makeAnchor(lines, 1) });
+        next = setSymbolExtras(setFavorite(next, key, true, 4), key, { number: 5, color: 'green' });
+        return setTagColor(setTagColor(next, 'auth', 'blue'), 'unused', 'pink');
+      });
+      await api.favorites.refresh();
+      const exported = await vscode.commands.executeCommand<{ text: string }>('functionBookmarks.exportBookmarks', {
+        folder: f1(),
+        scope: { kind: 'all' },
+        includeImported: false,
+        format: 'json',
+        includeCode: true,
+        target: 'clipboard',
+      });
+      assert.deepStrictEqual((JSON.parse(exported!.text) as { tagColors?: unknown }).tagColors, { auth: 'blue' }, '只帶用到的標籤顏色');
+
+      const importInto2 = () =>
+        vscode.commands.executeCommand<ImportResult>('functionBookmarks.importBookmarks', {
+          text: exported!.text,
+          folder: f2(),
+          author: 'alex.chen',
+          mode: 'replace',
+          confirmed: true,
+        });
+      const imported = () => api.store.bookmarksFor(uris[1]).map((b) => [b.line, b.number, b.color]);
+
+      // 資料夾 1 還佔用 2、5 號：不帶號碼，顏色照帶
+      assert.strictEqual((await importInto2())?.skippedNumbers, 2);
+      assert.deepStrictEqual(imported(), [
+        [1, undefined, 'red'],
+        [4, undefined, 'green'],
+      ]);
+
+      // 原本的書籤不在了（例如同事的工作區）：號碼與顏色保留；重複匯入（取代）也不會和自己衝突
+      await api.store.update(f1(), () => emptyStore());
+      await api.store.update(f2(), () => emptyStore());
+      await api.favorites.refresh();
+      for (let i = 0; i < 2; i++) {
+        assert.strictEqual((await importInto2())?.skippedNumbers, 0);
+        assert.deepStrictEqual(imported(), [
+          [1, 2, 'red'],
+          [4, 5, 'green'],
+        ]);
+      }
+      assert.strictEqual(api.store.tagColors().get('auth'), 'blue');
+      assert.strictEqual(api.store.tagColors().get('unused'), undefined);
+    } finally {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      for (const u of uris) {
+        await fsp.rm(u.fsPath, { force: true });
+      }
+    }
   });
 
   it('多資料夾工作區：cleanBranchRecords 依資料夾判斷與清理，不誤刪另一資料夾仍在用的分支快照（CR-06）', async function () {

@@ -236,5 +236,20 @@
   "Imported {0} tag color(s).": "已导入 {0} 个标签颜色。",
   "No bookmarks in this file.": "当前文件没有书签。",
   "Already at the last bookmark.": "已经是最后一个书签。",
-  "Already at the first bookmark.": "已经是第一个书签。"
+  "Already at the first bookmark.": "已经是第一个书签。",
+  "Status": "状态",
+  "Needs checking: the original line could not be found. Below is the last remembered content.": "需确认：找不到原来那一行，以下为最后记录的内容。",
+  "Needs checking: the original line could not be found.": "需确认：找不到原来那一行。",
+  "Not on the current branch: the current branch does not have this code.": "不在当前分支：当前分支没有这段代码。",
+  "Function not found: the file no longer contains this function.": "未找到函数：文件中已没有这个函数。",
+  "File not found: the project no longer contains this file.": "未找到文件：项目中已没有这个文件。",
+  "{0} number(s) are already in use by your bookmarks and were not imported.": "{0} 个编号与你现有的重复，未导入。",
+  "The file of this bookmark no longer exists: {0}": "此书签的文件已不存在：{0}",
+  "This bookmark needs checking: its original line was not found. Put the cursor on the correct line and run \"Move Bookmark to Cursor\" to fix it.": "此书签需确认：找不到原本的那一行。请将光标放在正确的行，再运行“将书签移动到光标处”来修正。",
+  "Set up the AI assistant skill for which folder?": "要为哪个文件夹设置 AI 助手 Skill？",
+  "Recommended": "推荐",
+  "Set Up AI Assistant Skill": "设置 AI 助手 Skill",
+  "Which AI assistant do you use? Cursor also reads the other two folders.": "你用哪个 AI 助手？Cursor 也会读取另外两个文件夹。",
+  "Open SKILL.md": "打开 SKILL.md",
+  "The AI assistant can now read and add bookmarks: {0}. It runs with Node.js. The folder is only on your computer (added to .git/info/exclude).": "AI 助手现在可以查询和添加书签：{0}。需要 Node.js 才能运行。这个文件夹只保留在你的电脑上（已加入 .git/info/exclude）。"
 }

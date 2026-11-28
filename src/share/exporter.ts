@@ -1,9 +1,8 @@
 import * as os from 'os';
 import * as vscode from 'vscode';
-import { bookmarkTitle } from '../bookmarks/commands';
-import { LineBookmark, makeAnchor } from '../bookmarks/model';
 import { hashLine, splitLines } from '../bookmarks/relocate';
 import { SECTION } from '../config';
+import { ExportItem, guideEntries, itemFromBookmark, itemFromFavorite, jsonBookmarks, sortItems, tableRows } from '../core/exportItems';
 import { findByPath } from '../detection/engine';
 import { readHeadCommit, readRemoteUrl, readUserName } from '../git/branch';
 import { BranchService } from '../git/branchService';
@@ -11,21 +10,7 @@ import { MarkStore } from '../storage/store';
 import { loadSource } from '../symbols/documentSource';
 import { FavoritesModel } from '../symbols/favorites';
 import { SymbolService } from '../symbols/symbolService';
-import { languageForPath } from '../util/paths';
-import {
-  encodeHashes,
-  EXPORT_FORMAT,
-  ExportedBookmark,
-  ExportFile,
-  ExportRow,
-  extractFunctionSnippet,
-  extractLineSnippet,
-  GuideEntry,
-  GuideSnippet,
-  toCsv,
-  toGuideMarkdown,
-  toMarkdown,
-} from './format';
+import { encodeHashes, EXPORT_FORMAT, ExportFile, ExportStatus, pickTagColors, toCsv, toGuideMarkdown, toMarkdown } from './format';
 
 export interface ShareDeps {
   store: MarkStore;
@@ -53,18 +38,7 @@ export interface ExportOptions {
   target?: 'clipboard' | vscode.Uri;
 }
 
-interface Candidate {
-  id: string;
-  file: string;
-  line: number;
-  title: string;
-  tags: string[];
-  imported: boolean;
-  number?: number;
-  createdAt?: string;
-  line_?: LineBookmark;
-  symbol?: { path: string; kind: string; alias?: string; note?: string; startLine?: number; endLine?: number };
-}
+type Candidate = ExportItem;
 
 /** 匯出者名稱：設定 → git user.name → 系統使用者名稱。 */
 export async function authorName(deps: ShareDeps, folder: vscode.WorkspaceFolder): Promise<string> {
@@ -84,49 +58,14 @@ export async function authorName(deps: ShareDeps, folder: vscode.WorkspaceFolder
 }
 
 function candidates(deps: ShareDeps, folder: vscode.WorkspaceFolder): Candidate[] {
-  const out: Candidate[] = [];
-  for (const e of deps.store.allBookmarks()) {
-    if (e.folder.uri.toString() !== folder.uri.toString()) {
-      continue;
-    }
-    const b = e.bookmark;
-    out.push({
-      id: b.id,
-      file: b.file,
-      line: b.line,
-      title: bookmarkTitle(b),
-      tags: b.tags ?? [],
-      imported: !!b.source,
-      number: b.number,
-      createdAt: b.createdAt,
-      line_: b,
-    });
-  }
-  for (const f of deps.favorites.all) {
-    if (f.folder.uri.toString() !== folder.uri.toString()) {
-      continue;
-    }
-    const m = f.mark;
-    out.push({
-      id: `fn:${m.file}:${m.kind}:${m.path}`,
-      file: m.file,
-      line: f.symbol?.nameLine ?? m.line ?? 0,
-      title: m.alias ?? m.path.split('.').pop() ?? m.path,
-      tags: m.tags ?? [],
-      imported: false,
-      number: m.number,
-      createdAt: m.addedAt,
-      symbol: {
-        path: m.path,
-        kind: m.kind,
-        alias: m.alias,
-        note: m.note,
-        startLine: f.symbol?.startLine,
-        endLine: f.symbol?.endLine,
-      },
-    });
-  }
-  return out.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+  const sameFolder = (f: vscode.WorkspaceFolder) => f.uri.toString() === folder.uri.toString();
+  return sortItems([
+    ...deps.store
+      .allBookmarks()
+      .filter((e) => sameFolder(e.folder))
+      .map((e) => itemFromBookmark(e.bookmark)),
+    ...deps.favorites.all.filter((f) => sameFolder(f.folder)).map((f) => itemFromFavorite(f.mark, f.symbol, f.status)),
+  ]);
 }
 
 function inScope(c: Candidate, scope: ExportScope): boolean {
@@ -197,6 +136,8 @@ export async function exportBookmarks(
   if (!folder) {
     return undefined;
   }
+  // 啟動後背景確認還沒跑完時，函式書籤的狀態還不準，先等它完成
+  await deps.favorites.whenReady();
   const all = candidates(deps, folder);
   if (!all.length) {
     void vscode.window.showInformationMessage(vscode.l10n.t('No bookmarks yet.'));
@@ -270,10 +211,9 @@ export async function exportBookmarks(
     const src = await loadSource(deps.store.uriOf(folder, file));
     contents.set(file, src ? splitLines(src.text) : undefined);
   }
-  const lineOk = (c: Candidate) => !c.line_?.status;
   const text =
     format === 'json'
-      ? JSON.stringify(await buildJson(deps, folder, list, contents, includeCode, lineOk), null, 2) + '\n'
+      ? JSON.stringify(await buildJson(deps, folder, list, contents, includeCode), null, 2) + '\n'
       : format === 'guide'
         ? await buildGuide(deps, folder, list, contents, includeCode)
         : buildTable(list, contents, includeCode, format);
@@ -305,51 +245,9 @@ async function buildJson(
   list: Candidate[],
   contents: Map<string, string[] | undefined>,
   includeCode: boolean,
-  lineOk: (c: Candidate) => boolean,
 ): Promise<ExportFile> {
   const gitDir = await deps.branches.gitDirOf(folder);
-  const bookmarks: ExportedBookmark[] = list.map((c) => {
-    const lines = contents.get(c.file);
-    const e: ExportedBookmark = { kind: c.symbol ? 'symbol' : 'line', id: c.id, file: c.file, line: c.line };
-    const label = c.symbol ? c.symbol.alias : c.line_?.label;
-    if (label) {
-      e.label = label;
-    }
-    if (c.tags.length) {
-      e.tags = c.tags;
-    }
-    const note = c.symbol ? c.symbol.note : c.line_?.note;
-    if (note) {
-      e.note = note;
-    }
-    if (c.symbol) {
-      e.path = c.symbol.path;
-      e.symbolKind = c.symbol.kind;
-    } else if (c.line_?.symbol) {
-      // 從別人匯入的函式書籤，轉出去時仍是函式書籤
-      e.kind = 'symbol';
-      e.path = c.line_.symbol.path;
-      e.symbolKind = c.line_.symbol.kind;
-    }
-    if (c.line_?.source) {
-      e.author = c.line_.source.author;
-    }
-    if (c.createdAt) {
-      e.createdAt = c.createdAt;
-    }
-    if (includeCode) {
-      if (lines && lineOk(c) && c.line < lines.length) {
-        const old = c.line_?.anchor;
-        e.anchor = makeAnchor(lines, c.line, old?.symbolPath ?? c.symbol?.path, undefined);
-        if (old?.symbolOffset !== undefined) {
-          e.anchor.symbolOffset = old.symbolOffset;
-        }
-      } else if (c.line_?.anchor) {
-        e.anchor = c.line_.anchor;
-      }
-    }
-    return e;
-  });
+  const bookmarks = jsonBookmarks(list, contents, includeCode);
   const files: Record<string, { hashes: string }> = {};
   if (includeCode) {
     for (const [file, lines] of contents) {
@@ -359,6 +257,10 @@ async function buildJson(
     }
   }
   const branch = deps.branches.current(folder);
+  const tagColors = pickTagColors(
+    list.flatMap((c) => c.tags),
+    deps.store.tagColors(),
+  );
   return {
     format: EXPORT_FORMAT,
     exportedBy: await authorName(deps, folder),
@@ -368,27 +270,43 @@ async function buildJson(
       : undefined,
     includesCode: includeCode,
     ...(includeCode ? { files } : {}),
+    ...(tagColors ? { tagColors } : {}),
     bookmarks,
   };
 }
 
+/** 表格與 CSV「狀態」欄的文字。 */
+function statusLabel(status: ExportStatus): string {
+  switch (status) {
+    case 'lost':
+      return vscode.l10n.t('needs checking');
+    case 'notOnBranch':
+      return vscode.l10n.t('not on this branch');
+    case 'missing':
+      return vscode.l10n.t('function not found');
+    case 'noFile':
+      return vscode.l10n.t('file not found');
+  }
+}
+
+/** 導讀文件的警示文字。 */
+function guideWarning(status: ExportStatus, hasCode: boolean): string {
+  switch (status) {
+    case 'lost':
+      return hasCode
+        ? vscode.l10n.t('Needs checking: the original line could not be found. Below is the last remembered content.')
+        : vscode.l10n.t('Needs checking: the original line could not be found.');
+    case 'notOnBranch':
+      return vscode.l10n.t('Not on the current branch: the current branch does not have this code.');
+    case 'missing':
+      return vscode.l10n.t('Function not found: the file no longer contains this function.');
+    case 'noFile':
+      return vscode.l10n.t('File not found: the project no longer contains this file.');
+  }
+}
+
 function buildTable(list: Candidate[], contents: Map<string, string[] | undefined>, includeCode: boolean, format: ExportFormat): string {
-  const rows: ExportRow[] = list.map((c) => {
-    const lines = contents.get(c.file);
-    const row: ExportRow = {
-      file: c.file,
-      line: c.line + 1,
-      name: c.title,
-      kind: c.symbol || c.line_?.symbol ? 'symbol' : 'line',
-      tags: c.tags,
-      note: c.symbol ? c.symbol.note : c.line_?.note,
-      source: c.line_?.source?.author,
-    };
-    if (includeCode) {
-      row.code = lines?.[c.line]?.trim() ?? c.line_?.anchor?.text ?? '';
-    }
-    return row;
-  });
+  const rows = tableRows(list, contents, includeCode, statusLabel);
   const labels = {
     file: vscode.l10n.t('File'),
     line: vscode.l10n.t('Line'),
@@ -400,6 +318,7 @@ function buildTable(list: Candidate[], contents: Map<string, string[] | undefine
     source: vscode.l10n.t('Source'),
     fn: vscode.l10n.t('function'),
     lineKind: vscode.l10n.t('line'),
+    status: vscode.l10n.t('Status'),
   };
   return format === 'markdown' ? toMarkdown(rows, labels) : toCsv(rows, labels);
 }
@@ -412,45 +331,17 @@ async function buildGuide(
   contents: Map<string, string[] | undefined>,
   includeCode: boolean,
 ): Promise<string> {
-  const entries: GuideEntry[] = [];
-  for (const c of list) {
-    const lines = contents.get(c.file);
-    let snippet: GuideSnippet | undefined;
-    if (includeCode && lines) {
-      const symTarget = c.symbol ?? c.line_?.symbol;
-      if (symTarget) {
-        let startLine = c.symbol?.startLine;
-        let endLine = c.symbol?.endLine;
-        if ((startLine === undefined || endLine === undefined) && deps.service) {
-          const parsed = await deps.service.getForUri(deps.store.uriOf(folder, c.file)).catch(() => undefined);
-          const found = parsed && findByPath(parsed.symbols, symTarget.path, symTarget.kind);
-          if (found) {
-            startLine = found.startLine;
-            endLine = found.endLine;
-          }
-        }
-        snippet =
-          startLine !== undefined && endLine !== undefined
-            ? extractFunctionSnippet(lines, startLine, endLine)
-            : extractLineSnippet(lines, c.line);
-      } else {
-        snippet = extractLineSnippet(lines, c.line);
+  const service = deps.service;
+  const findRange = service
+    ? async (file: string, path: string, kind: string) => {
+        const parsed = await service.getForUri(deps.store.uriOf(folder, file));
+        return parsed ? findByPath(parsed.symbols, path, kind) : undefined;
       }
-    }
-    entries.push({
-      number: c.number,
-      name: c.title,
-      file: c.file,
-      line: c.line + 1,
-      tags: c.tags,
-      note: c.symbol ? c.symbol.note : c.line_?.note,
-      source: c.line_?.source?.author,
-      language: languageForPath(c.file),
-      snippet,
-    });
-  }
+    : undefined;
+  const entries = await guideEntries(list, contents, includeCode, findRange);
   return toGuideMarkdown(entries, {
     title: vscode.l10n.t('{0} — Walkthrough', folder.name),
     omittedLabel: (n) => vscode.l10n.t('… ({0} more line(s) omitted)', n),
+    warningLabel: guideWarning,
   });
 }

@@ -5,7 +5,7 @@ import { findPartial, splitTemplateTarget } from './django/templates';
 import { findByPath, findInnermost } from './detection/engine';
 import { DetectedSymbol, SymbolKindName } from './detection/types';
 import { parseTags } from './bookmarks/model';
-import { autoNumbers, tagsPrompt } from './bookmarks/commands';
+import { autoNumbers, ensureBookmarkFileExists, JumpOptions, notifyMissingBookmarkFile, tagsPrompt } from './bookmarks/commands';
 import { MarkKey, setAlias, setFavorite, setNote, setSymbolExtras, setTags, StoreData } from './storage/marks';
 import { MarkStore } from './storage/store';
 import { ResolvedFavorite } from './symbols/favorites';
@@ -259,21 +259,28 @@ export class Commands {
     await this.notes.preview(mark.alias ?? name, subtitle, mark.note);
   }
 
-  async openFavorite(fav: ResolvedFavorite): Promise<void> {
+  async openFavorite(fav: ResolvedFavorite, options?: JumpOptions): Promise<boolean> {
+    // 先確認磁碟檔案存在：剛關閉的分頁仍可能留在 textDocuments 中，避免 getForUri 讀到快取而開出「已刪除」分頁
+    if (!(await ensureBookmarkFileExists(fav.uri, fav.mark.file, options))) {
+      return false;
+    }
     const file = await this.service.getForUri(fav.uri);
     if (!file) {
-      void vscode.window.showWarningMessage(vscode.l10n.t('File not found: {0}', fav.mark.file));
-      return;
+      if (!options?.silentMissing) {
+        notifyMissingBookmarkFile(fav.mark.file);
+      }
+      return false;
     }
     const sym = findByPath(file.symbols, fav.mark.path, fav.mark.kind);
     if (sym) {
       await revealSymbol(fav.uri, sym);
-      return;
+      return true;
     }
     await reveal(fav.uri, fav.mark.line ?? 0);
     void vscode.window.showWarningMessage(
       vscode.l10n.t('"{0}" was not found; jumped to its last known position.', fav.mark.path),
     );
+    return true;
   }
 
   async openTemplate(node?: TreeNode): Promise<void> {

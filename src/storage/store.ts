@@ -5,6 +5,7 @@ import { relativeUnder } from '../util/paths';
 import { SECTION, settingStorageMode, StorageMode, storageMode, WORKSPACE_STORAGE_KEY, WorkspaceStorageChoice, workspaceStorageOverride } from '../config';
 import { DetectedSymbol } from '../detection/types';
 import { BOOKMARKS_FILE } from './gitExclude';
+import { decodeStoreText, storeTextToWrite } from '../core/storeFile';
 import { ensureBookmarksFileExcluded } from './gitExcludeFs';
 import { LineBookmark, visibleOnBranch } from '../bookmarks/model';
 import { emptyStore, favorites, findMark, hasStoreData, MarkKey, mergeStoreData, parseStore, renamePath, serializeStore, StoreData, SymbolMark } from './marks';
@@ -766,13 +767,13 @@ export class MarkStore implements vscode.Disposable {
     }
     // 讀到外部變更：清掉自己最近寫入紀錄，確保之後若再改回舊內容也會正常載入
     this.lastWrite.delete(key);
-    if (text === undefined || text.trim() === '') {
+    const decoded = decodeStoreText(text);
+    if (decoded.kind === 'empty') {
       this.broken.delete(key);
-      this.data.set(key, emptyStore());
+      this.data.set(key, decoded.data);
       return true;
     }
-    const parsed = parseStore(text);
-    if (!parsed) {
+    if (decoded.kind === 'broken') {
       if (!this.broken.has(key)) {
         void vscode.window.showWarningMessage(
           vscode.l10n.t('{0} is not valid JSON. Fix or delete it before making changes.', BOOKMARKS_FILE),
@@ -782,7 +783,7 @@ export class MarkStore implements vscode.Disposable {
       return false;
     }
     this.broken.delete(key);
-    this.data.set(key, parsed);
+    this.data.set(key, decoded.data);
     return true;
   }
 
@@ -794,16 +795,11 @@ export class MarkStore implements vscode.Disposable {
       return;
     }
     const file = this.fileUri(folder);
-    if (data.symbols.length === 0 && !(data.bookmarks ?? []).length && !Object.keys(data.tagColors ?? {}).length) {
-      // 沒有任何資料時不主動建立檔案；已存在的檔案則更新為空清單
-      // （之前只看函式書籤：專案裡只有行號書籤時不會建立檔案，重開後書籤就不見了）
-      const exists = await vscode.workspace.fs.stat(file).then(
-        () => true,
-        () => false,
-      );
-      if (!exists) {
-        return;
-      }
+    // 沒有任何資料時不主動建立檔案；已存在的檔案則更新為空清單（規則在 core/storeFile，CLI 共用）
+    // 有資料時一定寫入，不必查檔案是否存在
+    const exists = hasStoreData(data) || (await vscode.workspace.fs.stat(file).then(() => true, () => false));
+    if (storeTextToWrite(data, exists) === undefined) {
+      return;
     }
     this.writeSeq.set(key, (this.writeSeq.get(key) ?? 0) + 1);
     this.lastWrite.set(key, { text, at: Date.now() });

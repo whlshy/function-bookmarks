@@ -1,14 +1,15 @@
 import * as vscode from 'vscode';
 import { FileEvents } from '../util/fileEvents';
 import { uriKey } from '../util/uris';
-import { findByPath } from '../detection/engine';
 import { DetectedSymbol } from '../detection/types';
 import { updateLine } from '../storage/marks';
 import { reconcileFile } from '../storage/reconcile';
 import { FavoriteEntry, MarkStore } from '../storage/store';
 import { FileSymbols, SymbolService } from './symbolService';
 
-export type FavoriteStatus = 'ok' | 'missing' | 'noFile';
+import { FavoriteStatus, favoriteLineUpdates, resolveFavorite } from '../core/resolve';
+
+export type { FavoriteStatus };
 
 export interface ResolvedFavorite extends FavoriteEntry {
   symbol?: DetectedSymbol;
@@ -225,8 +226,7 @@ export class FavoritesModel implements vscode.Disposable {
           resolved.push({ ...entry, status: 'noFile' });
           continue;
         }
-        const symbol = findByPath(file.symbols, entry.mark.path, entry.mark.kind);
-        resolved.push({ ...entry, symbol, status: symbol ? 'ok' : 'missing' });
+        resolved.push({ ...entry, ...resolveFavorite(entry.mark, file.symbols) });
       }
       return resolved;
     };
@@ -250,12 +250,10 @@ export class FavoritesModel implements vscode.Disposable {
 
     // 記住最新行號（每個資料夾合併成一次更新），函式之後找不到時還能跳到大概的位置
     const lineUpdates = new Map<vscode.WorkspaceFolder, { mark: FavoriteEntry['mark']; line: number }[]>();
-    for (const r of resolved) {
-      if (r.symbol && r.mark.line !== r.symbol.nameLine) {
-        const list = lineUpdates.get(r.folder) ?? [];
-        list.push({ mark: r.mark, line: r.symbol.nameLine });
-        lineUpdates.set(r.folder, list);
-      }
+    for (const { item, line } of favoriteLineUpdates(resolved)) {
+      const list = lineUpdates.get(item.folder) ?? [];
+      list.push({ mark: item.mark, line });
+      lineUpdates.set(item.folder, list);
     }
     if (lineUpdates.size) {
       this.updatingStore = true;

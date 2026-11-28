@@ -1,5 +1,17 @@
 import * as assert from 'assert';
-import { applyChanges, isBlockReplace, isWholeDocumentReplace, LineChange, makeAnchor, neighbor, parseTags, shiftLine, suggestName } from '../../src/bookmarks/model';
+import {
+  applyChanges,
+  findAvailableTourStep,
+  isBlockReplace,
+  isWholeDocumentReplace,
+  LineChange,
+  makeAnchor,
+  neighbor,
+  parseTags,
+  shiftLine,
+  suggestName,
+  tourCandidateIndices,
+} from '../../src/bookmarks/model';
 import { addBookmark, emptyStore, parseStore, removeBookmarks, renamePath, serializeStore, setAlias, setFavorite, updateBookmark } from '../../src/storage/marks';
 
 const ins = (line: number, ch: number, text: string): LineChange => ({ startLine: line, startChar: ch, endLine: line, endChar: ch, text });
@@ -176,5 +188,59 @@ describe('行號書籤：其他工具', () => {
     const lines = ['a', ' b ', 'c', 'd', 'e'];
     assert.deepStrictEqual(makeAnchor(lines, 0, 'f', 0), { text: 'a', before: ['', ''], after: ['b', 'c'], symbolPath: 'f', symbolOffset: 0 });
     assert.deepStrictEqual(makeAnchor(lines, 3), { text: 'd', before: ['b', 'c'], after: ['e', ''], symbolPath: undefined, symbolOffset: undefined });
+  });
+
+  it('tourCandidateIndices：依方向產生循環候選順序', () => {
+    assert.deepStrictEqual(tourCandidateIndices(0, -1, 1), []);
+    assert.deepStrictEqual(tourCandidateIndices(3, -1, 1), [0, 1, 2]);
+    assert.deepStrictEqual(tourCandidateIndices(3, -1, -1), [2, 1, 0]);
+    assert.deepStrictEqual(tourCandidateIndices(3, 0, 1), [1, 2, 0]);
+    assert.deepStrictEqual(tourCandidateIndices(3, 2, 1), [0, 1, 2]);
+    assert.deepStrictEqual(tourCandidateIndices(3, 2, -1), [1, 0, 2]);
+    assert.deepStrictEqual(tourCandidateIndices(3, 0, -1), [2, 1, 0]);
+    assert.deepStrictEqual(tourCandidateIndices(1, 0, 1), [0]);
+    assert.deepStrictEqual(tourCandidateIndices(1, 0, -1), [0]);
+  });
+
+  it('findAvailableTourStep：略過不可用步驟、保留原始索引、全部不可用時回傳 undefined', async () => {
+    const steps = [
+      { number: 1, ok: true },
+      { number: 2, ok: false },
+      { number: 3, ok: true },
+    ];
+    // 正向從第 0 步（#1）出發：略過 #2，跳到 #3（索引 2）
+    const next = await findAvailableTourStep(steps, 0, 1, async (s) => s.ok);
+    assert.deepStrictEqual(next, { step: steps[2], index: 2 });
+
+    // 反向從第 2 步（#3）出發：略過 #2，跳回 #1（索引 0）
+    const prev = await findAvailableTourStep(steps, 2, -1, async (s) => s.ok);
+    assert.deepStrictEqual(prev, { step: steps[0], index: 0 });
+
+    // 未定位時從第一或最後開始，遇到不可用往同方向繼續找
+    const onlyMiddle = [
+      { number: 1, ok: false },
+      { number: 2, ok: true },
+      { number: 3, ok: false },
+    ];
+    assert.deepStrictEqual(await findAvailableTourStep(onlyMiddle, -1, 1, (s) => s.ok), { step: onlyMiddle[1], index: 1 });
+    assert.deepStrictEqual(await findAvailableTourStep(onlyMiddle, -1, -1, (s) => s.ok), { step: onlyMiddle[1], index: 1 });
+
+    // 全部都不可用：每個步驟只試一次並回傳 undefined
+    const tried: number[] = [];
+    const none = await findAvailableTourStep(
+      [
+        { number: 1, ok: false },
+        { number: 2, ok: false },
+        { number: 3, ok: false },
+      ],
+      0,
+      1,
+      (s) => {
+        tried.push(s.number);
+        return s.ok;
+      },
+    );
+    assert.strictEqual(none, undefined);
+    assert.deepStrictEqual(tried, [2, 3, 1]);
   });
 });

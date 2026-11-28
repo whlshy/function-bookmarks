@@ -30,7 +30,8 @@ import { BookmarkGrouping, COMMANDS, FilterMode, FunctionTreeProvider, SymbolNod
 import { sameUri } from './util/uris';
 import { BookmarkSearchBox } from './views/searchBox';
 import { StartupLog, StartupTiming } from './util/startupLog';
-import { stringArg, stringArrayArg } from './util/commandArgs';
+import { plainOptions, stringArg, stringArrayArg } from './util/commandArgs';
+import { SkillSetup, SkillTargetId } from './ai/skillSetup';
 import { fileGroupKey, isBookmarkNode, lineArg } from './util/editorArgs';
 
 const VIEW_ID = 'functionBookmarks.tree';
@@ -56,6 +57,7 @@ export interface ExtensionApi {
   ruleTester: RuleTester;
   notes: NoteEditor;
   searchBox: BookmarkSearchBox;
+  skillSetup: SkillSetup;
   refreshNow(): Promise<void>;
   /** 立即執行一次游標跟隨，回傳被標示的節點。 */
   followCursor(): SymbolNode | undefined;
@@ -111,7 +113,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     service,
     favorites,
     bookmarks,
-    (fav) => commands.openFavorite(fav),
+    (fav, options) => commands.openFavorite(fav, options),
     () => gutter.update(),
   );
   const statusBar = new BookmarkStatusBar(store, favorites, gutter);
@@ -130,7 +132,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
   // 書籤搜尋：清單第一列顯示搜尋字串，輸入框開在畫面上方，打字即時篩選「書籤」區
   const openMatch = async (node: TreeNode | undefined) => {
     if (node?.type === 'bookmark') {
-      await revealLine(node.entry.uri, node.entry.bookmark.line);
+      await bookmarks.openBookmark(node);
     } else if (node?.type === 'favorite') {
       await commands.openFavorite(node.fav);
     }
@@ -393,6 +395,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
   let cursorTimer: NodeJS.Timeout | undefined;
   const reg = (id: string, fn: (...args: any[]) => unknown) => vscode.commands.registerCommand(id, fn);
 
+  // 已設定過的 AI 助理 Skill 跟著套件版本更新（背景進行，不拖慢啟動）
+  const skillSetup = new SkillSetup(context);
+  const skillRefresh = setTimeout(() => void skillSetup.refreshInstalled().catch(() => undefined), 5000);
+  context.subscriptions.push({ dispose: () => clearTimeout(skillRefresh) });
   context.subscriptions.push(
     files,
     store,
@@ -515,6 +521,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
       return arg.action === 'rename' ? commands.rename(node) : commands.editNote(node);
     }),
     reg(COMMANDS.revealLine, (uri: vscode.Uri, line: number) => revealLine(uri, line)),
+    reg(COMMANDS.openBookmark, (arg?: unknown) => bookmarks.openBookmark(arg)),
     // 也可從行號右鍵選單呼叫（參數為 { lineNumber, uri }）
     reg('functionBookmarks.toggleBookmark', (arg?: unknown) => bookmarks.toggle(lineArg(arg))),
     reg('functionBookmarks.addLabeledBookmark', (arg?: unknown) => bookmarks.addLabeled(undefined, lineArg(arg))),
@@ -605,6 +612,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     }),
     favorites.onDidChange(() => void updateCursorBookmarkContext()),
     ...registerShareCommands({ store, favorites, branches, service, bookmarks }),
+    // 給 AI 助理：Skill 說明書＋CLI；側邊欄 … 選單會傳入選取中的樹節點，只接受一般選項物件
+    reg('functionBookmarks.setUpAiSkill', (arg?: unknown) =>
+      skillSetup.run(plainOptions<{ folder?: vscode.WorkspaceFolder; target?: SkillTargetId }>(arg, ['folder', 'target']) ?? {}),
+    ),
     reg('functionBookmarks.groupBookmarksBySource', () => applyViewState(provider.filterMode, 'source')),
     reg('functionBookmarks.clearAllBookmarks', () => bookmarks.clearAll()),
     // M7：數字快速書籤、顏色、暫時隱藏圖示
@@ -725,6 +736,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     ruleTester,
     notes,
     searchBox,
+    skillSetup,
     refreshNow,
     followCursor,
     updateCursorBookmarkContext,

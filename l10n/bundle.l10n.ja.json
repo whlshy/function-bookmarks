@@ -236,5 +236,20 @@
   "Imported {0} tag color(s).": "{0} 件のタグの色をインポートしました。",
   "No bookmarks in this file.": "このファイルにブックマークはありません。",
   "Already at the last bookmark.": "すでに最後のブックマークです。",
-  "Already at the first bookmark.": "すでに最初のブックマークです。"
+  "Already at the first bookmark.": "すでに最初のブックマークです。",
+  "Status": "状態",
+  "Needs checking: the original line could not be found. Below is the last remembered content.": "要確認: 元の行が見つかりません。以下は最後に記録した内容です。",
+  "Needs checking: the original line could not be found.": "要確認: 元の行が見つかりません。",
+  "Not on the current branch: the current branch does not have this code.": "現在のブランチにありません: このコードは現在のブランチに含まれていません。",
+  "Function not found: the file no longer contains this function.": "関数が見つかりません: ファイル内にこの関数はもうありません。",
+  "File not found: the project no longer contains this file.": "ファイルが見つかりません: プロジェクト内にこのファイルはもうありません。",
+  "{0} number(s) are already in use by your bookmarks and were not imported.": "{0} 件の番号は既存のブックマークと重複するため、取り込みませんでした。",
+  "The file of this bookmark no longer exists: {0}": "このブックマークのファイルはもう存在しません: {0}",
+  "This bookmark needs checking: its original line was not found. Put the cursor on the correct line and run \"Move Bookmark to Cursor\" to fix it.": "このブックマークは要確認です。元の行が見つかりませんでした。正しい行にカーソルを置き、「ブックマークをカーソル位置へ移動」を実行して修正してください。",
+  "Set up the AI assistant skill for which folder?": "どのフォルダーに AI アシスタント用 Skill を設定しますか？",
+  "Recommended": "おすすめ",
+  "Set Up AI Assistant Skill": "AI アシスタント用 Skill を設定",
+  "Which AI assistant do you use? Cursor also reads the other two folders.": "どの AI アシスタントを使いますか？Cursor はほかの 2 つのフォルダーも読み込みます。",
+  "Open SKILL.md": "SKILL.md を開く",
+  "The AI assistant can now read and add bookmarks: {0}. It runs with Node.js. The folder is only on your computer (added to .git/info/exclude).": "AI アシスタントがブックマークを参照・追加できるようになりました：{0}。実行には Node.js が必要です。このフォルダーはこのコンピューターだけに置かれます（.git/info/exclude に追加済み）。"
 }

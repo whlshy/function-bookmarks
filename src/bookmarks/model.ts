@@ -191,6 +191,44 @@ export function neighbor<T extends Pick<LineBookmark, 'file' | 'line'>>(
   return [...sorted].reverse().find((b) => cmp(b) < 0) ?? (wrap ? sorted[sorted.length - 1] : undefined);
 }
 
+/**
+ * 計算依方向循環走訪步驟的候選索引順序（從起點往指定方向繞一圈，共 `length` 個）。
+ * `currentIndex` 不在範圍內（例如 -1）時，正向從 0 開始、反向從最後一個開始。
+ */
+export function tourCandidateIndices(length: number, currentIndex: number, direction: 1 | -1): number[] {
+  if (length <= 0) {
+    return [];
+  }
+  const start =
+    currentIndex < 0 || currentIndex >= length
+      ? direction === 1
+        ? 0
+        : length - 1
+      : ((currentIndex + direction) % length + length) % length;
+  const order: number[] = [];
+  for (let offset = 0; offset < length; offset++) {
+    order.push(((start + offset * direction) % length + length) % length);
+  }
+  return order;
+}
+
+/**
+ * 依方向在導覽步驟中找第一個可用（例如檔案仍存在於磁碟）的步驟；全部都不可用時回傳 `undefined`。
+ */
+export async function findAvailableTourStep<T>(
+  steps: readonly T[],
+  currentIndex: number,
+  direction: 1 | -1,
+  isAvailable: (step: T, index: number) => Promise<boolean> | boolean,
+): Promise<{ step: T; index: number } | undefined> {
+  for (const index of tourCandidateIndices(steps.length, currentIndex, direction)) {
+    if (await isAvailable(steps[index], index)) {
+      return { step: steps[index], index };
+    }
+  }
+  return undefined;
+}
+
 /** 新增書籤時建議的名稱：選取的文字 → 游標所在單字 → 所在函式名稱 → 該行內容。 */
 export function suggestName(input: {
   selection?: string;

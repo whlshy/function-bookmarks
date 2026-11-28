@@ -4,8 +4,9 @@ import { addBookmark, clearNumber, MarkKey, setFavorite, setSymbolExtras, setTag
 import { MarkStore, NumberedEntry } from '../storage/store';
 import { FavoritesModel } from '../symbols/favorites';
 import { SymbolService } from '../symbols/symbolService';
-import { autoNumbers, BookmarkCommands, bookmarkTitle, revealLine } from './commands';
+import { autoNumbers, BookmarkCommands, bookmarkTitle, JumpOptions, jumpToBookmark, notifyMissingBookmarkFile } from './commands';
 import { circled, nextFreeNumber, PALETTE, paletteColor } from './decor';
+import { findAvailableTourStep } from './model';
 import { itemTags, allBookmarkItems } from './unified';
 import { goToNumberKeys, setNumberKey, setNumberKeys } from '../util/shortcuts';
 
@@ -88,7 +89,7 @@ export class BookmarkExtras {
     private readonly service: SymbolService,
     private readonly favorites: FavoritesModel,
     private readonly bookmarks: BookmarkCommands,
-    private readonly openFavorite: (fav: FavoritesModel['all'][number]) => Promise<void>,
+    private readonly openFavorite: (fav: FavoritesModel['all'][number], options?: JumpOptions) => Promise<boolean>,
     private readonly beforeShowHover?: () => Promise<void>,
   ) {}
 
@@ -469,24 +470,34 @@ export class BookmarkExtras {
         void vscode.window.showInformationMessage(vscode.l10n.t('Bookmark {0} is not on the current branch.', n));
         return undefined;
       }
-      await revealLine(e.uri, e.bookmark.line);
-      return { uri: e.uri, line: e.bookmark.line };
+      const ok = await jumpToBookmark({
+        uri: e.uri,
+        line: e.bookmark.line,
+        file: e.bookmark.file,
+        status: e.bookmark.status,
+      });
+      return ok ? { uri: e.uri, line: e.bookmark.line } : undefined;
     }
     const fav = this.favorites.all.find(
       (f) => f.folder === e.folder && f.mark.file === e.mark.file && f.mark.path === e.mark.path && f.mark.kind === e.mark.kind,
     );
     if (fav) {
-      await this.openFavorite(fav);
+      const ok = await this.openFavorite(fav);
+      if (!ok) {
+        return undefined;
+      }
       const line = fav.symbol?.nameLine ?? fav.mark.line ?? 0;
       return { uri: e.uri, line };
     }
-    await revealLine(e.uri, e.mark.line ?? 0);
-    return { uri: e.uri, line: e.mark.line ?? 0 };
+    const fallbackLine = e.mark.line ?? 0;
+    const ok = await jumpToBookmark({ uri: e.uri, line: fallbackLine, file: e.mark.file });
+    return ok ? { uri: e.uri, line: fallbackLine } : undefined;
   }
 
   /**
    * 依編號（1→9）在有編號的書籤間循環導覽（跨檔案、跨資料夾）。
-   * 跳轉後在狀態列顯示「導覽 i/N：名稱」，若書籤有備註則自動開啟該行滑鼠提示。
+   * 跳轉後在狀態列顯示「導覽 i/N：名稱」，若書籤有備註則自動開啟該行滑鼠提示；
+   * 遇到已刪除的檔案會往同方向略過，全部都不存在時顯示一次提示後停止。
    */
   async tour(direction: 1 | -1): Promise<TourStepResult | undefined> {
     const used = this.store.numbered();
@@ -525,37 +536,76 @@ export class BookmarkExtras {
     if (curIdx === -1 && this.lastTourNumber !== undefined) {
       curIdx = steps.findIndex((s) => s.number === this.lastTourNumber);
     }
-    const nextIdx =
-      curIdx === -1
-        ? direction === 1
-          ? 0
-          : steps.length - 1
-        : (curIdx + direction + steps.length) % steps.length;
-    const step = steps[nextIdx];
-    const e = step.entry;
-    let landedLine = step.line;
-    if (e.kind === 'line') {
-      await revealLine(e.uri, e.bookmark.line);
-      landedLine = e.bookmark.line;
-    } else {
+
+    // 略過磁碟檔案已不存在的步驟，往同方向找下一個可用步驟；同一檔案失敗過不重複 stat
+    const missingUris = new Set<string>();
+    let firstMissing: string | undefined;
+    let landedLine = 0;
+    const found = await findAvailableTourStep(steps, curIdx, direction, async (step, index) => {
+      const e = step.entry;
+      const uriStr = e.uri.toString();
+      if (missingUris.has(uriStr)) {
+        return false;
+      }
+      const title = entryTitle(e);
+      const status = vscode.l10n.t('Tour {0}/{1}: {2}', index + 1, steps.length, title);
+      const setTourStatus = () => {
+        this.lastTourStatus = status;
+        vscode.window.setStatusBarMessage(`$(compass) ${status}`, 6000);
+      };
+      if (e.kind === 'line') {
+        const ok = await jumpToBookmark(
+          { uri: e.uri, line: e.bookmark.line, file: e.bookmark.file, status: e.bookmark.status },
+          { silentMissing: true, afterJump: setTourStatus },
+        );
+        if (!ok) {
+          missingUris.add(uriStr);
+          firstMissing ??= e.bookmark.file;
+          return false;
+        }
+        landedLine = e.bookmark.line;
+        return true;
+      }
       const fav = this.favorites.all.find(
         (f) => f.folder === e.folder && f.mark.file === e.mark.file && f.mark.path === e.mark.path && f.mark.kind === e.mark.kind,
       );
       if (fav) {
-        await this.openFavorite(fav);
+        const ok = await this.openFavorite(fav, { silentMissing: true });
+        if (!ok) {
+          missingUris.add(uriStr);
+          firstMissing ??= e.mark.file;
+          return false;
+        }
+        setTourStatus();
         landedLine = fav.symbol?.nameLine ?? fav.mark.line ?? 0;
-      } else {
-        await revealLine(e.uri, e.mark.line ?? 0);
-        landedLine = e.mark.line ?? 0;
+        return true;
       }
+      const fallbackLine = e.mark.line ?? 0;
+      const ok = await jumpToBookmark(
+        { uri: e.uri, line: fallbackLine, file: e.mark.file },
+        { silentMissing: true, afterJump: setTourStatus },
+      );
+      if (!ok) {
+        missingUris.add(uriStr);
+        firstMissing ??= e.mark.file;
+        return false;
+      }
+      landedLine = fallbackLine;
+      return true;
+    });
+
+    if (!found) {
+      this.lastTourStatus = undefined;
+      if (firstMissing !== undefined) {
+        notifyMissingBookmarkFile(firstMissing);
+      }
+      return undefined;
     }
 
+    const { step, index: nextIdx } = found;
+    const e = step.entry;
     this.lastTourNumber = step.number;
     const title = entryTitle(e);
-    const status = vscode.l10n.t('Tour {0}/{1}: {2}', nextIdx + 1, steps.length, title);
-    this.lastTourStatus = status;
-    vscode.window.setStatusBarMessage(`$(compass) ${status}`, 6000);
-
     const hasNote = e.kind === 'line' ? Boolean(e.bookmark.note) : Boolean(e.mark.note);
     if (hasNote) {
       // 先確保編輯器行號旁與整行的備註裝飾已畫上，再打開滑鼠提示

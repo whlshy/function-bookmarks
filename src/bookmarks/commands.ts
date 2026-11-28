@@ -19,8 +19,9 @@ import { BookmarkEntry, MarkStore } from '../storage/store';
 import { FavoritesModel } from '../symbols/favorites';
 import { SymbolService } from '../symbols/symbolService';
 import { shownBookmarkItems } from './unified';
+import { newLineBookmark, symbolAtNameLine } from '../core/resolve';
 import { NoteEditor } from '../views/noteEditor';
-import { LineBookmark, makeAnchor, neighbor, newBookmarkId, parseTags, suggestName } from './model';
+import { BookmarkStatus, LineBookmark, makeAnchor, neighbor, parseTags, suggestName } from './model';
 import { lineBookmarkTitle } from './sort';
 
 /** 樹狀檢視的書籤節點（避免與 views/tree 互相引用，只描述需要的欄位）。 */
@@ -29,7 +30,7 @@ export interface BookmarkNodeLike {
   entry: BookmarkEntry;
 }
 
-/** 提示中「在預覽中開啟」連結帶的參數。 */
+/** 提示中「在預覽中開啟」連結與側邊欄點擊書籤帶的參數。 */
 export interface BookmarkLinkArg {
   uri: string;
   bookmark: string;
@@ -42,6 +43,68 @@ export function isBookmarkLinkArg(arg: unknown): arg is BookmarkLinkArg {
 
 export function bookmarkTitle(b: LineBookmark): string {
   return lineBookmarkTitle(b);
+}
+
+/** 共用跳轉的目標描述（行號書籤或一般位置）。 */
+export interface BookmarkJumpTarget {
+  uri: vscode.Uri;
+  line: number;
+  /** 提示中顯示的相對路徑；省略時由 workspace.asRelativePath 推算。 */
+  file?: string;
+  /** 行號書籤狀態；為 'lost' 時跳轉後於狀態列提示需確認。 */
+  status?: BookmarkStatus;
+}
+
+export interface JumpOptions {
+  /** 檔案不存在時不顯示狀態列提示（供導覽／連續跳轉跳過不存在檔案時改由外層統一提示一次）。 */
+  silentMissing?: boolean;
+  /** 成功跳到目標行之後、顯示「需確認」狀態列提示之前執行。 */
+  afterJump?: () => void;
+}
+
+/** 在狀態列提示書籤檔案已不存在（顯示 5 秒）。 */
+export function notifyMissingBookmarkFile(rel: string): void {
+  vscode.window.setStatusBarMessage(
+    `$(warning) ${vscode.l10n.t('The file of this bookmark no longer exists: {0}', rel)}`,
+    5000,
+  );
+}
+
+/** 確認磁碟上仍有該檔案：剛關閉的分頁 VS Code 仍保有內容，直接開啟會冒出「已刪除」空分頁。 */
+export async function ensureBookmarkFileExists(
+  uri: vscode.Uri,
+  file?: string,
+  options?: Pick<JumpOptions, 'silentMissing'>,
+): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(uri);
+    return true;
+  } catch {
+    if (!options?.silentMissing) {
+      const rel = file ?? vscode.workspace.asRelativePath(uri, false);
+      notifyMissingBookmarkFile(rel);
+    }
+    return false;
+  }
+}
+
+/**
+ * 共用的書籤跳轉函式：先確認檔案仍存在於磁碟，再開到該行；
+ * 若行號書籤標記為「需確認（lost）」，在狀態列短暫提示 5 秒引導修正。
+ */
+export async function jumpToBookmark(target: BookmarkJumpTarget, options?: JumpOptions): Promise<boolean> {
+  if (!(await ensureBookmarkFileExists(target.uri, target.file, options))) {
+    return false;
+  }
+  await revealLine(target.uri, target.line);
+  options?.afterJump?.();
+  if (target.status === 'lost') {
+    vscode.window.setStatusBarMessage(
+      `$(warning) ${vscode.l10n.t('This bookmark needs checking: its original line was not found. Put the cursor on the correct line and run "Move Bookmark to Cursor" to fix it.')}`,
+      5000,
+    );
+  }
+  return true;
 }
 
 export async function revealLine(uri: vscode.Uri, line: number): Promise<vscode.TextEditor> {
@@ -64,17 +127,7 @@ export class BookmarkCommands {
 
   /** 名稱剛好在這一行的符號（函式、類別、block…），有的話 Alt+Shift+B B 建立函式書籤。 */
   async symbolAtNameLine(doc: vscode.TextDocument, line: number): Promise<DetectedSymbol | undefined> {
-    let hit: DetectedSymbol | undefined;
-    const walk = (list: DetectedSymbol[]) => {
-      for (const s of list) {
-        if (s.nameLine === line && s.kind !== 'reference') {
-          hit = s; // 同一行有多個時取最內層
-        }
-        walk(s.children);
-      }
-    };
-    walk((await this.service.getSymbols(doc)).symbols);
-    return hit;
+    return symbolAtNameLine((await this.service.getSymbols(doc)).symbols, line);
   }
 
   /** 準備一筆新的行號書籤（含 anchor 與所在函式），尚未寫入 store。 */
@@ -89,18 +142,7 @@ export class BookmarkCommands {
 
   private async newBookmark(doc: vscode.TextDocument, rel: string, line: number, label?: string): Promise<LineBookmark> {
     const symbols = (await this.service.getSymbols(doc)).symbols;
-    const sym = findInnermost(symbols, line);
-    const bm: LineBookmark = {
-      id: newBookmarkId(),
-      file: rel,
-      line,
-      anchor: makeAnchor(doc.getText().split(/\r?\n/), line, sym?.path, sym?.startLine),
-      createdAt: new Date().toISOString(),
-    };
-    if (label?.trim()) {
-      bm.label = label.trim();
-    }
-    return bm;
+    return newLineBookmark(doc.getText().split(/\r?\n/), symbols, rel, line, label);
   }
 
   private locateEditor(target?: { uri: vscode.Uri }): { editor: vscode.TextEditor; folder: vscode.WorkspaceFolder; rel: string } | undefined {
@@ -433,7 +475,15 @@ export class BookmarkCommands {
     }
     const entry = e;
     if (!editor || editor.document.uri.toString() !== entry.uri.toString()) {
-      await revealLine(entry.uri, entry.bookmark.line);
+      const ok = await jumpToBookmark({
+        uri: entry.uri,
+        line: entry.bookmark.line,
+        file: entry.bookmark.file,
+        status: entry.bookmark.status,
+      });
+      if (!ok) {
+        return;
+      }
       void vscode.window.showInformationMessage(
         vscode.l10n.t('Put the cursor on the correct line, then run "Move Bookmark to Cursor" again.'),
       );
@@ -528,6 +578,23 @@ export class BookmarkCommands {
     }
   }
 
+  /** 開啟指定的行號書籤（供側邊欄點擊與搜尋列按 Enter 呼叫）；檔案不存在時不開分頁並回傳 false。 */
+  async openBookmark(arg?: unknown): Promise<boolean> {
+    if (!arg) {
+      return false;
+    }
+    const e = this.entryOf(arg);
+    if (!e) {
+      return false;
+    }
+    return jumpToBookmark({
+      uri: e.uri,
+      line: e.bookmark.line,
+      file: e.bookmark.file,
+      status: e.bookmark.status,
+    });
+  }
+
   /** 跳到下一個（1）或上一個（-1）書籤（含函式書籤與行號書籤），依設定決定範圍與是否頭尾循環。 */
   async go(direction: 1 | -1): Promise<{ uri: vscode.Uri; line: number } | undefined> {
     // 多資料夾工作區以視窗／工作區層級設定為準（與 autoNumber、showLabelAtLineEnd 一致，跨資料夾導覽行為統一）
@@ -546,7 +613,13 @@ export class BookmarkCommands {
     // 函式書籤用目前偵測到的行號；找不到的函式不參與跳轉
     const allItems = shownBookmarkItems(this.store, this.favorites)
       .filter((i) => i.line !== undefined)
-      .map((i) => ({ file: keyOf(i.folder, i.file), line: i.line!, entry: { uri: i.uri, line: i.line! } }));
+      .map((i) => ({
+        file: keyOf(i.folder, i.file),
+        line: i.line!,
+        rel: i.file,
+        status: i.kind === 'line' ? i.entry.bookmark.status : undefined,
+        entry: { uri: i.uri, line: i.line! },
+      }));
     const items = currentFileOnly
       ? current !== undefined
         ? allItems.filter((i) => i.file === current)
@@ -567,24 +640,24 @@ export class BookmarkCommands {
     let pool = items;
     let fromFile = current;
     let fromLine = editor?.selection.active.line ?? 0;
-    let lastError: unknown;
+    let firstMissing: string | undefined;
     for (
       let target = neighbor(pool, fromFile, fromLine, direction, wrap);
       target;
       target = neighbor(pool, fromFile, fromLine, direction, wrap)
     ) {
-      try {
-        // 先確認磁碟上還有這個檔案：剛關閉的分頁 VS Code 還會留著內容，不檢查會打開一個「已刪除」的分頁
-        await vscode.workspace.fs.stat(target.entry.uri);
-        await revealLine(target.entry.uri, target.entry.line);
+      const ok = await jumpToBookmark(
+        { uri: target.entry.uri, line: target.entry.line, file: target.rel, status: target.status },
+        { silentMissing: true },
+      );
+      if (ok) {
         return target.entry;
-      } catch (err) {
-        lastError = err;
-        const skipped = target.entry.uri.toString();
-        pool = pool.filter((i) => i.entry.uri.toString() !== skipped);
-        fromFile = target.file;
-        fromLine = target.line;
       }
+      firstMissing ??= target.rel;
+      const skipped = target.entry.uri.toString();
+      pool = pool.filter((i) => i.entry.uri.toString() !== skipped);
+      fromFile = target.file;
+      fromLine = target.line;
     }
     if (!wrap && pool.length > 0) {
       // 不循環且沒有下一個／上一個（含跳過已刪除的書籤後後面沒有了）：游標不動並以狀態列短暫提示
@@ -594,8 +667,8 @@ export class BookmarkCommands {
       );
       return undefined;
     }
-    if (lastError !== undefined) {
-      throw lastError;
+    if (firstMissing !== undefined) {
+      notifyMissingBookmarkFile(firstMissing);
     }
     return undefined;
   }

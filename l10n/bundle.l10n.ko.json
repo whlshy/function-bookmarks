@@ -236,5 +236,20 @@
   "Imported {0} tag color(s).": "태그 색상 {0}개를 가져왔습니다.",
   "No bookmarks in this file.": "이 파일에는 북마크가 없습니다.",
   "Already at the last bookmark.": "이미 마지막 북마크입니다.",
-  "Already at the first bookmark.": "이미 첫 번째 북마크입니다."
+  "Already at the first bookmark.": "이미 첫 번째 북마크입니다.",
+  "Status": "상태",
+  "Needs checking: the original line could not be found. Below is the last remembered content.": "확인 필요: 원래 줄을 찾을 수 없습니다. 아래는 마지막으로 기록한 내용입니다.",
+  "Needs checking: the original line could not be found.": "확인 필요: 원래 줄을 찾을 수 없습니다.",
+  "Not on the current branch: the current branch does not have this code.": "현재 분기에 없음: 현재 분기에는 이 코드가 없습니다.",
+  "Function not found: the file no longer contains this function.": "함수를 찾을 수 없음: 파일에 이 함수가 더 이상 없습니다.",
+  "File not found: the project no longer contains this file.": "파일을 찾을 수 없음: 프로젝트에 이 파일이 더 이상 없습니다.",
+  "{0} number(s) are already in use by your bookmarks and were not imported.": "번호 {0}개는 기존 북마크와 겹쳐서 가져오지 않았습니다.",
+  "The file of this bookmark no longer exists: {0}": "이 북마크의 파일이 더 이상 존재하지 않습니다: {0}",
+  "This bookmark needs checking: its original line was not found. Put the cursor on the correct line and run \"Move Bookmark to Cursor\" to fix it.": "이 북마크는 확인이 필요합니다. 원래 줄을 찾을 수 없습니다. 올바른 줄에 커서를 놓고 \"북마크를 커서 위치로 이동\"을 실행하여 수정하십시오.",
+  "Set up the AI assistant skill for which folder?": "어느 폴더에 AI 어시스턴트 Skill을 설정할까요?",
+  "Recommended": "권장",
+  "Set Up AI Assistant Skill": "AI 어시스턴트 Skill 설정",
+  "Which AI assistant do you use? Cursor also reads the other two folders.": "어떤 AI 어시스턴트를 사용하나요? Cursor는 나머지 두 폴더도 읽습니다.",
+  "Open SKILL.md": "SKILL.md 열기",
+  "The AI assistant can now read and add bookmarks: {0}. It runs with Node.js. The folder is only on your computer (added to .git/info/exclude).": "이제 AI 어시스턴트가 북마크를 조회하고 추가할 수 있습니다: {0}. 실행하려면 Node.js가 필요합니다. 이 폴더는 이 컴퓨터에만 있습니다(.git/info/exclude에 추가됨)."
 }

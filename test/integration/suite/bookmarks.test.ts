@@ -940,6 +940,145 @@ describe('書籤操作、函式書籤、數字導覽、顏色與快捷鍵', () =
       assert.deepStrictEqual([prev?.number, prev?.index], [5, 2]);
     });
 
+    it('檔案在磁碟被刪除時：goToNumber、導覽、側邊欄點擊與函式書籤不開分頁；跳到需確認書籤正常定位', async () => {
+      const goneLine = workspaceFile('app', 'tmp_m7_gone_line.py');
+      const goneFn = workspaceFile('app', 'tmp_m7_gone_fn.py');
+      const keep = workspaceFile('app', 'tmp_m7_keep.py');
+      await fsp.writeFile(goneLine.fsPath, 'a = 1\nb = 2\nc = 3\n');
+      await fsp.writeFile(goneFn.fsPath, 'def vanished():\n    return 1\n');
+      await fsp.writeFile(keep.fsPath, 'def stay():\n    return 2\nk = 3\n');
+
+      const hasTabFor = (uri: vscode.Uri) =>
+        vscode.window.tabGroups.all.some((g) =>
+          g.tabs.some((t) => t.input instanceof vscode.TabInputText && t.input.uri.toString() === uri.toString()),
+        );
+
+      try {
+        // #1: fileN (存在) 行 1、#2: goneLine (將被刪除) 行 1、#3: goneFn (函式書籤，將被刪除)、#4: keep (存在) 行 2
+        await openAt(fileN(), 1, api);
+        await vscode.commands.executeCommand('functionBookmarks.toggleNumberedBookmark', { number: 1 });
+        await openAt(goneLine, 1, api);
+        await vscode.commands.executeCommand('functionBookmarks.toggleNumberedBookmark', { number: 2 });
+        await openAt(goneFn, 0, api);
+        await vscode.commands.executeCommand('functionBookmarks.toggleNumberedBookmark', { number: 3 });
+        await openAt(keep, 2, api);
+        await vscode.commands.executeCommand('functionBookmarks.toggleNumberedBookmark', { number: 4 });
+        await api.favorites.refresh();
+        await api.store.flush();
+        await api.external.idle();
+
+        // 先記下側邊欄行號書籤與函式書籤的點擊指令（刪除前即產生，模擬畫面還沒重繪時點擊）
+        const groups = (await api.provider.getChildren(api.provider.sections.bookmarks)) as BmGroupNode[];
+        const goneLineGroup = groups.find((g) => g.rel === 'app/tmp_m7_gone_line.py')!;
+        const goneLineNode = (await api.provider.getChildren(goneLineGroup)).find((n) => n.type === 'bookmark') as BookmarkNode;
+        const goneLineItem = api.provider.getTreeItem(goneLineNode);
+        assert.strictEqual(goneLineItem.command?.command, 'functionBookmarks.openBookmark');
+
+        const goneFnGroup = groups.find((g) => g.rel === 'app/tmp_m7_gone_fn.py')!;
+        const goneFnNode = (await api.provider.getChildren(goneFnGroup)).find((n) => n.type === 'favorite') as FavoriteNode;
+
+        // 關閉所有分頁後從磁碟刪掉兩個檔案（此時 VS Code 仍可能快取剛關掉的文件）
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await fsp.rm(goneLine.fsPath, { force: true });
+        await fsp.rm(goneFn.fsPath, { force: true });
+
+        // 停在 fileN 第 6 行當基準
+        await openAt(fileN(), 6, api);
+        const stayUri = fileN().toString();
+
+        // 1. goToNumber 指向已刪除的行號書籤與函式書籤：都不開分頁、目前編輯器與游標不變
+        assert.strictEqual(await vscode.commands.executeCommand('functionBookmarks.goToNumberedBookmark', { number: 2 }), undefined);
+        assert.strictEqual(vscode.window.activeTextEditor?.document.uri.toString(), stayUri);
+        assert.strictEqual(vscode.window.activeTextEditor?.selection.active.line, 6);
+        assert.strictEqual(hasTabFor(goneLine), false, 'goToNumber 不應為已刪行號書籤開分頁');
+
+        assert.strictEqual(await vscode.commands.executeCommand('functionBookmarks.goToNumberedBookmark', { number: 3 }), undefined);
+        assert.strictEqual(vscode.window.activeTextEditor?.document.uri.toString(), stayUri);
+        assert.strictEqual(vscode.window.activeTextEditor?.selection.active.line, 6);
+        assert.strictEqual(hasTabFor(goneFn), false, 'goToNumber 不應為已刪函式書籤開分頁');
+
+        // 2. 側邊欄點擊新指令（行號書籤）與 openFavorite（函式書籤）：對已刪除檔案都不開分頁
+        const openLineOk = await vscode.commands.executeCommand<boolean>(goneLineItem.command!.command, ...goneLineItem.command!.arguments!);
+        assert.strictEqual(openLineOk, false);
+        assert.strictEqual(vscode.window.activeTextEditor?.document.uri.toString(), stayUri);
+        assert.strictEqual(hasTabFor(goneLine), false, '側邊欄點擊已刪行號書籤不應開分頁');
+
+        const openFnOk = await api.commands.openFavorite(goneFnNode.fav);
+        assert.strictEqual(openFnOk, false);
+        assert.strictEqual(vscode.window.activeTextEditor?.document.uri.toString(), stayUri);
+        assert.strictEqual(hasTabFor(goneFn), false, 'openFavorite 對已刪檔案不應開分頁');
+
+        // 3. 導覽：從 #1 往前跳會略過 #2（行號）與 #3（函式），直接到 #4（index 4/4）；往回也略過跳回 #1（index 1/4）
+        await openAt(fileN(), 1, api);
+        const nextStep = await vscode.commands.executeCommand<{ number: number; index: number; total: number; uri: vscode.Uri; line: number }>(
+          'functionBookmarks.tourNext',
+        );
+        assert.deepStrictEqual([nextStep?.number, nextStep?.index, nextStep?.total, nextStep?.line], [4, 4, 4, 2]);
+        assert.strictEqual(vscode.window.activeTextEditor?.document.uri.toString(), keep.toString());
+        assert.strictEqual(vscode.window.activeTextEditor?.selection.active.line, 2);
+        assert.ok(api.extras.lastTourStatus?.includes('4/4'), api.extras.lastTourStatus);
+        assert.strictEqual(hasTabFor(goneLine), false);
+        assert.strictEqual(hasTabFor(goneFn), false);
+
+        const prevStep = await vscode.commands.executeCommand<{ number: number; index: number; total: number; line: number }>(
+          'functionBookmarks.tourPrevious',
+        );
+        assert.deepStrictEqual([prevStep?.number, prevStep?.index, prevStep?.total, prevStep?.line], [1, 1, 4, 1]);
+        assert.strictEqual(vscode.window.activeTextEditor?.document.uri.toString(), fileN().toString());
+        assert.strictEqual(vscode.window.activeTextEditor?.selection.active.line, 1);
+        assert.ok(api.extras.lastTourStatus?.includes('1/4'), api.extras.lastTourStatus);
+
+        // 4. 跳到 lost（需確認）書籤時不會丟錯，且游標停在記得的那一行
+        const stale = makeAnchor(['old_1 = 1', 'old_2 = 2', 'old_3 = 3'], 1);
+        const lostId = newBookmarkId();
+        await api.store.update(folder(), (d) =>
+          addBookmark(d, {
+            id: lostId,
+            file: relN,
+            line: 7,
+            number: 8,
+            label: '失聯書籤',
+            status: 'lost',
+            anchor: stale,
+          }),
+        );
+        await openAt(keep, 0, api);
+        const lostJump = await vscode.commands.executeCommand<{ uri: vscode.Uri; line: number }>('functionBookmarks.goToNumberedBookmark', {
+          number: 8,
+        });
+        assert.strictEqual(lostJump?.line, 7);
+        assert.strictEqual(vscode.window.activeTextEditor?.document.uri.toString(), fileN().toString());
+        assert.strictEqual(vscode.window.activeTextEditor?.selection.active.line, 7);
+
+        // 透過側邊欄點擊新指令跳到 lost 書籤也同樣正常定位
+        await openAt(keep, 0, api);
+        const lostOpenOk = await vscode.commands.executeCommand<boolean>('functionBookmarks.openBookmark', {
+          uri: fileN().toString(),
+          bookmark: lostId,
+        });
+        assert.strictEqual(lostOpenOk, true);
+        assert.strictEqual(vscode.window.activeTextEditor?.document.uri.toString(), fileN().toString());
+        assert.strictEqual(vscode.window.activeTextEditor?.selection.active.line, 7);
+
+        // 5. 所有編號書籤的檔案都不存在時：導覽顯示一次提示就停止，回傳 undefined 且不開分頁
+        await api.bookmarks.clearAll(true);
+        await api.store.update(folder(), (d) =>
+          addBookmark(d, { id: newBookmarkId(), file: 'app/tmp_m7_gone_line.py', line: 1, number: 1 }),
+        );
+        await openAt(keep, 0, api);
+        assert.strictEqual(await vscode.commands.executeCommand('functionBookmarks.tourNext'), undefined);
+        assert.strictEqual(api.extras.lastTourStatus, undefined);
+        assert.strictEqual(vscode.window.activeTextEditor?.document.uri.toString(), keep.toString());
+        assert.strictEqual(hasTabFor(goneLine), false);
+      } finally {
+        await api.bookmarks.clearAll(true);
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        for (const u of [goneLine, goneFn, keep]) {
+          await fsp.rm(u.fsPath, { force: true });
+        }
+      }
+    });
+
     it('書籤顏色、標籤顏色（書籤優先於標籤）與 setTagColor 按 Esc 取消不變更', async () => {
       await openAt(fileN(), 1, api);
       await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');

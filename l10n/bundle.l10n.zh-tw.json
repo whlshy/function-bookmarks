@@ -236,5 +236,20 @@
   "Imported {0} tag color(s).": "已匯入 {0} 個標籤顏色。",
   "No bookmarks in this file.": "目前檔案沒有書籤。",
   "Already at the last bookmark.": "已經是最後一個書籤。",
-  "Already at the first bookmark.": "已經是第一個書籤。"
+  "Already at the first bookmark.": "已經是第一個書籤。",
+  "Status": "狀態",
+  "Needs checking: the original line could not be found. Below is the last remembered content.": "需確認：找不到原本那一行，以下為最後記得的內容。",
+  "Needs checking: the original line could not be found.": "需確認：找不到原本那一行。",
+  "Not on the current branch: the current branch does not have this code.": "不在此分支：目前的分支沒有這段程式碼。",
+  "Function not found: the file no longer contains this function.": "找不到函式：檔案裡已經沒有這個函式。",
+  "File not found: the project no longer contains this file.": "找不到檔案：專案裡已經沒有這個檔案。",
+  "{0} number(s) are already in use by your bookmarks and were not imported.": "{0} 個號碼和你現有的重複，沒有帶入。",
+  "The file of this bookmark no longer exists: {0}": "這個書籤的檔案已不存在：{0}",
+  "This bookmark needs checking: its original line was not found. Put the cursor on the correct line and run \"Move Bookmark to Cursor\" to fix it.": "這個書籤需確認：找不到原本的那一行。請把游標放到正確的行，再執行「把書籤移到游標所在的行」修正。",
+  "Set up the AI assistant skill for which folder?": "要為哪個資料夾設定 AI 助理 Skill？",
+  "Recommended": "建議",
+  "Set Up AI Assistant Skill": "設定 AI 助理 Skill",
+  "Which AI assistant do you use? Cursor also reads the other two folders.": "你用哪個 AI 助理？Cursor 也會讀另外兩個資料夾。",
+  "Open SKILL.md": "開啟 SKILL.md",
+  "The AI assistant can now read and add bookmarks: {0}. It runs with Node.js. The folder is only on your computer (added to .git/info/exclude).": "AI 助理現在可以查詢與新增書籤：{0}。需要 Node.js 才能執行。這個資料夾只留在你的電腦（已加進 .git/info/exclude）。"
 }

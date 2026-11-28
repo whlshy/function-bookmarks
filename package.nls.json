@@ -79,6 +79,7 @@
   "command.showNotOnBranch": "Show Bookmarks Not on This Branch",
   "command.cleanBranchRecords": "Clean Up Records of Deleted Branches",
   "command.exportBookmarks": "Export Bookmarks…",
+  "command.setUpAiSkill": "Set Up AI Assistant Skill…",
   "command.importBookmarks": "Import Bookmarks…",
   "command.chooseStorage": "Choose Bookmark Storage for This Workspace…",
   "command.filterBookmarkSources": "Filter by Source…",

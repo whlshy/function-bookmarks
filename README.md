@@ -56,6 +56,13 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 - Filter and group by source; others' bookmarks are purple
 - Coming from **Bookmarks (alefragnani)**? *Import Bookmarks…* reads its `.vscode/bookmarks.json` (turn on `bookmarks.saveBookmarksInProject` there first)
 
+### For AI assistants (Skill + CLI)
+
+- Side bar `…` → **Set Up AI Assistant Skill…** puts a skill (`SKILL.md`) and a small command-line tool in the project, so Cursor, Claude Code, Codex and other AI assistants can read and add bookmarks
+- Ask the assistant "where is the login flow?" and it checks your bookmarks, names and notes first; ask it to bookmark a function with a note and it does
+- The tool uses the same detection rules, works out the current positions even when the editor is closed, and its changes show up in the side bar right away
+- Needs Node.js; the folder stays on your computer (added to `.git/info/exclude`) and is updated with the extension
+
 ## Keyboard shortcuts
 
 | Shortcut (Win / Linux) | macOS | Action |

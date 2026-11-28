@@ -2,7 +2,7 @@
   "name": "function-bookmarks",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "publisher": "whlshy",
   "icon": "media/icon.png",
   "galleryBanner": {
@@ -199,6 +199,12 @@
         "command": "functionBookmarks.cleanBranchRecords",
         "title": "%command.cleanBranchRecords%",
         "category": "%command.category%"
+      },
+      {
+        "command": "functionBookmarks.setUpAiSkill",
+        "title": "%command.setUpAiSkill%",
+        "category": "%command.category%",
+        "icon": "$(sparkle)"
       },
       {
         "command": "functionBookmarks.exportBookmarks",
@@ -515,6 +521,11 @@
           "command": "functionBookmarks.importBookmarks",
           "when": "view == functionBookmarks.tree",
           "group": "4_share@2"
+        },
+        {
+          "command": "functionBookmarks.setUpAiSkill",
+          "when": "view == functionBookmarks.tree",
+          "group": "4_share@3"
         },
         {
           "command": "functionBookmarks.chooseStorage",

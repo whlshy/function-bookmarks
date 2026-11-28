@@ -109,6 +109,7 @@ export const AUTO_COLLAPSE_GROUPS = 6;
 
 export const COMMANDS = {
   revealLine: 'functionBookmarks.revealLine',
+  openBookmark: 'functionBookmarks.openBookmark',
   reveal: 'functionBookmarks.revealSymbol',
   openFavorite: 'functionBookmarks.openFavorite',
   openTemplate: 'functionBookmarks.openTemplate',

@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
 import { DetectedSymbol } from '../detection/types';
-import { bookmarkTitle, revealLine } from '../bookmarks/commands';
+import { bookmarkTitle, jumpToBookmark } from '../bookmarks/commands';
 import { circled } from '../bookmarks/decor';
 import { isEmptyQuery, matchesQuery, parseQuery, SearchFields } from '../bookmarks/filter';
 import { BookmarkItem, compareItems, shownBookmarkItems } from '../bookmarks/unified';
-import { MarkStore } from '../storage/store';
+import { BookmarkEntry, MarkStore } from '../storage/store';
 import { FavoritesModel, ResolvedFavorite } from '../symbols/favorites';
 import { ProjectFiles } from '../symbols/projectFiles';
 import { SymbolService } from '../symbols/symbolService';
@@ -137,6 +137,7 @@ export async function searchFunctions(project: ProjectFiles, service: SymbolServ
 export interface MarkQuickPickItem extends vscode.QuickPickItem {
   uri: vscode.Uri;
   line: number;
+  entry?: BookmarkEntry;
   fav?: ResolvedFavorite;
   fields: SearchFields;
 }
@@ -144,8 +145,8 @@ export interface MarkQuickPickItem extends vscode.QuickPickItem {
 export interface SearchMarksOptions {
   /** 是否隱藏「不在此分支」的書籤（跟隨側邊欄設定）。 */
   hideNotOnBranch?: boolean;
-  /** 選中函式書籤時的開啟函式（未提供時退回 revealLine）。 */
-  openFavorite?: (fav: ResolvedFavorite) => Promise<void>;
+  /** 選中函式書籤時的開啟函式（未提供時退回共用跳轉函式）。 */
+  openFavorite?: (fav: ResolvedFavorite) => Promise<boolean | void>;
 }
 
 function firstNoteLine(note: string | undefined): string | undefined {
@@ -194,6 +195,7 @@ function toMarkQuickPickItem(item: BookmarkItem, multiRoot: boolean): MarkQuickP
       detail: [where, code, noteLine].filter(Boolean).join('  ·  '),
       uri: e.uri,
       line: b.line,
+      entry: e,
       fields,
       alwaysShow: true,
     };
@@ -267,8 +269,15 @@ export async function searchMarks(
   if (pick) {
     if (pick.fav && options.openFavorite) {
       await options.openFavorite(pick.fav);
+    } else if (pick.entry) {
+      await jumpToBookmark({
+        uri: pick.entry.uri,
+        line: pick.entry.bookmark.line,
+        file: pick.entry.bookmark.file,
+        status: pick.entry.bookmark.status,
+      });
     } else {
-      await revealLine(pick.uri, pick.line);
+      await jumpToBookmark({ uri: pick.uri, line: pick.line });
     }
   }
 }

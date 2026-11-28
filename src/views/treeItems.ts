@@ -163,9 +163,9 @@ export class TreeItemFactory {
     item.tooltip = md;
     item.contextValue = `fbBookmark${b.note ? ':note' : ''}${lost ? ':lost' : ''}${away ? ':away' : ''}${b.scope === 'branch' ? ':branchOnly' : ''}${b.source ? ':foreign' : ''}`;
     item.command = {
-      command: COMMANDS.revealLine,
+      command: COMMANDS.openBookmark,
       title: vscode.l10n.t('Go to bookmark'),
-      arguments: [element.entry.uri, b.line],
+      arguments: [{ uri: element.entry.uri.toString(), bookmark: b.id }],
     };
     return item;
   }

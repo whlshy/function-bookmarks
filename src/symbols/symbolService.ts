@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import { uriKey } from '../util/uris';
 import { languageForPath } from '../util/paths';
-import { readSettings, ruleApplies } from '../config';
-import { detectSymbols } from '../detection/engine';
+import { readSettings } from '../config';
+import { applicableRules } from '../core/settings';
+import { detectWithRules, rulesCover } from '../core/resolve';
 import { DetectedSymbol, RuleError, SymbolKindName } from '../detection/types';
 import { fromDocument, loadSource, openDocumentFor, SourceDoc } from './documentSource';
 
@@ -57,11 +58,7 @@ export class SymbolService {
     if (!lang) {
       return true;
     }
-    const settings = readSettings(uri);
-    if (settings.source === 'languageServer' || settings.source === 'both') {
-      return true;
-    }
-    return !settings.rules.some((r) => r.enabled !== false && r.languages.includes(lang) && ruleApplies(r, uri));
+    return !rulesCover(readSettings(uri), lang, vscode.workspace.asRelativePath(uri, false), uri.path);
   }
 
   getSymbols(document: vscode.TextDocument): Promise<FileSymbols> {
@@ -132,9 +129,8 @@ export class SymbolService {
 
   private async compute(src: SourceDoc, options: GetSymbolsOptions = {}): Promise<FileSymbols> {
     const settings = readSettings(src.uri);
-    const applicable = settings.rules.filter(
-      (r) => r.enabled !== false && r.languages.includes(src.languageId) && ruleApplies(r, src.uri),
-    );
+    const rel = vscode.workspace.asRelativePath(src.uri, false);
+    const applicable = applicableRules(settings.rules, src.languageId, rel, src.uri.path);
     const base = { uri: src.uri, version: src.version, languageId: src.languageId };
     const lsp = async () => {
       if (options.skipLsp) {
@@ -148,9 +144,7 @@ export class SymbolService {
       const symbols = await lsp();
       return { ...base, symbols, source: symbols.length ? 'languageServer' : 'none', errors: [] };
     }
-    const r = detectSymbols(src.text, src.languageId, settings.rules, {
-      isApplicable: (rule) => ruleApplies(rule, src.uri),
-    });
+    const r = detectWithRules(src.text, src.languageId, settings, rel, src.uri.path);
     if (settings.source === 'both') {
       return { ...base, symbols: mergeByLine(r.symbols, await lsp()), source: 'both', errors: r.errors };
     }
