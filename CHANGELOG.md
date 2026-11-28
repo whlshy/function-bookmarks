@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.0 (2026-11-28) — scrollbar marker setting, Next / Previous follow the side bar search, and the side bar follows the cursor in Bookmarks
+
+- **Scrollbar markers can move or be turned off**: the new setting `functionBookmarks.bookmarks.scrollbarMarker` puts bookmark and note markers in the left (default, as before), center or right lane of the editor scrollbar, across its full width, or hides them. The change applies right away; icons beside line numbers are not affected
+- **Next / Previous Bookmark follow the side bar search**: while the search box in the side bar has text, they only step through the bookmarks it lists, and the status bar says *Jumping within search results (N)*. If nothing matches, the cursor stays where it is and the status bar says so. Clear the search to step through all bookmarks again. Going to a numbered bookmark and the tour are not affected
+- **Follow cursor in Bookmarks**: when *Current File* is collapsed or the side bar shows bookmarks only, `functionBookmarks.followCursor` highlights the bookmark under the cursor in *Bookmarks* instead (a line bookmark on the cursor line first, otherwise the innermost enclosing function bookmark). Auto-collapsed bookmark groups expand as needed, while groups you collapsed stay collapsed
+
 ## 0.11.0 (2026-11-28) — AI assistants can read and add your bookmarks
 
 - **Set Up AI Assistant Skill…** (side bar `…` menu): puts a skill (`SKILL.md`) and a small command-line tool in the project's `.cursor`, `.claude` or `.agents` skills folder. Cursor, Claude Code, Codex and other AI assistants can then list your bookmarks with their names, tags and notes, read a bookmark with its code, add or change bookmarks when you ask, and print a walkthrough of the numbered bookmarks. Asked where some code lives, the assistant checks your bookmarks first

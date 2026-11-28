@@ -27,6 +27,24 @@ export interface TreeItemContext {
   defaultGroupState(): vscode.TreeItemCollapsibleState;
 }
 
+/** 書籤分組節點的穩定 id（搜尋中另加 :search，避免覆蓋原本的收合記憶）。 */
+export function bmGroupId(element: BmGroupNode, searching: boolean): string {
+  const prefix = element.by === 'source' ? 'bmSource' : element.by === 'tag' ? 'bmTag' : 'bmFile';
+  const base = `${prefix}:${element.key}`;
+  return searching ? `${base}:search` : base;
+}
+
+/** 行號書籤節點的穩定 id（含所在分組鍵，多標籤分組時各自唯一）。 */
+export function bookmarkNodeId(element: BookmarkNode): string {
+  return `bm:${element.parent.type === 'bmGroup' ? element.parent.key : ''}:${element.entry.bookmark.id}`;
+}
+
+/** 函式書籤節點的穩定 id（含所在分組鍵，多標籤分組時各自唯一）。 */
+export function favoriteNodeId(element: FavoriteNode): string {
+  const { fav } = element;
+  return `fav:${element.parent.type === 'bmGroup' ? element.parent.key : ''}:${fav.uri.toString()}::${fav.mark.kind}:${fav.mark.path}`;
+}
+
 export class TreeItemFactory {
   constructor(private readonly ctx: TreeItemContext) {}
 
@@ -37,11 +55,6 @@ export class TreeItemFactory {
     }
     const highlights = highlightRanges(label, [...this.ctx.query().text, ...extraTerms]);
     return highlights.length ? { label, highlights } : label;
-  }
-
-  /** 搜尋中，分組節點換一組 id：讓分組都展開（使用者先前收合的分組裡也可能有結果），清除搜尋後恢復原本的展開狀態。 */
-  private groupId(id: string): string {
-    return this.ctx.searching() ? `${id}:search` : id;
   }
 
   private favLabel(fav: ResolvedFavorite): string {
@@ -55,7 +68,7 @@ export class TreeItemFactory {
         this.highlighted(element.key || vscode.l10n.t('Mine'), element.key ? this.ctx.query().authors : []),
         defaultState,
       );
-      item.id = this.groupId(`bmSource:${element.key}`);
+      item.id = bmGroupId(element, this.ctx.searching());
       item.iconPath = new vscode.ThemeIcon(element.key ? 'person' : 'account', element.key ? new vscode.ThemeColor(FOREIGN_COLOR) : undefined);
       item.description = String(element.items.length);
       item.contextValue = element.key ? 'fbBmSource:foreign' : 'fbBmSource';
@@ -66,7 +79,7 @@ export class TreeItemFactory {
         element.key ? this.highlighted(`#${element.key}`, this.ctx.query().tags) : vscode.l10n.t('No tag'),
         defaultState,
       );
-      item.id = this.groupId(`bmTag:${element.key}`);
+      item.id = bmGroupId(element, this.ctx.searching());
       const tc = paletteColor(this.ctx.store.tagColors().get(element.key));
       item.iconPath = new vscode.ThemeIcon('tag', tc ? new vscode.ThemeColor(tc.theme) : undefined);
       item.contextValue = element.key ? 'fbBmTag' : undefined;
@@ -76,7 +89,7 @@ export class TreeItemFactory {
     const rel = element.rel ?? '';
     const sort = this.ctx.fileSortOf(element.key);
     const item = new vscode.TreeItem(this.highlighted(basenamePosix(rel)), defaultState);
-    item.id = this.groupId(`bmFile:${element.key}`);
+    item.id = bmGroupId(element, this.ctx.searching());
     item.resourceUri = element.uri;
     item.iconPath = vscode.ThemeIcon.File;
     const dir = path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel);
@@ -97,7 +110,7 @@ export class TreeItemFactory {
       vscode.TreeItemCollapsibleState.None,
     );
     const color = paletteColor(effectiveColor(b, this.ctx.store.tagColors()));
-    item.id = `bm:${element.parent.type === 'bmGroup' ? element.parent.key : ''}:${b.id}`;
+    item.id = bookmarkNodeId(element);
     const lost = b.status === 'lost';
     const away = b.status === 'notOnBranch';
     item.iconPath = lost
@@ -285,7 +298,7 @@ export class TreeItemFactory {
     );
     const color = paletteColor(effectiveColor(fav.mark, this.ctx.store.tagColors()));
     const byTag = element.parent.type === 'bmGroup' && element.parent.by === 'tag';
-    item.id = `fav:${element.parent.type === 'bmGroup' ? element.parent.key : ''}:${fav.uri.toString()}::${fav.mark.kind}:${fav.mark.path}`;
+    item.id = favoriteNodeId(element);
     const line = fav.symbol?.nameLine ?? fav.mark.line;
     const parts: string[] = [];
     if (fav.mark.alias) {

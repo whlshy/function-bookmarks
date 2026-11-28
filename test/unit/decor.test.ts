@@ -1,5 +1,16 @@
 import * as assert from 'assert';
-import { circled, effectiveColor, gutterSvg, LOST_HEX, nextFreeNumber, paletteColor, PALETTE, svgDataUri } from '../../src/bookmarks/decor';
+import {
+  circled,
+  effectiveColor,
+  gutterSvg,
+  LOST_HEX,
+  nextFreeNumber,
+  OVERVIEW_RULER_LANE,
+  overviewRulerOptions,
+  paletteColor,
+  PALETTE,
+  svgDataUri,
+} from '../../src/bookmarks/decor';
 import { LineBookmark } from '../../src/bookmarks/model';
 import {
   clearNumber,
@@ -110,5 +121,39 @@ describe('M7：書籤外觀（顏色、號碼、圖示）', () => {
     const cleared = setTagColor(d, 'todo', undefined);
     assert.strictEqual(cleared.tagColors, undefined);
     assert.ok(!serializeStore(cleared).includes('tagColors'));
+  });
+
+  it('捲軸標記選項：支援 left／center／right／full／off，無效值退回 left', () => {
+    const color = '#3794FF';
+    assert.deepStrictEqual(overviewRulerOptions('left', color), {
+      overviewRulerLane: OVERVIEW_RULER_LANE.left,
+      overviewRulerColor: color,
+    });
+    assert.deepStrictEqual(overviewRulerOptions('center', color), {
+      overviewRulerLane: OVERVIEW_RULER_LANE.center,
+      overviewRulerColor: color,
+    });
+    assert.deepStrictEqual(overviewRulerOptions('right', color), {
+      overviewRulerLane: OVERVIEW_RULER_LANE.right,
+      overviewRulerColor: color,
+    });
+    assert.deepStrictEqual(overviewRulerOptions('full', color), {
+      overviewRulerLane: OVERVIEW_RULER_LANE.full,
+      overviewRulerColor: color,
+    });
+
+    const off = overviewRulerOptions('off', color);
+    assert.deepStrictEqual(off, {});
+    assert.strictEqual('overviewRulerLane' in off, false);
+    assert.strictEqual('overviewRulerColor' in off, false);
+
+    // 未設定或無效值皆視為 left
+    for (const invalid of [undefined, null, '', 'LEFT', 'top', 'none', 0, 123, true, {}]) {
+      assert.deepStrictEqual(
+        overviewRulerOptions(invalid, LOST_HEX),
+        { overviewRulerLane: OVERVIEW_RULER_LANE.left, overviewRulerColor: LOST_HEX },
+        `無效值 ${String(invalid)} 應退回 left`,
+      );
+    }
   });
 });

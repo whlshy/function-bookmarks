@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import {
   applyChanges,
+  filterNavigationItems,
   findAvailableTourStep,
   isBlockReplace,
   isWholeDocumentReplace,
@@ -12,6 +13,7 @@ import {
   suggestName,
   tourCandidateIndices,
 } from '../../src/bookmarks/model';
+import { matchesQuery, parseQuery } from '../../src/bookmarks/filter';
 import { addBookmark, emptyStore, parseStore, removeBookmarks, renamePath, serializeStore, setAlias, setFavorite, updateBookmark } from '../../src/storage/marks';
 
 const ins = (line: number, ch: number, text: string): LineChange => ({ startLine: line, startChar: ch, endLine: line, endChar: ch, text });
@@ -170,6 +172,87 @@ describe('行號書籤：其他工具', () => {
     assert.deepStrictEqual(neighbor(single, 'a.py', 5, 1, true), single[0]);
     assert.strictEqual(neighbor(single, 'a.py', 5, 1, false), undefined);
     assert.strictEqual(neighbor(single, 'a.py', 5, -1, false), undefined);
+  });
+
+  it('filterNavigationItems：套用側邊欄搜尋與 currentFile 條件，排除無行號並區分空狀態原因', () => {
+    type Entry = { file: string; line?: number; name: string; tags: string[] };
+    const entries: Entry[] = [
+      { file: '000/a.py', line: 1, name: 'auth_login', tags: ['auth'] },
+      { file: '000/a.py', line: 8, name: 'render_home', tags: ['ui'] },
+      { file: '000/a.py', line: undefined, name: 'missing_auth_fn', tags: ['auth'] },
+      { file: '000/b.py', line: 3, name: 'auth_logout', tags: ['auth'] },
+    ];
+    const matchFor = (query: string) => {
+      const q = parseQuery(query);
+      return (e: Entry) => matchesQuery(q, { names: [e.name], tags: e.tags, author: '', file: e.file });
+    };
+
+    // 無搜尋、all：排除沒有行號的項目
+    const all = filterNavigationItems(entries, { fileKey: (e) => e.file });
+    assert.strictEqual(all.searchActive, false);
+    assert.strictEqual(all.emptyReason, undefined);
+    assert.deepStrictEqual(all.items.map((e) => e.name), ['auth_login', 'render_home', 'auth_logout']);
+
+    // 無搜尋、完全沒有書籤
+    const none = filterNavigationItems<Entry>([], { fileKey: (e) => e.file });
+    assert.deepStrictEqual(none, { items: [], searchActive: false, emptyReason: 'noBookmarks' });
+
+    // 搜尋啟用、all：只留有行號且符合搜尋的項目
+    const byTag = filterNavigationItems(entries, { fileKey: (e) => e.file, searchMatch: matchFor('#auth') });
+    assert.strictEqual(byTag.searchActive, true);
+    assert.strictEqual(byTag.emptyReason, undefined);
+    assert.deepStrictEqual(byTag.items.map((e) => e.name), ['auth_login', 'auth_logout']);
+
+    // 搜尋只符合沒有行號的遺失函式：視為沒有可跳的符合書籤
+    const onlyMissing = filterNavigationItems(entries, { fileKey: (e) => e.file, searchMatch: matchFor('missing_auth_fn') });
+    assert.deepStrictEqual(onlyMissing, { items: [], searchActive: true, emptyReason: 'noMatch' });
+
+    // 搜尋沒有任何符合
+    const noHit = filterNavigationItems(entries, { fileKey: (e) => e.file, searchMatch: matchFor('nope') });
+    assert.deepStrictEqual(noHit, { items: [], searchActive: true, emptyReason: 'noMatch' });
+
+    // currentFile 未搜尋
+    const curFile = filterNavigationItems(entries, { fileKey: (e) => e.file, currentFile: '000/a.py', currentFileOnly: true });
+    assert.deepStrictEqual(curFile.items.map((e) => e.name), ['auth_login', 'render_home']);
+    const curFileEmpty = filterNavigationItems(entries, { fileKey: (e) => e.file, currentFile: '000/c.py', currentFileOnly: true });
+    assert.deepStrictEqual(curFileEmpty, { items: [], searchActive: false, emptyReason: 'noBookmarksInFile' });
+
+    // currentFile 搭配搜尋：兩個條件都要符合
+    const both = filterNavigationItems(entries, {
+      fileKey: (e) => e.file,
+      currentFile: '000/a.py',
+      currentFileOnly: true,
+      searchMatch: matchFor('#auth'),
+    });
+    assert.strictEqual(both.searchActive, true);
+    assert.deepStrictEqual(both.items.map((e) => e.name), ['auth_login']);
+
+    // currentFile 搭配搜尋：目前檔案有書籤但不符合搜尋 -> noMatch
+    const fileHasOther = filterNavigationItems(entries, {
+      fileKey: (e) => e.file,
+      currentFile: '000/b.py',
+      currentFileOnly: true,
+      searchMatch: matchFor('#ui'),
+    });
+    assert.deepStrictEqual(fileHasOther, { items: [], searchActive: true, emptyReason: 'noMatch' });
+
+    // currentFile 搭配搜尋：目前檔案沒有任何書籤，但其他檔案有符合 -> noBookmarksInFile
+    const fileHasNoneOtherMatches = filterNavigationItems(entries, {
+      fileKey: (e) => e.file,
+      currentFile: '000/c.py',
+      currentFileOnly: true,
+      searchMatch: matchFor('#auth'),
+    });
+    assert.deepStrictEqual(fileHasNoneOtherMatches, { items: [], searchActive: true, emptyReason: 'noBookmarksInFile' });
+
+    // currentFile 搭配搜尋：整個專案都沒有符合 -> noMatch
+    const nowhereMatches = filterNavigationItems(entries, {
+      fileKey: (e) => e.file,
+      currentFile: '000/c.py',
+      currentFileOnly: true,
+      searchMatch: matchFor('zzz'),
+    });
+    assert.deepStrictEqual(nowhereMatches, { items: [], searchActive: true, emptyReason: 'noMatch' });
   });
 
   it('名稱建議：選取文字 → 游標單字 → 函式名稱 → 該行內容', () => {

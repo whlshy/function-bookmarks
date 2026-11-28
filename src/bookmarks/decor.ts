@@ -109,3 +109,43 @@ export function gutterSvg(kind: GutterKind, hex: string, n?: number): string {
 export function svgDataUri(svg: string): string {
   return `data:image/svg+xml;base64,${Buffer.from(svg, 'utf8').toString('base64')}`;
 }
+
+/** 捲軸（概觀尺規）書籤標記的顯示位置設定值。 */
+export type ScrollbarMarker = 'left' | 'center' | 'right' | 'full' | 'off';
+
+/** 與 vscode.OverviewRulerLane 對應的數值（純模組不匯入 vscode，方便單元測試）。 */
+export const OVERVIEW_RULER_LANE = {
+  left: 1,
+  center: 2,
+  right: 4,
+  full: 7,
+} as const;
+
+export type OverviewRulerLaneValue = (typeof OVERVIEW_RULER_LANE)[keyof typeof OVERVIEW_RULER_LANE];
+
+export interface OverviewRulerOptions {
+  overviewRulerLane?: OverviewRulerLaneValue;
+  overviewRulerColor?: string;
+}
+
+/**
+ * 依 `functionBookmarks.bookmarks.scrollbarMarker` 設定值，轉成編輯器裝飾的概觀尺規選項。
+ * - `off`：不給 `overviewRulerLane` 與 `overviewRulerColor`（捲軸不顯示標記）
+ * - `left`／`center`／`right`／`full`：對應 OverviewRulerLane 的 Left / Center / Right / Full
+ * - 無效值或未設定：視為預設 `left`
+ */
+export function overviewRulerOptions(setting: unknown, color: string): OverviewRulerOptions {
+  switch (setting) {
+    case 'off':
+      return {};
+    case 'center':
+      return { overviewRulerLane: OVERVIEW_RULER_LANE.center, overviewRulerColor: color };
+    case 'right':
+      return { overviewRulerLane: OVERVIEW_RULER_LANE.right, overviewRulerColor: color };
+    case 'full':
+      return { overviewRulerLane: OVERVIEW_RULER_LANE.full, overviewRulerColor: color };
+    case 'left':
+    default:
+      return { overviewRulerLane: OVERVIEW_RULER_LANE.left, overviewRulerColor: color };
+  }
+}

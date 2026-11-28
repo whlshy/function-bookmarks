@@ -12,7 +12,7 @@
   "config.detection.rules": "独自の検出ルールを設定します。組み込みルールと同じ `id` を指定すると上書きされます。`pattern` は `(?<name>...)` グループを含む正規表現である必要があります（`nameTemplate` または `body: \"embedded\"` を使う場合を除く）。本体はマッチの終端から検索されます。",
   "config.detection.disabledRules": "無効にする組み込みルールの ID（例: `ts-method`）。`html-id` は既定で無効です。",
   "config.detection.templateFiles": "組み込みの Django / HTML ルールを適用するファイルの glob パターン。",
-  "config.followCursor": "カーソル位置の関数をサイドバーで強調表示します。",
+  "config.followCursor": "サイドバーの「現在のファイル」でカーソル位置の関数を強調表示します。「現在のファイル」が折りたたまれているかブックマークのみ表示している場合は、代わりに「ブックマーク」でカーソル位置のブックマークを強調表示します。",
   "config.rule.id": "一意の ID。組み込みルールの ID を指定するとそのルールを上書きします。",
   "config.rule.label": "ツールヒントに表示される短い説明。",
   "config.rule.languages": "このルールを適用する言語 ID（例: typescript、python、html）。",
@@ -114,5 +114,11 @@
   "config.bookmarks.navigationScope.all": "すべてのファイルのブックマークを横断して移動します。",
   "config.bookmarks.navigationScope.currentFile": "現在のファイル内のブックマークのみを移動します（アクティブなエディターがない場合はすべてのファイルが対象になります）。",
   "config.bookmarks.navigationWrap": "「次のブックマーク」 / 「前のブックマーク」で先頭または末尾のブックマークに達したときに反対側へ循環します。オフにすると端で停止します。",
+  "config.bookmarks.scrollbarMarker": "ブックマークやメモのマーカーをエディターのスクロールバー（概要ルーラー）のどこに表示するか、または非表示にします。行番号の横のアイコンには影響しません。",
+  "config.bookmarks.scrollbarMarker.left": "左側（Git の変更マーカーと同じレーン）。",
+  "config.bookmarks.scrollbarMarker.center": "中央。",
+  "config.bookmarks.scrollbarMarker.right": "右側。",
+  "config.bookmarks.scrollbarMarker.full": "スクロールバー全幅。",
+  "config.bookmarks.scrollbarMarker.off": "オフ（スクロールバーに表示しない）。",
   "config.statusBar.enabled": "現在のファイルのブックマーク数と、ソース フィルター・アイコン非表示の状態をステータスバーに表示します。クリックするとブックマークを検索できます。"
 }

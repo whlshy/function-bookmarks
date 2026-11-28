@@ -251,5 +251,7 @@
   "Set Up AI Assistant Skill": "设置 AI 助手 Skill",
   "Which AI assistant do you use? Cursor also reads the other two folders.": "你用哪个 AI 助手？Cursor 也会读取另外两个文件夹。",
   "Open SKILL.md": "打开 SKILL.md",
-  "The AI assistant can now read and add bookmarks: {0}. It runs with Node.js. The folder is only on your computer (added to .git/info/exclude).": "AI 助手现在可以查询和添加书签：{0}。需要 Node.js 才能运行。这个文件夹只保留在你的电脑上（已加入 .git/info/exclude）。"
+  "The AI assistant can now read and add bookmarks: {0}. It runs with Node.js. The folder is only on your computer (added to .git/info/exclude).": "AI 助手现在可以查询和添加书签：{0}。需要 Node.js 才能运行。这个文件夹只保留在你的电脑上（已加入 .git/info/exclude）。",
+  "Jumping within search results ({0})": "按搜索结果跳转（{0} 个）",
+  "No bookmarks match the search.": "没有符合搜索的书签。"
 }

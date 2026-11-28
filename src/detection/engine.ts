@@ -780,6 +780,16 @@ export function findInnermost(symbols: DetectedSymbol[], line: number): Detected
   return undefined;
 }
 
+/** 依行號找出所有包住該行的符號，由最內層往外層排列。 */
+export function findEnclosing(symbols: DetectedSymbol[], line: number): DetectedSymbol[] {
+  for (const s of symbols) {
+    if (line >= s.startLine && line <= s.endLine) {
+      return [...findEnclosing(s.children, line), s];
+    }
+  }
+  return [];
+}
+
 /** 以名稱路徑找符號：先找路徑＋種類都相同的，找不到再只比路徑。 */
 export function findByPath(symbols: DetectedSymbol[], path: string, kind?: string): DetectedSymbol | undefined {
   let loose: DetectedSymbol | undefined;

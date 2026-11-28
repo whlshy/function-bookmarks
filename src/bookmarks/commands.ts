@@ -18,10 +18,10 @@ import { nextFreeNumber } from './decor';
 import { BookmarkEntry, MarkStore } from '../storage/store';
 import { FavoritesModel } from '../symbols/favorites';
 import { SymbolService } from '../symbols/symbolService';
-import { shownBookmarkItems } from './unified';
+import { BookmarkItem, shownBookmarkItems } from './unified';
 import { newLineBookmark, symbolAtNameLine } from '../core/resolve';
 import { NoteEditor } from '../views/noteEditor';
-import { BookmarkStatus, LineBookmark, makeAnchor, neighbor, parseTags, suggestName } from './model';
+import { BookmarkStatus, filterNavigationItems, LineBookmark, makeAnchor, neighbor, parseTags, suggestName } from './model';
 import { lineBookmarkTitle } from './sort';
 
 /** 樹狀檢視的書籤節點（避免與 views/tree 互相引用，只描述需要的欄位）。 */
@@ -118,11 +118,15 @@ export async function revealLine(uri: vscode.Uri, line: number): Promise<vscode.
 }
 
 export class BookmarkCommands {
+  /** 給測試用：最近一次上下跳轉（go）由本指令顯示的狀態列文字；跳到需確認書籤由 jumpToBookmark 提示時為 undefined。 */
+  lastGoStatus: string | undefined;
+
   constructor(
     private readonly store: MarkStore,
     private readonly service: SymbolService,
     private readonly notes: NoteEditor,
     private readonly favorites: FavoritesModel,
+    private readonly getSearchMatcher?: () => ((item: BookmarkItem) => boolean) | undefined,
   ) {}
 
   /** 名稱剛好在這一行的符號（函式、類別、block…），有的話 Alt+Shift+B B 建立函式書籤。 */
@@ -595,8 +599,9 @@ export class BookmarkCommands {
     });
   }
 
-  /** 跳到下一個（1）或上一個（-1）書籤（含函式書籤與行號書籤），依設定決定範圍與是否頭尾循環。 */
+  /** 跳到下一個（1）或上一個（-1）書籤（含函式書籤與行號書籤），依設定與側邊欄搜尋決定範圍與是否頭尾循環。 */
   async go(direction: 1 | -1): Promise<{ uri: vscode.Uri; line: number } | undefined> {
+    this.lastGoStatus = undefined;
     // 多資料夾工作區以視窗／工作區層級設定為準（與 autoNumber、showLabelAtLineEnd 一致，跨資料夾導覽行為統一）
     const cfg = vscode.workspace.getConfiguration(SECTION);
     const scope = cfg.get<string>('bookmarks.navigationScope', 'all') === 'currentFile' ? 'currentFile' : 'all';
@@ -610,31 +615,35 @@ export class BookmarkCommands {
     // currentFile 模式但沒有作用中的編輯器時，視為 all
     const currentFileOnly = scope === 'currentFile' && editor !== undefined;
 
-    // 函式書籤用目前偵測到的行號；找不到的函式不參與跳轉
-    const allItems = shownBookmarkItems(this.store, this.favorites)
-      .filter((i) => i.line !== undefined)
-      .map((i) => ({
-        file: keyOf(i.folder, i.file),
-        line: i.line!,
-        rel: i.file,
-        status: i.kind === 'line' ? i.entry.bookmark.status : undefined,
-        entry: { uri: i.uri, line: i.line! },
-      }));
-    const items = currentFileOnly
-      ? current !== undefined
-        ? allItems.filter((i) => i.file === current)
-        : []
-      : allItems;
+    // 函式書籤用目前偵測到的行號；找不到的函式不參與跳轉；側邊欄搜尋啟用時共用同一組比對條件
+    const { items: matched, searchActive, emptyReason } = filterNavigationItems(shownBookmarkItems(this.store, this.favorites), {
+      fileKey: (i) => keyOf(i.folder, i.file),
+      currentFile: current,
+      currentFileOnly,
+      searchMatch: this.getSearchMatcher?.(),
+    });
 
-    if (items.length === 0) {
-      if (currentFileOnly) {
-        vscode.window.setStatusBarMessage(vscode.l10n.t('No bookmarks in this file.'), 3000);
-      } else {
-        // 和其他跳轉提示一樣用狀態列短暫顯示，不跳出會擋住程式碼的通知
-        vscode.window.setStatusBarMessage(vscode.l10n.t('No bookmarks yet.'), 3000);
-      }
+    if (matched.length === 0) {
+      // 和其他跳轉提示一樣用狀態列短暫顯示，不跳出會擋住程式碼的通知
+      const msg =
+        emptyReason === 'noMatch'
+          ? vscode.l10n.t('No bookmarks match the search.')
+          : emptyReason === 'noBookmarksInFile'
+            ? vscode.l10n.t('No bookmarks in this file.')
+            : vscode.l10n.t('No bookmarks yet.');
+      this.lastGoStatus = msg;
+      vscode.window.setStatusBarMessage(msg, 3000);
       return undefined;
     }
+
+    const items = matched.map((i) => ({
+      file: keyOf(i.folder, i.file),
+      line: i.line,
+      rel: i.file,
+      status: i.kind === 'line' ? i.entry.bookmark.status : undefined,
+      entry: { uri: i.uri, line: i.line },
+    }));
+    const searchHint = searchActive ? vscode.l10n.t('Jumping within search results ({0})', items.length) : undefined;
 
     // 開不了的檔案（已被刪除、搬走）跳過，從它的位置繼續找下一個；不然游標不動，每次都挑到同一個而卡住
     let pool = items;
@@ -646,9 +655,19 @@ export class BookmarkCommands {
       target;
       target = neighbor(pool, fromFile, fromLine, direction, wrap)
     ) {
+      // 若跳到的書籤為「需確認」狀態，以 jumpToBookmark 的 5 秒需確認提示為優先，不以搜尋提示覆蓋
       const ok = await jumpToBookmark(
         { uri: target.entry.uri, line: target.entry.line, file: target.rel, status: target.status },
-        { silentMissing: true },
+        {
+          silentMissing: true,
+          afterJump:
+            searchHint && target.status !== 'lost'
+              ? () => {
+                  this.lastGoStatus = searchHint;
+                  vscode.window.setStatusBarMessage(`$(search) ${searchHint}`, 3000);
+                }
+              : undefined,
+        },
       );
       if (ok) {
         return target.entry;
@@ -661,10 +680,9 @@ export class BookmarkCommands {
     }
     if (!wrap && pool.length > 0) {
       // 不循環且沒有下一個／上一個（含跳過已刪除的書籤後後面沒有了）：游標不動並以狀態列短暫提示
-      vscode.window.setStatusBarMessage(
-        direction === 1 ? vscode.l10n.t('Already at the last bookmark.') : vscode.l10n.t('Already at the first bookmark.'),
-        3000,
-      );
+      const msg = direction === 1 ? vscode.l10n.t('Already at the last bookmark.') : vscode.l10n.t('Already at the first bookmark.');
+      this.lastGoStatus = msg;
+      vscode.window.setStatusBarMessage(msg, 3000);
       return undefined;
     }
     if (firstMissing !== undefined) {

@@ -2,7 +2,7 @@
   "name": "function-bookmarks",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "publisher": "whlshy",
   "icon": "media/icon.png",
   "galleryBanner": {
@@ -31,18 +31,32 @@
   "keywords": [
     "bookmarks",
     "bookmark",
+    "function bookmarks",
+    "line bookmarks",
+    "numbered bookmarks",
+    "bookmark manager",
+    "favorites",
+    "code navigation",
+    "navigation",
+    "jump",
     "functions",
     "symbols",
     "outline",
-    "navigation",
-    "git",
-    "branch",
-    "django",
+    "hover",
+    "notes",
     "markdown",
-    "jquery",
-    "ajax",
-    "numbered bookmarks",
-    "share"
+    "markdown notes",
+    "annotations",
+    "tags",
+    "git",
+    "git pull",
+    "branch",
+    "cursor",
+    "ai",
+    "ai agent",
+    "walkthrough",
+    "share",
+    "export"
   ],
   "extensionKind": [
     "workspace"
@@ -983,23 +997,43 @@
             "markdownDescription": "%config.bookmarks.navigationWrap%",
             "order": 4
           },
+          "functionBookmarks.bookmarks.scrollbarMarker": {
+            "type": "string",
+            "enum": [
+              "left",
+              "center",
+              "right",
+              "full",
+              "off"
+            ],
+            "enumDescriptions": [
+              "%config.bookmarks.scrollbarMarker.left%",
+              "%config.bookmarks.scrollbarMarker.center%",
+              "%config.bookmarks.scrollbarMarker.right%",
+              "%config.bookmarks.scrollbarMarker.full%",
+              "%config.bookmarks.scrollbarMarker.off%"
+            ],
+            "default": "left",
+            "markdownDescription": "%config.bookmarks.scrollbarMarker%",
+            "order": 5
+          },
           "functionBookmarks.statusBar.enabled": {
             "type": "boolean",
             "default": true,
             "markdownDescription": "%config.statusBar.enabled%",
-            "order": 5
+            "order": 6
           },
           "functionBookmarks.hover.enabled": {
             "type": "boolean",
             "default": true,
             "markdownDescription": "%config.hover.enabled%",
-            "order": 6
+            "order": 7
           },
           "functionBookmarks.followCursor": {
             "type": "boolean",
             "default": true,
             "markdownDescription": "%config.followCursor%",
-            "order": 7
+            "order": 8
           }
         }
       },

@@ -251,5 +251,7 @@
   "Set Up AI Assistant Skill": "AI 어시스턴트 Skill 설정",
   "Which AI assistant do you use? Cursor also reads the other two folders.": "어떤 AI 어시스턴트를 사용하나요? Cursor는 나머지 두 폴더도 읽습니다.",
   "Open SKILL.md": "SKILL.md 열기",
-  "The AI assistant can now read and add bookmarks: {0}. It runs with Node.js. The folder is only on your computer (added to .git/info/exclude).": "이제 AI 어시스턴트가 북마크를 조회하고 추가할 수 있습니다: {0}. 실행하려면 Node.js가 필요합니다. 이 폴더는 이 컴퓨터에만 있습니다(.git/info/exclude에 추가됨)."
+  "The AI assistant can now read and add bookmarks: {0}. It runs with Node.js. The folder is only on your computer (added to .git/info/exclude).": "이제 AI 어시스턴트가 북마크를 조회하고 추가할 수 있습니다: {0}. 실행하려면 Node.js가 필요합니다. 이 폴더는 이 컴퓨터에만 있습니다(.git/info/exclude에 추가됨).",
+  "Jumping within search results ({0})": "검색 결과 내에서 이동 중({0}개)",
+  "No bookmarks match the search.": "검색과 일치하는 북마크가 없습니다."
 }

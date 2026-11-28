@@ -12,7 +12,7 @@
   "config.detection.rules": "自定义检测规则。`id` 与内置规则相同时会覆盖该规则。`pattern` 是正则表达式，必须包含 `(?<name>...)` 分组（除非使用 `nameTemplate` 或 `body: \"embedded\"`）；主体范围从匹配结束处开始查找。",
   "config.detection.disabledRules": "要禁用的内置规则 ID，例如 `ts-method`。`html-id` 默认禁用。",
   "config.detection.templateFiles": "内置 Django / HTML 规则适用的文件 glob 模式。",
-  "config.followCursor": "在侧边栏高亮显示光标所在的函数。",
+  "config.followCursor": "在侧边栏的“当前文件”中高亮显示光标所在的函数；“当前文件”折叠或仅显示书签时，改为在“书签”区高亮显示光标所在的书签。",
   "config.rule.id": "唯一 ID。使用内置规则的 ID 可覆盖该规则。",
   "config.rule.label": "显示在工具提示中的简短说明。",
   "config.rule.languages": "此规则适用的语言 ID，例如 typescript、python、html。",
@@ -114,5 +114,11 @@
   "config.bookmarks.navigationScope.all": "跨所有文件的书签跳转。",
   "config.bookmarks.navigationScope.currentFile": "仅在当前文件的书签之间跳转（没有打开编辑器时回退到全部文件）。",
   "config.bookmarks.navigationWrap": "使用“下一个书签” / “上一个书签”到达最后一个或第一个书签时，绕回另一端继续。关闭时到达首尾即停止。",
+  "config.bookmarks.scrollbarMarker": "书签与备注标记在编辑器滚动条（概览标尺）上的显示位置，或关闭不显示。不影响行号旁的图标。",
+  "config.bookmarks.scrollbarMarker.left": "左侧（与 Git 修改标记同一道）。",
+  "config.bookmarks.scrollbarMarker.center": "中间。",
+  "config.bookmarks.scrollbarMarker.right": "右侧。",
+  "config.bookmarks.scrollbarMarker.full": "整条宽度。",
+  "config.bookmarks.scrollbarMarker.off": "关闭（滚动条上不显示）。",
   "config.statusBar.enabled": "在状态栏显示当前文件的书签数，以及来源筛选和图标隐藏状态。点击可搜索书签。"
 }

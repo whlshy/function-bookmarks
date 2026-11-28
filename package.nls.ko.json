@@ -12,7 +12,7 @@
   "config.detection.rules": "사용자 지정 감지 규칙입니다. 기본 제공 규칙과 같은 `id`를 사용하면 해당 규칙을 재정의합니다. `pattern`은 `(?<name>...)` 그룹을 포함해야 하는 정규식이며(`nameTemplate` 또는 `body: \"embedded\"` 사용 시 제외), 본문은 일치 끝 위치부터 검색합니다.",
   "config.detection.disabledRules": "비활성화할 기본 제공 규칙 ID입니다(예: `ts-method`). `html-id`는 기본적으로 비활성화되어 있습니다.",
   "config.detection.templateFiles": "기본 제공 Django / HTML 규칙이 적용되는 파일의 glob 패턴입니다.",
-  "config.followCursor": "사이드바에서 커서가 위치한 함수를 강조 표시합니다.",
+  "config.followCursor": "사이드바의 '현재 파일'에서 커서가 위치한 함수를 강조 표시합니다. '현재 파일'이 접혀 있거나 북마크만 표시할 때는 대신 '북마크'에서 커서가 위치한 북마크를 강조 표시합니다.",
   "config.rule.id": "고유 ID입니다. 기본 제공 ID를 사용하면 해당 규칙을 재정의합니다.",
   "config.rule.label": "도구 설명에 표시되는 짧은 설명입니다.",
   "config.rule.languages": "이 규칙이 적용되는 언어 ID입니다(예: typescript, python, html).",
@@ -114,5 +114,11 @@
   "config.bookmarks.navigationScope.all": "모든 파일의 북마크를 가로질러 이동합니다.",
   "config.bookmarks.navigationScope.currentFile": "현재 파일의 북마크 내에서만 이동합니다(활성 편집기가 없으면 모든 파일 대상으로 동작합니다).",
   "config.bookmarks.navigationWrap": "**다음 북마크** / **이전 북마크**로 첫 번째 또는 마지막 북마크에 도달하면 반대쪽 끝으로 순환합니다. 끄면 양 끝에서 멈춥니다.",
+  "config.bookmarks.scrollbarMarker": "편집기 스크롤바(개요 눈금자)에서 북마크와 메모 마커가 표시되는 위치를 지정하거나 끕니다. 줄 번호 옆 아이콘에는 영향을 주지 않습니다.",
+  "config.bookmarks.scrollbarMarker.left": "왼쪽(Git 변경 마커와 같은 레인).",
+  "config.bookmarks.scrollbarMarker.center": "가운데.",
+  "config.bookmarks.scrollbarMarker.right": "오른쪽.",
+  "config.bookmarks.scrollbarMarker.full": "전체 너비.",
+  "config.bookmarks.scrollbarMarker.off": "끔(스크롤바에 표시하지 않음).",
   "config.statusBar.enabled": "상태 표시줄에 현재 파일의 북마크 수와 출처 필터, 아이콘 숨김 상태를 표시합니다. 클릭하면 북마크를 검색합니다."
 }

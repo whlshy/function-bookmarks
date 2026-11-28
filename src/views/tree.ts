@@ -4,7 +4,7 @@ import { BookmarkItem, compareItems, itemSource, itemTags, shownBookmarkItems } 
 import { BookmarkQuery, isEmptyQuery, matchesQuery, parseQuery } from '../bookmarks/filter';
 import { FileBookmarkSort } from '../bookmarks/sort';
 import { findInnermost } from '../detection/engine';
-import { DetectedSymbol } from '../detection/types';
+import { DetectedSymbol, SymbolKindName } from '../detection/types';
 import { OverrideInfo, TemplateResolver } from '../django/resolver';
 import { MarkStore } from '../storage/store';
 import { openDocumentFor } from '../symbols/documentSource';
@@ -14,8 +14,8 @@ import { DirTree } from '../symbols/projectTree';
 import { FileSymbols, SymbolService } from '../symbols/symbolService';
 import { basenamePosix } from '../util/paths';
 import { toggleBookmarkKey } from '../util/shortcuts';
-import { uriKey } from '../util/uris';
-import { TreeItemFactory } from './treeItems';
+import { sameUri, uriKey } from '../util/uris';
+import { bmGroupId, bookmarkNodeId, favoriteNodeId, TreeItemFactory } from './treeItems';
 import {
   AUTO_COLLAPSE_BOOKMARKS,
   AUTO_COLLAPSE_GROUPS,
@@ -153,9 +153,33 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     [...this.disposables, this.changed].forEach((d) => d.dispose());
   }
 
+  /** 取得樹節點的穩定識別碼（與 getTreeItem().id 一致）。 */
+  nodeId(node: TreeNode): string | undefined {
+    switch (node.type) {
+      case 'search':
+        return 'search';
+      case 'section':
+        return `section:${node.section}`;
+      case 'bmGroup':
+        return bmGroupId(node, this.searching);
+      case 'bookmark':
+        return bookmarkNodeId(node);
+      case 'favorite':
+        return favoriteNodeId(node);
+      case 'symbol':
+        return node.id;
+      case 'wsFolder':
+        return `ws:${node.folder.uri.toString()}`;
+      case 'dir':
+        return `dir:${node.folder.uri.toString()}:${node.dir.path}`;
+      case 'file':
+        return `file:${uriKey(node.uri)}`;
+    }
+  }
+
   /** 記錄使用者展開或收合了某個節點。 */
   setExpanded(node: TreeNode, expanded: boolean): void {
-    const id = this.buildItem(node).id;
+    const id = this.nodeId(node);
     if (!id) {
       return;
     }
@@ -175,7 +199,7 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   }
 
   isExpanded(node: TreeNode): boolean | undefined {
-    const id = this.buildItem(node).id;
+    const id = this.nodeId(node);
     return id ? this.expansion[id] : undefined;
   }
 
@@ -216,6 +240,15 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
     return !isEmptyQuery(this.parsedQuery);
   }
 
+  /** 回傳目前側邊欄搜尋列的書籤比對函式（與側邊欄清單完全共用）；沒有搜尋時回傳 undefined。 */
+  searchMatcher(): ((item: BookmarkItem) => boolean) | undefined {
+    if (!this.searching) {
+      return undefined;
+    }
+    const q = this.parsedQuery;
+    return (item) => matchesQuery(q, searchFields(item));
+  }
+
   /** 設定搜尋列的字串並重畫；回傳是否有變。 */
   setQuery(query: string): boolean {
     if (query === this.queryText) {
@@ -231,6 +264,30 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   firstMatch(): BookmarkNode | FavoriteNode | undefined {
     const group = this.bookmarkChildren(this.sections.bookmarks)[0];
     return group ? this.groupChildren(group)[0] : undefined;
+  }
+
+  /** 在「書籤」區目前顯示的節點中找出指定書籤（依側邊欄分組順序取第一個）。 */
+  bookmarkNodeFor(
+    uri: vscode.Uri,
+    target: { kind: 'line'; id: string } | { kind: 'symbol'; path: string; kindName: SymbolKindName },
+  ): BookmarkNode | FavoriteNode | undefined {
+    for (const group of this.bookmarkChildren(this.sections.bookmarks)) {
+      for (const node of this.groupChildren(group)) {
+        if (target.kind === 'line') {
+          if (node.type === 'bookmark' && node.entry.bookmark.id === target.id && sameUri(node.entry.uri, uri)) {
+            return node;
+          }
+        } else if (
+          node.type === 'favorite' &&
+          sameUri(node.fav.uri, uri) &&
+          node.fav.mark.path === target.path &&
+          node.fav.mark.kind === target.kindName
+        ) {
+          return node;
+        }
+      }
+    }
+    return undefined;
   }
 
   get currentFile(): FileSymbols | undefined {
@@ -454,7 +511,8 @@ export class FunctionTreeProvider implements vscode.TreeDataProvider<TreeNode>, 
   /** 側邊欄列出的書籤再套用搜尋列的篩選。 */
   private matchedItems(): BookmarkItem[] {
     const items = this.shownItems();
-    return this.searching ? items.filter((i) => matchesQuery(this.parsedQuery, searchFields(i))) : items;
+    const match = this.searchMatcher();
+    return match ? items.filter(match) : items;
   }
 
   private fileComparator(key: string): (a: BookmarkItem, b: BookmarkItem) => number {

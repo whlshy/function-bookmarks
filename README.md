@@ -90,7 +90,7 @@ Function Bookmarks remembers the content around each bookmark and compares the o
 | `functionBookmarks.bookmarks.navigationWrap` | `true` | Next / previous bookmark wraps around at the last / first bookmark; turn off to stop there |
 | `functionBookmarks.statusBar.enabled` | `true` | Show bookmark count in the status bar |
 | `functionBookmarks.hover.enabled` | `true` | Popup on function names to add a bookmark, rename, edit the note |
-| `functionBookmarks.followCursor` | `true` | Highlight the function under the cursor in the side bar |
+| `functionBookmarks.followCursor` | `true` | Highlight the function under the cursor in Current File; when Current File is collapsed or showing bookmarks only, highlight the bookmark under the cursor in Bookmarks instead |
 
 **Notes**
 

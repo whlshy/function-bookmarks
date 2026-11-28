@@ -12,7 +12,7 @@
   "config.detection.rules": "Your own detection rules. A rule with the same `id` as a built-in rule overrides it. `pattern` is a regular expression that must contain a `(?<name>...)` group (unless `nameTemplate` or `body: \"embedded\"` is used); the body is searched from where the match ends.",
   "config.detection.disabledRules": "IDs of built-in rules to turn off, e.g. `ts-method`. `html-id` is off by default.",
   "config.detection.templateFiles": "Glob patterns of files where the built-in Django / HTML rules apply.",
-  "config.followCursor": "Highlight the function under the cursor in the side bar.",
+  "config.followCursor": "Highlight the function under the cursor in Current File; when Current File is collapsed or the view shows bookmarks only, highlight the bookmark under the cursor in Bookmarks instead.",
   "config.rule.id": "Unique ID. Use a built-in ID to override that rule.",
   "config.rule.label": "Short description shown in tooltips.",
   "config.rule.languages": "Language IDs this rule applies to, e.g. typescript, python, html.",
@@ -114,5 +114,11 @@
   "config.bookmarks.navigationScope.all": "Navigate across bookmarks in all files.",
   "config.bookmarks.navigationScope.currentFile": "Only navigate among bookmarks in the current file (falls back to all files when no editor is active).",
   "config.bookmarks.navigationWrap": "Wrap around when reaching the first or last bookmark with **Next Bookmark** / **Previous Bookmark**. Turn off to stop at either end.",
+  "config.bookmarks.scrollbarMarker": "Where bookmark and note markers appear on the editor scrollbar (overview ruler), or turn them off. Does not affect the icons beside line numbers.",
+  "config.bookmarks.scrollbarMarker.left": "Left lane (same lane as Git diff markers).",
+  "config.bookmarks.scrollbarMarker.center": "Center lane.",
+  "config.bookmarks.scrollbarMarker.right": "Right lane.",
+  "config.bookmarks.scrollbarMarker.full": "Full width of the scrollbar.",
+  "config.bookmarks.scrollbarMarker.off": "Off (do not show markers on the scrollbar).",
   "config.statusBar.enabled": "Show the number of bookmarks in the current file in the status bar, with the source filter and hidden-icon state. Click it to search bookmarks."
 }

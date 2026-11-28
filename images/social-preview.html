@@ -1,0 +1,65 @@
+<!doctype html><html><head><meta charset="utf-8"><title>OG A</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* 方案 A：編輯器實景——滑鼠移到函式名稱，提示框裡按星號加入書籤 */
+:root{--navy:#1F3B4D;--deep:#101B23;--teal:#2BB5A0;--slate:#5E7D8F;--ink:#E7EEF2;--dim:#8FA6B3;--code:#0B141A;--sans:"IBM Plex Sans",system-ui,sans-serif;--mono:"JetBrains Mono",Consolas,monospace;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0!important;padding:0!important;background:transparent}
+.card{width:1280px;height:640px;background:radial-gradient(120% 140% at 100% 0%,#24475C 0%,var(--navy) 38%,var(--deep) 100%);display:grid;grid-template-columns:520px 1fr;gap:48px;padding:72px 72px 72px 80px;color:var(--ink);font-family:var(--sans);overflow:hidden;position:relative}
+.left{display:flex;flex-direction:column;justify-content:center;gap:26px}
+.brand{display:flex;align-items:center;gap:18px}
+.brand svg{width:76px;height:76px;flex:none}
+h1{font-size:58px;line-height:1.02;margin:0;font-weight:700;letter-spacing:-.5px}
+.tag{font-size:30px;line-height:1.3;margin:0;color:var(--ink);font-weight:600;text-wrap:balance}
+.tag em{font-style:normal;white-space:nowrap;color:var(--teal)}
+.sub{font-size:21px;color:var(--dim);margin:0;line-height:1.45}
+.foot{font-family:var(--mono);font-size:17px;color:var(--slate);letter-spacing:.3px}
+.ed{align-self:center;background:var(--code);border:1px solid #23394A;border-radius:14px;box-shadow:0 30px 80px rgba(0,0,0,.45);overflow:visible;position:relative;height:430px}
+.bar{height:38px;border-bottom:1px solid #1B2C38;display:flex;align-items:center;gap:8px;padding:0 16px}
+.bar i{width:11px;height:11px;border-radius:50%;background:#2A3E4C}
+.bar span{margin-left:14px;font:500 14px var(--mono);color:var(--dim)}
+.l>span:last-child{white-space:pre}
+.lines{font:400 19px/34px var(--mono);padding:16px 0;color:#B9C9D3}
+.l{display:flex;padding-right:20px}
+.g{width:56px;text-align:right;padding-right:18px;color:#3C5566;flex:none;position:relative}
+.k{color:#C792EA}.f{color:#82AAFF}.s{color:#C3E88D}.c{color:#546E7A}
+.hl{background:rgba(43,181,160,.14);border-radius:3px;outline:1px solid rgba(43,181,160,.5)}
+.hover{position:absolute;left:120px;top:128px;width:330px;background:#15232D;border:1px solid #2C4657;border-radius:10px;box-shadow:0 18px 50px rgba(0,0,0,.55);font-family:var(--sans);font-size:18px;color:var(--ink);overflow:hidden}
+.hover .h{padding:14px 18px 10px;font:600 18px var(--mono)}
+.hover .h small{display:block;font:400 15px var(--sans);color:var(--dim);margin-top:4px}
+.hover .a{border-top:1px solid #243A49;padding:12px 18px;display:flex;align-items:center;gap:10px;color:var(--teal);font-weight:600}
+.cursor{position:absolute;left:150px;top:212px;width:26px;height:34px}
+.star{width:22px;height:22px}
+</style></head><body>
+<div class="card">
+ <div class="left">
+  <div class="brand">
+   <svg viewBox="0 0 128 128"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2A4F66"/><stop offset="1" stop-color="#132029"/></linearGradient></defs><rect x="4" y="4" width="120" height="120" rx="26" fill="url(#bg)"/><rect x="20" y="30" width="34" height="7" rx="3.5" fill="#5E7D8F"/><rect x="28" y="48" width="24" height="7" rx="3.5" fill="#5E7D8F"/><rect x="28" y="66" width="30" height="7" rx="3.5" fill="#5E7D8F"/><rect x="20" y="84" width="20" height="7" rx="3.5" fill="#5E7D8F"/><path d="M68 16h34a6 6 0 0 1 6 6v88l-23-15.5L62 110V22a6 6 0 0 1 6-6z" fill="#2BB5A0"/><path d="M95 36h-5.5a7.5 7.5 0 0 0-7.5 7.5V80M74 55h17" stroke="#fff" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+   <h1>Function<br>Bookmarks</h1>
+  </div>
+  <p class="tag">Hover a function, click <em>★</em>.<br>It stays bookmarked — even after <em>git pull</em> or an AI edit.</p>
+  <p class="sub">Markdown notes on hover · numbered tours · VS Code &amp; Cursor</p>
+  <div class="foot">github.com/whlshy/function-bookmarks</div>
+ </div>
+ <div class="ed">
+  <div class="bar"><i></i><i></i><i></i><span>auth/service.py</span></div>
+  <div class="lines">
+   <div class="l"><span class="g">38</span><span class="c"># check the user's password</span></div>
+   <div class="l"><span class="g">39</span><span><span class="k">def</span> <span class="f hl">check_password</span>(user, pw):</span></div>
+   <div class="l"><span class="g">40</span><span>    hashed = user.password_hash</span></div>
+   <div class="l"><span class="g">41</span><span>    <span class="k">return</span> verify(pw, hashed)</span></div>
+   <div class="l"><span class="g">42</span><span></span></div>
+   <div class="l"><span class="g">43</span><span><span class="k">def</span> <span class="f">create_session</span>(user):</span></div>
+   <div class="l"><span class="g">44</span><span>    token = new_token()</span></div>
+   <div class="l"><span class="g">45</span><span>    <span class="k">return</span> Session(user, token)</span></div>
+   <div class="l"><span class="g">46</span><span></span></div>
+   <div class="l"><span class="g">47</span><span><span class="k">def</span> <span class="f">log_attempt</span>(user, ok):</span></div>
+  </div>
+  <div class="hover">
+   <div class="h">check_password<small>function · auth/service.py</small></div>
+   <div class="a"><svg class="star" viewBox="0 0 24 24"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4L2.8 9.5l6.4-.8z" fill="none" stroke="#2BB5A0" stroke-width="2" stroke-linejoin="round"/></svg>Add bookmark</div>
+  </div>
+  <svg class="cursor" viewBox="0 0 26 34"><path d="M2 2l20 18h-11l6 12-4 2-6-12-5 6z" fill="#fff" stroke="#0B141A" stroke-width="1.6" stroke-linejoin="round"/></svg>
+ </div>
+</div>
+</body></html>

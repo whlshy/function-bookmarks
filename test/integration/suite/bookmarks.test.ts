@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { ExtensionApi } from '../../../src/extension';
 import { tagsPrompt } from '../../../src/bookmarks/commands';
+import { OVERVIEW_RULER_LANE } from '../../../src/bookmarks/decor';
 import { makeAnchor, newBookmarkId } from '../../../src/bookmarks/model';
 import { formatLocalDateTime } from '../../../src/util/time';
 import { addBookmark, setFavorite, setNote, setTags } from '../../../src/storage/marks';
@@ -771,6 +772,7 @@ describe('書籤操作、函式書籤、數字導覽、顏色與快捷鍵', () =
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
       await vscode.workspace.getConfiguration('functionBookmarks').update('bookmarks.autoNumber', undefined, vscode.ConfigurationTarget.Workspace);
       await vscode.workspace.getConfiguration('functionBookmarks').update('bookmarks.showLabelAtLineEnd', undefined, vscode.ConfigurationTarget.Workspace);
+      await vscode.workspace.getConfiguration('functionBookmarks').update('bookmarks.scrollbarMarker', undefined, vscode.ConfigurationTarget.Workspace);
       await vscode.commands.executeCommand('functionBookmarks.showBookmarkIcons');
       await fsp.rm(fileN().fsPath, { force: true });
     });
@@ -1203,6 +1205,93 @@ describe('書籤操作、函式書籤、數字導覽、顏色與快捷鍵', () =
       await vscode.commands.executeCommand('functionBookmarks.filterBookmarkSources', []);
       api.statusBar.update();
       assert.strictEqual(api.statusBar.text, '$(bookmark) 3');
+    });
+
+    it('捲軸書籤標記設定（bookmarks.scrollbarMarker）：切換各位置與 off 立即重建 decoration 且書籤與備註圖示維持正常', async () => {
+      // 驗證純模組的 lane 數值與 VS Code OverviewRulerLane 一致
+      assert.strictEqual(OVERVIEW_RULER_LANE.left, vscode.OverviewRulerLane.Left);
+      assert.strictEqual(OVERVIEW_RULER_LANE.center, vscode.OverviewRulerLane.Center);
+      assert.strictEqual(OVERVIEW_RULER_LANE.right, vscode.OverviewRulerLane.Right);
+      assert.strictEqual(OVERVIEW_RULER_LANE.full, vscode.OverviewRulerLane.Full);
+
+      const views = workspaceFile('app', 'views.py');
+      const stale = makeAnchor(['old_1 = 1', 'old_2 = 2', 'old_3 = 3'], 1);
+      await api.store.update(folder(), (d) => {
+        let next = setFavorite(d, { file: 'app/views.py', path: 'index', kind: 'function' }, true, 4);
+        next = setNote(next, { file: 'app/views.py', path: 'ArticleView.get', kind: 'method' }, '只有備註的函式', 11);
+        next = addBookmark(next, { id: newBookmarkId(), file: 'app/views.py', line: 1, label: '行號書籤' });
+        return addBookmark(next, {
+          id: newBookmarkId(),
+          file: 'app/views.py',
+          line: 6,
+          status: 'lost',
+          anchor: stale,
+        });
+      });
+
+      await openAt(views, 0, api);
+      await api.gutter.update();
+
+      const assertIconsIntact = (stage: string) => {
+        assert.deepStrictEqual(api.gutter.linesFor(views, 'favorite'), [4], `${stage}：函式書籤圖示應存在`);
+        assert.deepStrictEqual(api.gutter.linesFor(views, 'note'), [11], `${stage}：備註圖示應存在`);
+        assert.deepStrictEqual(api.gutter.linesFor(views, 'bookmark'), [1, 6], `${stage}：行號與 lost 書籤圖示應存在`);
+        assert.strictEqual(api.gutter.iconAt(views, 4), 'favorite|teal|', `${stage}：函式書籤樣式`);
+        assert.strictEqual(api.gutter.iconAt(views, 1), 'bookmark|teal|', `${stage}：行號書籤樣式`);
+        assert.strictEqual(api.gutter.iconAt(views, 6), 'lost|teal|', `${stage}：lost 書籤樣式`);
+        assert.strictEqual(api.gutter.labelAt(views, 1), '行號書籤', `${stage}：行尾名稱應保留`);
+      };
+
+      const cfg = vscode.workspace.getConfiguration('functionBookmarks');
+      assert.strictEqual(api.gutter.scrollbarMarkerSetting, 'left');
+      assertIconsIntact('預設 left');
+
+      let prevNoteKey = api.gutter.noteDecorationKey;
+      let prevBmKey = api.gutter.iconDecorationKeyAt(views, 1);
+      let prevLostKey = api.gutter.iconDecorationKeyAt(views, 6);
+      assert.ok(prevNoteKey && prevBmKey && prevLostKey);
+
+      try {
+        for (const mode of ['off', 'center', 'right', 'full', 'left'] as const) {
+          await cfg.update('bookmarks.scrollbarMarker', mode, vscode.ConfigurationTarget.Workspace);
+          await waitFor(
+            () => ({
+              setting: api.gutter.scrollbarMarkerSetting,
+              noteKey: api.gutter.noteDecorationKey,
+              bmKey: api.gutter.iconDecorationKeyAt(views, 1),
+              lostKey: api.gutter.iconDecorationKeyAt(views, 6),
+            }),
+            (s) =>
+              s.setting === mode &&
+              s.noteKey !== prevNoteKey &&
+              Boolean(s.bmKey) &&
+              s.bmKey !== prevBmKey &&
+              Boolean(s.lostKey) &&
+              s.lostKey !== prevLostKey,
+            `切換 bookmarks.scrollbarMarker 為 ${mode} 後立即重建並重畫`,
+          );
+          assertIconsIntact(`切換為 ${mode}`);
+          prevNoteKey = api.gutter.noteDecorationKey;
+          prevBmKey = api.gutter.iconDecorationKeyAt(views, 1);
+          prevLostKey = api.gutter.iconDecorationKeyAt(views, 6);
+        }
+
+        // 切換到 off 再切回 left 後，新增／移除書籤仍正常運作
+        await cfg.update('bookmarks.scrollbarMarker', 'off', vscode.ConfigurationTarget.Workspace);
+        await waitFor(() => api.gutter.scrollbarMarkerSetting, (v) => v === 'off', '切換為 off');
+        await cfg.update('bookmarks.scrollbarMarker', 'left', vscode.ConfigurationTarget.Workspace);
+        await waitFor(() => api.gutter.scrollbarMarkerSetting, (v) => v === 'left', '切回 left');
+        await openAt(views, 2, api);
+        await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+        await api.gutter.update();
+        assert.deepStrictEqual(api.gutter.linesFor(views, 'bookmark'), [1, 2, 6]);
+        await vscode.commands.executeCommand('functionBookmarks.toggleBookmark');
+        await api.gutter.update();
+        assert.deepStrictEqual(api.gutter.linesFor(views, 'bookmark'), [1, 6]);
+      } finally {
+        await cfg.update('bookmarks.scrollbarMarker', undefined, vscode.ConfigurationTarget.Workspace);
+        await waitFor(() => api.gutter.scrollbarMarkerSetting, (v) => v === 'left', '還原 bookmarks.scrollbarMarker 預設值');
+      }
     });
   });
 

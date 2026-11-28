@@ -276,9 +276,15 @@ describe('package.json、package.nls 與 l10n 一致性', () => {
       'functionBookmarks.bookmarks.showLabelAtLineEnd',
       'functionBookmarks.bookmarks.navigationScope',
       'functionBookmarks.bookmarks.navigationWrap',
+      'functionBookmarks.bookmarks.scrollbarMarker',
       'functionBookmarks.statusBar.enabled',
     ]) {
       assert.ok(k in allProps, k);
+    }
+    // 每個設定群組內的 order 不應重複
+    for (const group of groups) {
+      const orders = Object.values(group.properties).map((v) => v.order);
+      assert.strictEqual(new Set(orders).size, orders.length, `${group.title} 的 order 有重複：${orders.join(', ')}`);
     }
     assert.strictEqual(
       allProps['functionBookmarks.detection.rules']?.items?.properties?.optionalBody?.type,

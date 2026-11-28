@@ -26,8 +26,9 @@ import { FavoriteGutter } from './views/gutter';
 import { FileEvents } from './util/fileEvents';
 import { NoteEditor, PREVIEW_NOTE_COMMAND } from './views/noteEditor';
 import { collectProjectSymbols, searchFunctions, searchMarks } from './views/search';
-import { BookmarkGrouping, COMMANDS, FilterMode, FunctionTreeProvider, SymbolNode, TreeNode } from './views/tree';
+import { BookmarkGrouping, BookmarkNode, COMMANDS, FavoriteNode, FilterMode, FunctionTreeProvider, SymbolNode, TreeNode } from './views/tree';
 import { sameUri } from './util/uris';
+import { chooseCursorBookmarkTarget, chooseFollowSection } from './util/followCursor';
 import { BookmarkSearchBox } from './views/searchBox';
 import { StartupLog, StartupTiming } from './util/startupLog';
 import { plainOptions, stringArg, stringArrayArg } from './util/commandArgs';
@@ -60,7 +61,7 @@ export interface ExtensionApi {
   skillSetup: SkillSetup;
   refreshNow(): Promise<void>;
   /** 立即執行一次游標跟隨，回傳被標示的節點。 */
-  followCursor(): SymbolNode | undefined;
+  followCursor(): SymbolNode | BookmarkNode | FavoriteNode | undefined;
   /** 立即重算游標所在位置是否有書籤（供編輯器右鍵選單 when 條件與整合測試用）。 */
   updateCursorBookmarkContext(): Promise<boolean>;
   treeView: vscode.TreeView<TreeNode>;
@@ -100,7 +101,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     notes.isNoteDocument(uri),
   );
   const commands = new Commands(service, store, resolver, notes);
-  const bookmarks = new BookmarkCommands(store, service, notes, favorites);
+  const bookmarks = new BookmarkCommands(store, service, notes, favorites, () => provider.searchMatcher());
   const tracker = new BookmarkTracker(store, service);
   const external = new ExternalChangeWatcher(store, service, context.workspaceState, branches, files);
   tracker.handledByDiff = (e, changes) => external.handlesByDiff(e, changes);
@@ -205,6 +206,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
   const applyViewState = async (filter: FilterMode, bmGroup: BookmarkGrouping = provider.bookmarkGrouping) => {
     provider.filterMode = filter;
     provider.bookmarkGrouping = bmGroup;
+    lastRevealed = undefined;
     await context.workspaceState.update(STATE_FILTER, filter);
     await context.workspaceState.update(STATE_BM_GROUP, bmGroup);
     await vscode.commands.executeCommand('setContext', 'functionBookmarks.filterMode', filter);
@@ -245,7 +247,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
       reportErrors(provider.currentFile.errors);
     }
     void updateCursorBookmarkContext();
-    if (hasContent) {
+    if (hasContent || chooseFollowSection(provider.filterMode, provider.isExpanded(provider.sections.currentFile)) === 'bookmarks') {
       followCursor();
     }
   };
@@ -274,6 +276,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
       return sameUri(sel.uri, uri) && sel.symbol.path === path;
     }
     return false;
+  };
+
+  /** 「書籤」區游標跟隨時，側邊欄目前選取是否已指向同一筆書籤（含多標籤分組的另一處）。 */
+  const bookmarkSelectionPointsTo = (node: BookmarkNode | FavoriteNode): boolean => {
+    const sel = treeView.selection[0] ?? lastSelected;
+    if (node.type === 'bookmark') {
+      return (
+        sel?.type === 'bookmark' &&
+        sameUri(sel.entry.uri, node.entry.uri) &&
+        (sel.entry.bookmark.id === node.entry.bookmark.id || sel.entry.bookmark.line === node.entry.bookmark.line)
+      );
+    }
+    return (
+      sel?.type === 'favorite' &&
+      sameUri(sel.fav.uri, node.fav.uri) &&
+      sel.fav.mark.path === node.fav.mark.path &&
+      sel.fav.mark.kind === node.fav.mark.kind
+    );
   };
 
   /** 上層有被使用者收合的節點（例如收合了「目前檔案」）時，不為了跟隨游標把它展開。 */
@@ -366,28 +386,65 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
   };
 
   let lastRevealed: string | undefined;
-  /** 在側邊欄標示游標所在的函式；回傳實際標示的節點（測試用）。 */
-  const followCursor = (): SymbolNode | undefined => {
+  /** 在側邊欄標示游標所在的函式或書籤；回傳實際標示的節點（測試用）。 */
+  const followCursor = (): SymbolNode | BookmarkNode | FavoriteNode | undefined => {
     const editor = vscode.window.activeTextEditor;
     if (
       !editor ||
       notes.isNoteDocument(editor.document.uri) ||
-      !provider.currentFile ||
-      !sameUri(editor.document.uri, provider.currentFile.uri) ||
       !treeView.visible ||
-      provider.filterMode !== 'all' ||
       !readSettings(editor.document.uri).followCursor
     ) {
       return undefined;
     }
-    const node = provider.nodeAt(editor.selection.active.line);
-    if (!node || node.id === lastRevealed) {
+    const section = chooseFollowSection(provider.filterMode, provider.isExpanded(provider.sections.currentFile));
+    if (section === 'currentFile') {
+      if (!provider.currentFile || !sameUri(editor.document.uri, provider.currentFile.uri)) {
+        return undefined;
+      }
+      const node = provider.nodeAt(editor.selection.active.line);
+      if (!node || node.id === lastRevealed) {
+        return undefined;
+      }
+      if (selectionPointsTo(editor.document.uri, node.symbol.path, editor.selection.active.line) || hasCollapsedAncestor(node)) {
+        return undefined;
+      }
+      lastRevealed = node.id;
+      void treeView.reveal(node, { select: true, focus: false, expand: false }).then(undefined, () => undefined);
+      return node;
+    }
+    // 「目前檔案」被使用者收合或只顯示書籤：改在「書籤」區標示游標所在的書籤
+    if (provider.isExpanded(provider.sections.bookmarks) === false) {
       return undefined;
     }
-    if (selectionPointsTo(editor.document.uri, node.symbol.path, editor.selection.active.line) || hasCollapsedAncestor(node)) {
+    const line = editor.selection.active.line;
+    const lineEntry = bookmarks.entryOf(undefined);
+    const symbols = provider.currentFile && sameUri(editor.document.uri, provider.currentFile.uri) ? provider.currentFile.symbols : [];
+    const target = chooseCursorBookmarkTarget({
+      lineBookmarkId: lineEntry?.bookmark.id,
+      symbols,
+      line,
+      favoritesShown: store.favoritesShown,
+      isFavorite: (sym) => !!store.get(editor.document.uri, sym)?.favorite,
+    });
+    if (!target) {
       return undefined;
     }
-    lastRevealed = node.id;
+    const node = provider.bookmarkNodeFor(
+      editor.document.uri,
+      target.kind === 'line' ? target : { kind: 'symbol', path: target.symbol.path, kindName: target.symbol.kind },
+    );
+    if (!node) {
+      return undefined;
+    }
+    const id = provider.nodeId(node);
+    if (!id || id === lastRevealed) {
+      return undefined;
+    }
+    if (bookmarkSelectionPointsTo(node) || hasCollapsedAncestor(node)) {
+      return undefined;
+    }
+    lastRevealed = id;
     void treeView.reveal(node, { select: true, focus: false, expand: false }).then(undefined, () => undefined);
     return node;
   };
@@ -690,8 +747,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
       const sel = e.selection[0];
       if (sel) {
         lastSelected = sel;
-        // 選取換到別的項目：清掉「上次標示」的紀錄，之後游標回到原函式時才會再標示
-        if (sel.type !== 'symbol' || sel.id !== lastRevealed) {
+        // 選取換到別的項目：清掉「上次標示」的紀錄，之後游標回到原位置時才會再標示
+        if (provider.nodeId(sel) !== lastRevealed) {
           lastRevealed = undefined;
         }
       }

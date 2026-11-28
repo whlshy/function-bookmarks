@@ -251,5 +251,7 @@
   "Set Up AI Assistant Skill": "AI アシスタント用 Skill を設定",
   "Which AI assistant do you use? Cursor also reads the other two folders.": "どの AI アシスタントを使いますか？Cursor はほかの 2 つのフォルダーも読み込みます。",
   "Open SKILL.md": "SKILL.md を開く",
-  "The AI assistant can now read and add bookmarks: {0}. It runs with Node.js. The folder is only on your computer (added to .git/info/exclude).": "AI アシスタントがブックマークを参照・追加できるようになりました：{0}。実行には Node.js が必要です。このフォルダーはこのコンピューターだけに置かれます（.git/info/exclude に追加済み）。"
+  "The AI assistant can now read and add bookmarks: {0}. It runs with Node.js. The folder is only on your computer (added to .git/info/exclude).": "AI アシスタントがブックマークを参照・追加できるようになりました：{0}。実行には Node.js が必要です。このフォルダーはこのコンピューターだけに置かれます（.git/info/exclude に追加済み）。",
+  "Jumping within search results ({0})": "検索結果内で移動中（{0} 件）",
+  "No bookmarks match the search.": "検索に一致するブックマークはありません。"
 }

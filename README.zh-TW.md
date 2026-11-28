@@ -90,7 +90,7 @@ Function Bookmarks 會記住每個書籤附近的內容，比對檔案修改前�
 | `functionBookmarks.bookmarks.navigationWrap` | `true` | 下一個／上一個書籤到最後／第一個時繞回另一端；關閉就停在那裡 |
 | `functionBookmarks.statusBar.enabled` | `true` | 在狀態列顯示書籤數 |
 | `functionBookmarks.hover.enabled` | `true` | 滑鼠移到函式名稱時顯示加入書籤、改名、編輯備註的提示 |
-| `functionBookmarks.followCursor` | `true` | 側邊欄標示游標所在的函式 |
+| `functionBookmarks.followCursor` | `true` | 側邊欄標示游標所在的函式；「目前檔案」收合或只看書籤時，改在「書籤」區標示游標所在的書籤 |
 
 **備註**
 

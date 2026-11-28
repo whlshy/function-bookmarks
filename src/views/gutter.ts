@@ -4,11 +4,25 @@ import { MarkStore } from '../storage/store';
 import { SymbolService } from '../symbols/symbolService';
 import { uriKey } from '../util/uris';
 import { bookmarkTitle } from '../bookmarks/commands';
-import { circled, DEFAULT_COLOR, effectiveColor, GutterKind, gutterSvg, LOST_HEX, paletteColor, svgDataUri } from '../bookmarks/decor';
+import {
+  circled,
+  DEFAULT_COLOR,
+  effectiveColor,
+  GutterKind,
+  gutterSvg,
+  LOST_HEX,
+  overviewRulerOptions,
+  paletteColor,
+  svgDataUri,
+} from '../bookmarks/decor';
 import { SECTION } from '../config';
 import { closeUnclosedFences } from '../markdown/fences';
 import { formatLocalDateTime } from '../util/time';
 import { bookmarkPreviewLink, trustPreviewLink } from './noteEditor';
+
+export { overviewRulerOptions } from '../bookmarks/decor';
+
+const NOTE_RULER_COLOR = '#3794FF';
 
 function escapeMd(s: string): string {
   return s.replace(/[\\`*_[\]]/g, '\\$&');
@@ -26,26 +40,24 @@ type LineKind = 'favorite' | 'note' | 'bookmark' | 'foreign' | 'label';
  * - 可暫時隱藏全部（方便設中斷點），書籤不受影響
  */
 export class FavoriteGutter implements vscode.Disposable {
-  private readonly noteType: vscode.TextEditorDecorationType;
+  private noteType: vscode.TextEditorDecorationType;
   private readonly labelType: vscode.TextEditorDecorationType;
   /** 依「種類＋顏色＋號碼」建立的書籤圖示樣式。 */
   private readonly iconTypes = new Map<string, vscode.TextEditorDecorationType>();
   private readonly lines = new Map<string, Record<LineKind, number[]>>();
+  private scrollbarMarker: unknown;
   private timer: NodeJS.Timeout | undefined;
   private disposables: vscode.Disposable[] = [];
+  private disposed = false;
   private hiddenValue = false;
 
   constructor(
-    extensionUri: vscode.Uri,
+    private readonly extensionUri: vscode.Uri,
     private readonly service: SymbolService,
     private readonly store: MarkStore,
   ) {
-    this.noteType = vscode.window.createTextEditorDecorationType({
-      gutterIconPath: vscode.Uri.joinPath(extensionUri, 'media', 'gutter-note.svg'),
-      gutterIconSize: 'contain',
-      overviewRulerColor: '#3794FF',
-      overviewRulerLane: vscode.OverviewRulerLane.Left,
-    });
+    this.scrollbarMarker = this.readScrollbarMarker();
+    this.noteType = this.createNoteType();
     this.labelType = vscode.window.createTextEditorDecorationType({
       after: {
         color: new vscode.ThemeColor('editorCodeLens.foreground'),
@@ -55,7 +67,6 @@ export class FavoriteGutter implements vscode.Disposable {
       rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
     });
     this.disposables.push(
-      this.noteType,
       this.labelType,
       vscode.window.onDidChangeVisibleTextEditors(() => this.schedule(0)),
       store.onDidChange(() => this.schedule(0)),
@@ -65,7 +76,15 @@ export class FavoriteGutter implements vscode.Disposable {
         }
       }),
       vscode.workspace.onDidChangeConfiguration((e) => {
+        let redraw = false;
+        if (e.affectsConfiguration(`${SECTION}.bookmarks.scrollbarMarker`)) {
+          this.rebuildMarkerTypes();
+          redraw = true;
+        }
         if (e.affectsConfiguration(`${SECTION}.bookmarks.showLabelAtLineEnd`)) {
+          redraw = true;
+        }
+        if (redraw) {
           this.schedule(0);
         }
       }),
@@ -74,11 +93,44 @@ export class FavoriteGutter implements vscode.Disposable {
   }
 
   dispose(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
     if (this.timer) {
       clearTimeout(this.timer);
+      this.timer = undefined;
     }
+    this.noteType.dispose();
     this.iconTypes.forEach((t) => t.dispose());
+    this.iconTypes.clear();
     this.disposables.forEach((d) => d.dispose());
+    this.disposables = [];
+  }
+
+  /** 多資料夾工作區以視窗／工作區層級設定為準（與 bookmarks.showLabelAtLineEnd 一致）。 */
+  private readScrollbarMarker(): unknown {
+    return vscode.workspace.getConfiguration(SECTION).get<string>('bookmarks.scrollbarMarker', 'left');
+  }
+
+  private createNoteType(): vscode.TextEditorDecorationType {
+    return vscode.window.createTextEditorDecorationType({
+      gutterIconPath: vscode.Uri.joinPath(this.extensionUri, 'media', 'gutter-note.svg'),
+      gutterIconSize: 'contain',
+      ...overviewRulerOptions(this.scrollbarMarker, NOTE_RULER_COLOR),
+    });
+  }
+
+  /** 捲軸標記設定變更時，釋放舊的 decoration type 並重建，讓設定立刻生效。 */
+  private rebuildMarkerTypes(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.scrollbarMarker = this.readScrollbarMarker();
+    this.noteType.dispose();
+    this.iconTypes.forEach((t) => t.dispose());
+    this.iconTypes.clear();
+    this.noteType = this.createNoteType();
   }
 
   /** 暫時隱藏全部圖示與行尾名稱。 */
@@ -89,6 +141,22 @@ export class FavoriteGutter implements vscode.Disposable {
   set hidden(v: boolean) {
     this.hiddenValue = v;
     this.schedule(0);
+  }
+
+  /** 給測試用：目前生效的捲軸標記設定值。 */
+  get scrollbarMarkerSetting(): unknown {
+    return this.scrollbarMarker;
+  }
+
+  /** 給測試用：目前備註圖示的 decoration type 鍵值（重建後會更換）。 */
+  get noteDecorationKey(): string {
+    return this.noteType.key;
+  }
+
+  /** 給測試用：某一行圖示目前使用的 decoration type 鍵值（重建後會更換）。 */
+  iconDecorationKeyAt(uri: vscode.Uri, line: number): string | undefined {
+    const key = this.iconKeys.get(`${uriKey(uri)}#${line}`);
+    return key ? this.iconTypes.get(key)?.key : undefined;
   }
 
   /** 給測試用：某個檔案目前標示的行號（0 起算）。 */
@@ -116,6 +184,9 @@ export class FavoriteGutter implements vscode.Disposable {
   private hoverTexts = new Map<string, string>();
 
   schedule(delay = 300): void {
+    if (this.disposed) {
+      return;
+    }
     if (this.timer) {
       clearTimeout(this.timer);
     }
@@ -130,8 +201,7 @@ export class FavoriteGutter implements vscode.Disposable {
       type = vscode.window.createTextEditorDecorationType({
         gutterIconPath: vscode.Uri.parse(svgDataUri(gutterSvg(kind, hex, n))),
         gutterIconSize: 'contain',
-        overviewRulerColor: hex,
-        overviewRulerLane: vscode.OverviewRulerLane.Left,
+        ...overviewRulerOptions(this.scrollbarMarker, hex),
       });
       this.iconTypes.set(key, type);
     }
@@ -156,10 +226,16 @@ export class FavoriteGutter implements vscode.Disposable {
   }
 
   private async render(seq: number): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
     const showLabels = vscode.workspace.getConfiguration(SECTION).get<boolean>('bookmarks.showLabelAtLineEnd', true);
     const tagColors = this.store.tagColors();
     const favoritesShown = this.store.favoritesShown;
     for (const editor of vscode.window.visibleTextEditors) {
+      if (this.disposed) {
+        return;
+      }
       const uri = editor.document.uri;
       const fileKey = uriKey(uri);
       // 對照表（測試用）在確定要更新這個檔案時才清：被較新的一次取代時保留舊的
@@ -179,6 +255,9 @@ export class FavoriteGutter implements vscode.Disposable {
         continue;
       }
       const file = await this.service.getSymbols(editor.document);
+      if (this.disposed) {
+        return;
+      }
       if (seq !== this.seq) {
         return this.latest;
       }

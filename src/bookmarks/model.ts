@@ -165,6 +165,64 @@ export function sortBookmarks<T extends Pick<LineBookmark, 'file' | 'line'>>(lis
   return [...list].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 }
 
+/** 上下跳轉沒有候選目標時的空狀態原因（供狀態列提示使用）。 */
+export type NavigationEmptyReason = 'noMatch' | 'noBookmarksInFile' | 'noBookmarks';
+
+export interface NavigationFilterOptions<T> {
+  /** 取得項目所屬檔案的識別鍵（例如 folderIndex/rel）。 */
+  fileKey: (item: T) => string;
+  /** 目前作用中檔案的識別鍵；未開啟或不在工作區內時為 undefined。 */
+  currentFile?: string;
+  /** 是否限制只在目前檔案內跳轉（navigationScope = currentFile 且有作用中編輯器）。 */
+  currentFileOnly?: boolean;
+  /** 側邊欄搜尋列的比對函式；沒有搜尋時為 undefined。 */
+  searchMatch?: (item: T) => boolean;
+}
+
+export interface NavigationPool<T> {
+  /** 符合所有條件（有行號、搜尋篩選、檔案範圍）的候選書籤。 */
+  items: T[];
+  /** 側邊欄搜尋篩選是否啟用。 */
+  searchActive: boolean;
+  /** items 為空時的提示原因；有候選時為 undefined。 */
+  emptyReason?: NavigationEmptyReason;
+}
+
+/**
+ * 篩選「下一個／上一個書籤」的候選清單：
+ * 1. 排除沒有行號的項目（例如找不到的函式書籤）。
+ * 2. 搜尋啟用時套用與側邊欄相同的比對函式。
+ * 3. currentFileOnly 為 true 時同時限制在目前檔案。
+ */
+export function filterNavigationItems<T extends { line?: number }>(
+  all: readonly T[],
+  options: NavigationFilterOptions<T>,
+): NavigationPool<T & { line: number }> {
+  const withLine = all.filter((i): i is T & { line: number } => i.line !== undefined);
+  const searchActive = options.searchMatch !== undefined;
+  const matched = options.searchMatch ? withLine.filter(options.searchMatch) : withLine;
+  const currentFileOnly = Boolean(options.currentFileOnly);
+  const items = currentFileOnly
+    ? options.currentFile !== undefined
+      ? matched.filter((i) => options.fileKey(i) === options.currentFile)
+      : []
+    : matched;
+  if (items.length > 0) {
+    return { items, searchActive };
+  }
+  let emptyReason: NavigationEmptyReason;
+  if (searchActive) {
+    const hasInCurrentFile =
+      currentFileOnly && options.currentFile !== undefined && withLine.some((i) => options.fileKey(i) === options.currentFile);
+    // currentFile 模式下，其他檔案有符合搜尋但目前檔案本身完全沒有書籤時提示目前檔案無書籤；
+    // 若目前檔案有書籤但不符合搜尋（或整個專案都沒有符合搜尋的書籤），提示沒有符合搜尋的書籤
+    emptyReason = currentFileOnly && matched.length > 0 && !hasInCurrentFile ? 'noBookmarksInFile' : 'noMatch';
+  } else {
+    emptyReason = currentFileOnly ? 'noBookmarksInFile' : 'noBookmarks';
+  }
+  return { items, searchActive, emptyReason };
+}
+
 /**
  * 下一個／上一個書籤（跨檔案，依檔名、行號排序，預設頭尾相接）。
  * `file`、`line` 是目前游標位置；沒有開檔時從第一個（或最後一個）開始。

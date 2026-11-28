@@ -12,7 +12,7 @@
   "config.detection.rules": "自訂的偵測規則。`id` 與內建規則相同時會覆蓋該規則。`pattern` 是正規表示式，必須包含 `(?<name>...)` 群組（除非使用 `nameTemplate` 或 `body: \"embedded\"`）；函式內容範圍從比對結束處開始找。",
   "config.detection.disabledRules": "要關閉的內建規則 ID，例如 `ts-method`。`html-id` 預設關閉。",
   "config.detection.templateFiles": "內建 Django／HTML 規則套用的檔案範圍（glob）。",
-  "config.followCursor": "在側邊欄標示游標所在的函式。",
+  "config.followCursor": "在側邊欄標示游標所在的函式；「目前檔案」收合或只看書籤時，改在「書籤」區標示游標所在的書籤。",
   "config.rule.id": "唯一識別碼；使用內建規則的 ID 可覆蓋該規則。",
   "config.rule.label": "簡短說明，顯示在提示中。",
   "config.rule.languages": "套用的語言 ID，例如 typescript、python、html。",
@@ -114,5 +114,11 @@
   "config.bookmarks.navigationScope.all": "跨所有檔案的書籤跳轉。",
   "config.bookmarks.navigationScope.currentFile": "只在目前檔案的書籤之間跳轉（沒有開啟編輯器時改為全部檔案）。",
   "config.bookmarks.navigationWrap": "使用「下一個書籤」／「上一個書籤」跳到最後一個或第一個書籤時，繞回另一端繼續。關閉時到頭尾就停住。",
+  "config.bookmarks.scrollbarMarker": "書籤與備註標記在編輯器捲軸（概觀尺規）上的顯示位置，或關閉不顯示。不影響行號旁的圖示。",
+  "config.bookmarks.scrollbarMarker.left": "左側（和 Git 修改標記同一道）。",
+  "config.bookmarks.scrollbarMarker.center": "中間。",
+  "config.bookmarks.scrollbarMarker.right": "右側。",
+  "config.bookmarks.scrollbarMarker.full": "整條寬度。",
+  "config.bookmarks.scrollbarMarker.off": "關閉（捲軸上不顯示）。",
   "config.statusBar.enabled": "在狀態列顯示目前檔案的書籤數，以及來源篩選、圖示隱藏的狀態；點一下可以搜尋書籤。"
 }

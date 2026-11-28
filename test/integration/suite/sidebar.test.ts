@@ -137,7 +137,9 @@ describe('側邊欄：檢視狀態、游標跟隨、搜尋列、快速搜尋與�
 
       const postLine = editor.document.getText().split('\n').findIndex((l) => l.includes('return "post"'));
       editor.selection = new vscode.Selection(postLine, 0, postLine, 0);
-      assert.strictEqual(api.followCursor()?.symbol.path, 'ArticleView.post', '移到別的函式照常跟隨');
+      const followed = api.followCursor();
+      assert.strictEqual(followed?.type, 'symbol', '移到別的函式照常跟隨');
+      assert.strictEqual(followed.symbol.path, 'ArticleView.post', '移到別的函式照常跟隨');
 
       // 行號書籤同理
       await openAt(views, postLine, api);
@@ -167,6 +169,207 @@ describe('側邊欄：檢視狀態、游標跟隨、搜尋列、快速搜尋與�
         assert.strictEqual(api.provider.isExpanded(api.provider.sections.currentFile), false);
       } finally {
         api.provider.setExpanded(api.provider.sections.currentFile, true);
+      }
+    });
+
+    it('目前檔案收合或只顯示書籤時，游標跟隨改標示「書籤」區（函式／外層函式／行號優先／情況 3／篩選／多標籤／情況 A 不變）', async () => {
+      await vscode.commands.executeCommand('workbench.view.extension.functionBookmarks');
+      const views = workspaceFile('app', 'views.py');
+      const editor = await openAt(views, 0, api);
+      const lines = editor.document.getText().split('\n');
+      const indexBody = lines.findIndex((l) => l.includes('render('));
+      const getBody = lines.findIndex((l) => l.includes('return "get"'));
+      const postDef = lines.findIndex((l) => l.includes('def post('));
+      const postBody = lines.findIndex((l) => l.includes('return "post"'));
+
+      // 建立：index 函式書籤（含雙標籤，測試多標籤順序）、ArticleView 類別書籤（測試往外層找）、postBody 行號書籤
+      await api.store.update(folder(), (d) => {
+        let next = setFavorite(d, { file: 'app/views.py', path: 'index', kind: 'function' }, true, 4);
+        next = setTags(next, { file: 'app/views.py', path: 'index', kind: 'function' }, ['zebra', 'alpha']);
+        next = setFavorite(next, { file: 'app/views.py', path: 'ArticleView', kind: 'class' }, true, 8);
+        return addBookmark(next, { id: 'fc-post-line', file: 'app/views.py', line: postBody, label: 'PostReturn' });
+      });
+      await api.favorites.refresh();
+      await api.refreshNow();
+      // 先把選取放到搜尋列，確保情況 A 的選取變化確實由 followCursor 觸發
+      await api.treeView.reveal(api.provider.searchNode, { select: true, focus: false });
+      await waitFor(() => api.treeView.selection[0]?.type, (t) => t === 'search', '選取先移到搜尋列');
+
+      // 情況 A 不變：目前檔案展開時，標示「目前檔案」中的函式
+      editor.selection = new vscode.Selection(getBody, 0, getBody, 0);
+      const symNode = api.followCursor();
+      assert.strictEqual(symNode?.type, 'symbol');
+      assert.strictEqual(symNode.symbol.path, 'ArticleView.get');
+      await waitFor(
+        () => api.treeView.selection[0],
+        (s) => s?.type === 'symbol' && s.symbol.path === 'ArticleView.get',
+        '情況 A：樹狀選取應為目前檔案的 ArticleView.get',
+      );
+
+      // 情況 B：收合「目前檔案」
+      api.provider.setExpanded(api.provider.sections.currentFile, false);
+      try {
+        // B1：游標在 index 內 → 標示「書籤」區的 index 函式書籤，且不展開目前檔案
+        editor.selection = new vscode.Selection(indexBody, 0, indexBody, 0);
+        const favIndex = api.followCursor();
+        assert.strictEqual(favIndex?.type, 'favorite');
+        assert.strictEqual(favIndex.fav.mark.path, 'index');
+        await waitFor(
+          () => api.treeView.selection[0],
+          (s) => s?.type === 'favorite' && s.fav.mark.path === 'index',
+          '情況 B：樹狀選取應為書籤區的 index',
+        );
+        assert.strictEqual(api.provider.isExpanded(api.provider.sections.currentFile), false);
+        // 停在同一筆不重複標示
+        assert.strictEqual(api.followCursor(), undefined);
+
+        // B2：游標在沒有函式書籤的 ArticleView.get 內 → 往外層找到有書籤的 ArticleView
+        editor.selection = new vscode.Selection(getBody, 0, getBody, 0);
+        const favCls = api.followCursor();
+        assert.strictEqual(favCls?.type, 'favorite');
+        assert.strictEqual(favCls.fav.mark.path, 'ArticleView');
+        await waitFor(
+          () => api.treeView.selection[0],
+          (s) => s?.type === 'favorite' && s.fav.mark.path === 'ArticleView',
+          '情況 B：往外層找到 ArticleView 函式書籤',
+        );
+
+        // B3：游標在行號書籤那一行（即使外層 ArticleView 有函式書籤）→ 行號書籤優先
+        editor.selection = new vscode.Selection(postBody, 0, postBody, 0);
+        const bmNode = api.followCursor();
+        assert.strictEqual(bmNode?.type, 'bookmark');
+        assert.strictEqual(bmNode.entry.bookmark.id, 'fc-post-line');
+        await waitFor(
+          () => api.treeView.selection[0],
+          (s) => s?.type === 'bookmark' && s.entry.bookmark.id === 'fc-post-line',
+          '情況 B：行號書籤優先於外層函式書籤',
+        );
+
+        // 情況 3：把 ArticleView 取消收藏後，游標在 postDef（同函式另一行有行號書籤，但目前行無行號書籤且無外層函式書籤）→ 不動作、選取維持原狀
+        await api.store.update(folder(), (d) => setFavorite(d, { file: 'app/views.py', path: 'ArticleView', kind: 'class' }, false, 8));
+        await api.favorites.refresh();
+        editor.selection = new vscode.Selection(postDef, 0, postDef, 0);
+        assert.strictEqual(api.followCursor(), undefined, '情況 3：無對應書籤不應標示');
+        await new Promise((r) => setTimeout(r, 250));
+        assert.strictEqual(
+          api.treeView.selection[0]?.type === 'bookmark' ? api.treeView.selection[0].entry.bookmark.id : undefined,
+          'fc-post-line',
+          '情況 3：既有選取應維持不變',
+        );
+
+        // 規則 4：搜尋列濾掉目標書籤時不動作
+        api.searchBox.setQuery('PostReturn');
+        editor.selection = new vscode.Selection(indexBody, 0, indexBody, 0);
+        assert.strictEqual(api.followCursor(), undefined, '被搜尋篩選隱藏的書籤不應標示');
+        api.searchBox.setQuery('');
+
+        // 規則 5：依標籤分組時，同書籤出現在多個標籤分組，標示排在最前面的分組（#alpha 先於 #zebra）
+        await vscode.commands.executeCommand('functionBookmarks.groupBookmarksByTag');
+        try {
+          editor.selection = new vscode.Selection(indexBody, 0, indexBody, 0);
+          const tagFav = api.followCursor();
+          assert.strictEqual(tagFav?.type, 'favorite');
+          assert.strictEqual(tagFav.parent.type === 'bmGroup' ? tagFav.parent.key : undefined, 'alpha');
+          await waitFor(
+            () => api.treeView.selection[0],
+            (s) => s?.type === 'favorite' && s.parent.type === 'bmGroup' && s.parent.key === 'alpha',
+            '多標籤分組應選取第一個分組 #alpha 中的書籤',
+          );
+        } finally {
+          await vscode.commands.executeCommand('functionBookmarks.groupBookmarksByFile');
+        }
+      } finally {
+        api.provider.setExpanded(api.provider.sections.currentFile, true);
+      }
+
+      // 情況 C：只顯示書籤模式（filterMode === 'bookmarks'）
+      await vscode.commands.executeCommand('functionBookmarks.showBookmarksOnly');
+      try {
+        editor.selection = new vscode.Selection(postBody, 0, postBody, 0);
+        const cBm = api.followCursor();
+        assert.strictEqual(cBm?.type, 'bookmark');
+        assert.strictEqual(cBm.entry.bookmark.id, 'fc-post-line');
+        await waitFor(
+          () => api.treeView.selection[0],
+          (s) => s?.type === 'bookmark' && s.entry.bookmark.id === 'fc-post-line',
+          '情況 C：只顯示書籤模式應標示行號書籤',
+        );
+
+        // 透過 150ms debounce 自動跟隨到函式書籤
+        editor.selection = new vscode.Selection(indexBody, 0, indexBody, 0);
+        await waitFor(
+          () => api.treeView.selection[0],
+          (s) => s?.type === 'favorite' && s.fav.mark.path === 'index',
+          '情況 C：150ms debounce 自動跟隨到 index 函式書籤',
+        );
+      } finally {
+        await vscode.commands.executeCommand('functionBookmarks.showAll');
+      }
+    });
+
+    it('書籤區游標跟隨收合規則：使用者收合區段或分組時不展開；大量書籤預設收合分組時自動展開並標示', async () => {
+      await vscode.commands.executeCommand('workbench.view.extension.functionBookmarks');
+      const targetUri = workspaceFile('langs', 'OrderService.cs');
+      const autoExpandUri = workspaceFile('langs', 'Panel.tsx');
+      const otherFiles = ['langs/Panel.tsx', 'langs/widget.cpp', 'langs/Widget.svelte', 'langs/Counter.vue', 'langs/App.jsx'];
+      await api.store.update(folder(), (d) => {
+        let next = addBookmark(d, { id: 'auto-target', file: 'langs/OrderService.cs', line: 2, label: 'AutoTarget' });
+        for (let i = 0; i < otherFiles.length; i++) {
+          next = addBookmark(next, { id: `auto-other-${i}`, file: otherFiles[i], line: 0, label: `Other${i}` });
+        }
+        return next;
+      });
+      await api.favorites.refresh();
+      const editor = await openAt(targetUri, 2, api);
+
+      // 確認檔案數達到自動收合門檻，且 targetGroup 與 autoExpandGroup 從未被使用者手動展開／收合
+      const groups = (await api.provider.getChildren(api.provider.sections.bookmarks)) as BmGroupNode[];
+      assert.strictEqual(groups.length, AUTO_COLLAPSE_GROUPS);
+      const targetGroup = groups.find((g) => g.rel === 'langs/OrderService.cs')!;
+      const autoExpandGroup = groups.find((g) => g.rel === 'langs/Panel.tsx')!;
+      assert.ok(targetGroup && autoExpandGroup);
+      assert.strictEqual(api.provider.isExpanded(targetGroup), undefined);
+      assert.strictEqual(api.provider.getTreeItem(targetGroup).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
+
+      await vscode.commands.executeCommand('functionBookmarks.showBookmarksOnly');
+      try {
+        // 先把選取放到搜尋列，確保之後選取確實由 followCursor 改變
+        await api.treeView.reveal(api.provider.searchNode, { select: true, focus: false });
+        await waitFor(() => api.treeView.selection[0]?.type, (t) => t === 'search', '選取先移到搜尋列');
+
+        // 1. 整個「書籤」區被使用者收合 → 不動作
+        api.provider.setExpanded(api.provider.sections.bookmarks, false);
+        try {
+          editor.selection = new vscode.Selection(2, 0, 2, 0);
+          assert.strictEqual(api.followCursor(), undefined, '書籤區收合時不應標示');
+          assert.strictEqual(api.treeView.selection[0]?.type, 'search');
+        } finally {
+          api.provider.setExpanded(api.provider.sections.bookmarks, true);
+        }
+
+        // 2. 該分組被使用者收合 → 不動作
+        api.provider.setExpanded(targetGroup, false);
+        try {
+          assert.strictEqual(api.followCursor(), undefined, '使用者收合的分組不應展開');
+          assert.strictEqual(api.treeView.selection[0]?.type, 'search');
+        } finally {
+          api.provider.setExpanded(targetGroup, true);
+        }
+
+        // 3. 僅因預設收合的分組（isExpanded === undefined）→ 應展開該分組並選取書籤
+        assert.strictEqual(api.provider.isExpanded(autoExpandGroup), undefined, 'langs/Panel.tsx 應為預設收合狀態');
+        assert.strictEqual(api.provider.getTreeItem(autoExpandGroup).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
+        await openAt(autoExpandUri, 0, api);
+        await waitFor(
+          () => api.treeView.selection[0],
+          (s) => s?.type === 'bookmark' && s.entry.bookmark.id === 'auto-other-0',
+          '預設收合的分組應自動展開並選取書籤',
+        );
+        // 其他預設收合分組不受影響
+        const untouched = groups.find((g) => g.rel === 'langs/widget.cpp')!;
+        assert.strictEqual(api.provider.isExpanded(untouched), undefined, '其他預設收合分組不應被展開');
+      } finally {
+        await vscode.commands.executeCommand('functionBookmarks.showAll');
       }
     });
 
